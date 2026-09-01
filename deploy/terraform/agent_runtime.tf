@@ -13,6 +13,10 @@ resource "google_vertex_ai_reasoning_engine" "producer" {
     agent_framework = "google-adk"
     service_account = google_service_account.agent.email
 
+    # GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are deliberately absent:
+    # Agent Runtime reserves both and rejects the resource outright if either is
+    # supplied. It injects them itself, and sprtz_agents.config reads them from
+    # the environment either way.
     deployment_spec {
       min_instances         = var.agent_min_instances
       max_instances         = var.agent_max_instances
@@ -23,14 +27,6 @@ resource "google_vertex_ai_reasoning_engine" "producer" {
         memory = "8Gi"
       }
 
-      env {
-        name  = "GOOGLE_CLOUD_PROJECT"
-        value = var.project_id
-      }
-      env {
-        name  = "GOOGLE_CLOUD_LOCATION"
-        value = var.vertex_region
-      }
       env {
         name  = "GOOGLE_GENAI_USE_VERTEXAI"
         value = "True"

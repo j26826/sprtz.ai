@@ -155,7 +155,20 @@ startup probe failing with no application output, suspect time, not the image.
 
 **CI permissions.** `roles/editor` is not enough. Also needs
 `resourcemanager.projectIamAdmin`, `iap.admin`, `firebaserules.admin`,
-`iam.serviceAccountAdmin`, `secretmanager.admin`, `datastore.owner`.
+`iam.serviceAccountAdmin`, `secretmanager.admin`, `datastore.owner`,
+`run.admin` (Editor cannot `run.services.setIamPolicy`).
+
+**Firestore vector indexes replace themselves forever.** Firestore appends
+`__name__` to the index it creates, so the remote object never matches the
+declared fields. The provider reads that as a change, forces replacement, and
+the replacement's create fails 409 because the equivalent index already
+exists — so every later apply retries the same doomed replace. Both KNN
+indexes carry `ignore_changes = [fields]`. Change a vector definition by
+deleting the index and re-applying, never by editing in place.
+
+**Agent Runtime reserves `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`.**
+Supplying either in `deployment_spec.env` fails the resource outright. It
+injects them itself.
 
 **Bootstrap ordering.** The state bucket and Artifact Registry repo cannot be
 owned by the Terraform that needs them — `deploy/scripts/bootstrap.sh` creates

@@ -33,6 +33,20 @@ resource "google_firestore_index" "moments_knn" {
       flat {}
     }
   }
+
+  # Firestore appends __name__ to the index it actually creates, so the remote
+  # object is [ownerUid, __name__, embedding] while this config declares
+  # [ownerUid, embedding]. The provider reads that as a field change, which
+  # forces replacement — and the replacement's create fails with 409 because
+  # the equivalent index already exists, so every subsequent apply retries the
+  # same doomed replace. The definition below is what created the index; it is
+  # the normalisation that differs, not the intent.
+  #
+  # Change the vector definition by deleting the index and re-applying, not by
+  # editing in place.
+  lifecycle {
+    ignore_changes = [fields]
+  }
 }
 
 # "More clips like this" across a user's whole library.
@@ -53,6 +67,20 @@ resource "google_firestore_index" "clips_knn" {
       dimension = var.embedding_dimensions
       flat {}
     }
+  }
+
+  # Firestore appends __name__ to the index it actually creates, so the remote
+  # object is [ownerUid, __name__, embedding] while this config declares
+  # [ownerUid, embedding]. The provider reads that as a field change, which
+  # forces replacement — and the replacement's create fails with 409 because
+  # the equivalent index already exists, so every subsequent apply retries the
+  # same doomed replace. The definition below is what created the index; it is
+  # the normalisation that differs, not the intent.
+  #
+  # Change the vector definition by deleting the index and re-applying, not by
+  # editing in place.
+  lifecycle {
+    ignore_changes = [fields]
   }
 }
 
