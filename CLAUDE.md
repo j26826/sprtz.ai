@@ -146,6 +146,9 @@ startup probe failing with no application output, suspect time, not the image.
 > platform behaviour looks arbitrary, run the boring control first.
 
 **Cloud Build.**
+- The `gcloud` builder image has **no `jq`** — use `python3`, which it does have.
+  A `|| true` on the apt-get that installed it turned a missing binary into a
+  127 that failed the build *after* a completely successful deploy.
 - `waitFor` only resolves against steps declared **earlier** in the list.
 - Escape shell variables as `$$NAME`. Only `PROJECT_ID`, `SHORT_SHA` and
   friends are real substitutions; anything you assign in a step is not.
