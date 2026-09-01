@@ -40,3 +40,8 @@ cdn_domain = ""
 # authorized redirect URI. Leave empty for email/password sign-in only.
 google_oauth_client_id     = ""
 google_oauth_client_secret = ""
+
+# Cookie domain for CDN playback. Must cover both the API and the CDN hosts,
+# so both need custom domains under one registrable domain. Leave empty while
+# running on *.run.app — cookies cannot span services there.
+cdn_cookie_domain = ""

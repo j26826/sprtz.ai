@@ -15,6 +15,9 @@ resource "google_storage_bucket" "hls" {
   force_destroy               = var.environment != "prod"
   labels                      = local.common_labels
 
+  # The player fetches segments from this bucket cross-origin and, with signed
+  # cookies, does so with credentials — so the allowed origins must be listed
+  # explicitly rather than wildcarded.
   cors {
     origin          = var.upload_cors_origins
     method          = ["GET", "HEAD", "OPTIONS"]

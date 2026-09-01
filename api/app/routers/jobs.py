@@ -7,7 +7,7 @@ import logging
 import re
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from google.cloud import storage
 from pydantic import BaseModel, Field
 
@@ -154,13 +154,14 @@ async def get_job(job_id: str, user: CallerIdentity = Depends(current_user)) -> 
 @router.get("/{job_id}/playback")
 async def get_playback(
     job_id: str,
+    response: Response,
     user: CallerIdentity = Depends(current_user),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    """Return a signed CDN URL for the job's HLS stream.
+    """Return the job's HLS URL and mint the Cloud CDN cookie that authorises it.
 
     The editor plays this one stream for everything: reviewing a key moment is a
-    seek to its start time, not a separate render.
+    seek to its in point, not a separate render.
     """
     job = await _load_owned_job(job_id, user)
     playback = job.get("playback") or {}
@@ -171,24 +172,46 @@ async def get_playback(
         )
 
     try:
-        signed = cdn.playback_url(
+        signed = cdn.playback(
             cdn_base_url=settings.cdn_base_url,
             job_id=job_id,
             key_name=settings.cdn_signing_key_name,
             key_value=settings.cdn_signing_key,
             ttl_seconds=settings.cdn_signed_url_ttl,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
 
+    if settings.cdn_cookie_domain:
+        # Scoped to the job's path so several jobs can hold valid cookies at
+        # once, despite Cloud CDN fixing the cookie's name.
+        response.set_cookie(
+            key=signed["cookie_name"],
+            value=signed["cookie_value"],
+            domain=settings.cdn_cookie_domain,
+            path=signed["cookie_path"],
+            max_age=settings.cdn_signed_url_ttl,
+            secure=True,
+            httponly=True,
+            samesite="none",
+        )
+        cookie_set = True
+    else:
+        cookie_set = False
+
     return {
         "job_id": job_id,
+        "hls_url": signed["hls_url"],
+        "poster_url": signed["poster_url"],
+        "expires_at": signed["expires_at"],
+        # Reported so the editor can say why playback will fail rather than
+        # surfacing an opaque 403 from inside the player.
+        "cookie_set": cookie_set,
         "renditions": playback.get("renditions", []),
         "segment_seconds": playback.get("segmentSeconds", 2),
         "duration_sec": (job.get("media") or {}).get("durationSec", 0.0),
-        **signed,
     }
 
 

@@ -469,9 +469,23 @@ let playbackUrl = null;
 let playerEl = null;      // survives innerHTML rebuilds
 let playerFor = null;     // which moment playerEl is bound to
 
+/**
+ * Fetch the playback URL and let the API set the Cloud CDN cookie.
+ *
+ * The cookie, not a signed URL, is what authorises playback: an HLS playlist
+ * references segments relatively, so a query-string signature would cover the
+ * playlist and none of its thousands of segments. The browser attaches the
+ * cookie to every one of them without the player knowing.
+ */
 async function ensurePlaybackUrl() {
   if (playbackUrl) return playbackUrl;
   const p = await api(`/api/jobs/${state.jobId}/playback`);
+  if (p.cookie_set === false) {
+    throw new Error(
+      'Playback is not authorised: the CDN cookie could not be set. '
+      + 'The API and CDN need custom domains under one registrable domain.',
+    );
+  }
   playbackUrl = p.hls_url;
   return playbackUrl;
 }
@@ -518,7 +532,13 @@ async function mountPlayer() {
 
   if (hls) { hls.destroy(); hls = null; }
   if (window.Hls?.isSupported()) {
-    hls = new window.Hls({ startPosition: start, maxBufferLength: 30 });
+    hls = new window.Hls({
+      startPosition: start,
+      maxBufferLength: 30,
+      // Segment requests must carry the Cloud CDN cookie, and they are
+      // cross-origin, so credentials have to be opted into explicitly.
+      xhrSetup: (xhr) => { xhr.withCredentials = true; },
+    });
     hls.loadSource(url);
     hls.attachMedia(video);
     hls.on(window.Hls.Events.MANIFEST_PARSED, () => { video.currentTime = start; video.play().catch(() => {}); });

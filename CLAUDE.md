@@ -111,10 +111,18 @@ in a batch job.
 
 ### Playback
 
-One HLS stream per job behind Cloud CDN, with **signed URL prefixes** so a
-single signature covers the master playlist, variant playlists and every
-segment. Reviewing a moment is a seek to its in point with a stop at its out
-point — that is what replaces a timeline.
+One HLS stream per job behind Cloud CDN, authorised by **signed cookies, not
+signed URLs**. HLS playlists reference segments relatively, so a query-string
+signature is dropped when the player resolves them and every segment 403s. The
+cookie is signed over the job's `URLPrefix` and scoped by `Path` to the same job.
+
+This requires the API and CDN to share a registrable domain — it cannot work on
+`*.run.app`, which is on the Public Suffix List. `cdn_cookie_domain` empty means
+`cookie_set: false` and the editor says playback is unauthorised instead of
+failing inside the player.
+
+Reviewing a moment is a seek to its in point with a stop at its out point — that
+is what replaces a timeline.
 
 ### UI
 
