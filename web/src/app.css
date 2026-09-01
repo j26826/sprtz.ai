@@ -583,3 +583,6 @@ input, button, textarea { font-family: var(--font-body); }
 @media (max-width: 900px) {
   .transcript, .suggestions, .composer-inner { padding-left: 20px; padding-right: 20px; }
 }
+
+/* Slot the live player is re-parented into after each render. */
+.player-slot:empty { display: none; }

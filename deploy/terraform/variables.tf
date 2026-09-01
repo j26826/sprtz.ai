@@ -6,24 +6,24 @@ variable "project_id" {
 variable "region" {
   type        = string
   description = "Primary region for Cloud Run, Artifact Registry, GCS and Cloud Build."
-  default     = "us-south1"
+  default     = "us-central1"
 }
 
 # Agent Runtime and Gemini are served from a narrower set of locations than
-# Cloud Run. Keeping this separate means the app can sit in us-south1 without
-# the deploy failing if Vertex is not offered there yet. Leave it equal to
-# var.region when the region supports both; deploy/scripts/preflight.sh checks
-# the live locations API and tells you which to change.
+# Cloud Run. Keeping this separate means the app can sit in a region Vertex
+# does not serve without the whole deploy failing. Leave it equal to var.region
+# when the region supports both; deploy/scripts/preflight.sh checks the live
+# APIs and tells you which to change.
 variable "vertex_region" {
   type        = string
   description = "Region for Vertex AI: Agent Runtime, Gemini and the embedding model. Must be a Vertex AI location."
-  default     = "us-south1"
+  default     = "us-central1"
 }
 
 variable "firestore_location" {
   type        = string
-  description = "Firestore location. A region (us-south1) or a multi-region (nam5). Immutable once the database exists."
-  default     = "us-south1"
+  description = "Firestore location. A region (us-central1) or a multi-region (nam5). Immutable once the database exists."
+  default     = "us-central1"
 }
 
 variable "app_name" {

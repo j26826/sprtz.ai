@@ -76,10 +76,10 @@ docs/ARCHITECTURE.md    how and why the pieces fit
 
 ```bash
 # 1. Confirm the target regions can host everything.
-PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/preflight.sh
+PROJECT_ID=<project> REGION=us-central1 bash deploy/scripts/preflight.sh
 
 # 2. Create the two resources Terraform cannot own (state bucket, registry).
-PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/bootstrap.sh
+PROJECT_ID=<project> REGION=us-central1 bash deploy/scripts/bootstrap.sh
 
 # 3. Apply.
 cd deploy/terraform
@@ -133,8 +133,7 @@ Two resources cannot be owned by the Terraform that needs them:
 ### Regions
 
 `region` and `vertex_region` are separate because Vertex AI serves fewer regions
-than Cloud Run. Both default to `us-south1`, verified against the live APIs to
-support Vertex AI, Agent Runtime, Gemini 2.5 Flash, Cloud Run and Firestore.
+than Cloud Run. Both default to `us-central1`.
 
 Firestore's location is immutable once the database exists — the preflight
 checks it before Terraform creates anything.

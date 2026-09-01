@@ -12,7 +12,7 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
-REGION="${REGION:-us-south1}"
+REGION="${REGION:-us-central1}"
 APP_NAME="${APP_NAME:-sprtz}"
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 

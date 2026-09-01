@@ -6,7 +6,7 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
-REGION="${REGION:-us-south1}"
+REGION="${REGION:-us-central1}"
 VERTEX_REGION="${VERTEX_REGION:-$REGION}"
 FIRESTORE_LOCATION="${FIRESTORE_LOCATION:-$REGION}"
 
@@ -31,6 +31,18 @@ note_fail() {
 echo "Enabling the APIs needed to run these checks..."
 gcloud services enable aiplatform.googleapis.com run.googleapis.com \
   firestore.googleapis.com --project "$PROJECT_ID" --quiet
+
+# Enabling returns before the API is queryable, and a list issued too early
+# comes back empty — which is what made this script fail a perfectly good
+# region once.
+for _ in 1 2 3 4 5 6; do
+  if gcloud firestore locations list --project "$PROJECT_ID" \
+       --format='value(locationId)' 2>/dev/null | grep -q .; then
+    break
+  fi
+  echo "  waiting for the Firestore API to become queryable..."
+  sleep 10
+done
 
 # --- Vertex AI ----------------------------------------------------------------
 echo "Checking Vertex AI availability in $VERTEX_REGION..."
@@ -87,20 +99,33 @@ esac
 
 # --- Cloud Run ----------------------------------------------------------------
 echo "Checking Cloud Run in $REGION..."
-if gcloud run regions list --project "$PROJECT_ID" --format='value(locationId)' 2>/dev/null |
-   grep -qx "$REGION"; then
+run_regions="$(gcloud run regions list --project "$PROJECT_ID" \
+  --format='value(locationId)' 2>/dev/null || true)"
+
+if [[ -z "$run_regions" ]]; then
+  note_fail "Could not list Cloud Run regions. The API may still be enabling — retry in a minute."
+elif grep -qx "$REGION" <<<"$run_regions"; then
   echo "  ✓ Cloud Run available in $REGION"
 else
   note_fail "Cloud Run is not available in '$REGION'."
 fi
 
 # --- Firestore ----------------------------------------------------------------
+# An empty list means the query failed — the API was only just enabled, or the
+# caller lacks permission — and must not be reported as "location unsupported".
+# That false negative once failed a build against a location Firestore does in
+# fact serve, so the empty case is called out separately.
 echo "Checking Firestore location $FIRESTORE_LOCATION..."
-if gcloud firestore locations list --project "$PROJECT_ID" --format='value(locationId)' 2>/dev/null |
-   grep -qx "$FIRESTORE_LOCATION"; then
+fs_locations="$(gcloud firestore locations list --project "$PROJECT_ID" \
+  --format='value(locationId)' 2>/dev/null || true)"
+
+if [[ -z "$fs_locations" ]]; then
+  note_fail "Could not list Firestore locations. The API may still be enabling — retry in a minute."
+elif grep -qx "$FIRESTORE_LOCATION" <<<"$fs_locations"; then
   echo "  ✓ Firestore can be created in $FIRESTORE_LOCATION"
 else
-  note_fail "Firestore is not offered in '$FIRESTORE_LOCATION'. Use a multi-region such as nam5."
+  note_fail "Firestore is not offered in '$FIRESTORE_LOCATION'. Offered in this project:"
+  grep -E '^(us|nam)' <<<"$fs_locations" | sed 's/^/      /' >&2
 fi
 
 echo
