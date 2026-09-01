@@ -129,12 +129,13 @@ variable "agent_max_instances" {
 
 # The worker streams sources over HTTPS and drains HLS segments to GCS as they
 # are written, so it holds only a few segments locally and copy-remuxes rather
-# than re-encodes. That is what lets it run this small — and small is also what
-# starts reliably here: on this project, every Cloud Run shape above 1GiB of
-# memory per CPU (4Gi/2cpu, 8Gi/2cpu, 8Gi/4cpu) failed to launch its instance
-# at all, with zero application output, while 2Gi/2cpu and 4Gi/4cpu start
-# immediately. If you raise memory, raise CPU with it and verify the shape
-# starts before relying on it.
+# than re-encodes. That is what lets it run this small.
+#
+# An earlier revision of this comment blamed a memory-to-CPU ratio for the
+# service failing to start. That was wrong: the cause was the startup probe
+# window expiring during Python's import of fastmcp and the Google client
+# libraries, which takes ~100s on Cloud Run. The shapes that appeared to "work"
+# were the ones that happened to import fast enough.
 variable "media_worker_cpu" {
   type        = string
   description = "CPU allocation for the ffmpeg-backed MCP server."

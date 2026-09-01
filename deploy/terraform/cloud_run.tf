@@ -25,7 +25,8 @@ resource "google_cloud_run_v2_service" "mcp_catalog" {
           cpu    = "1"
           memory = "1Gi"
         }
-        cpu_idle = true
+        cpu_idle          = true
+        startup_cpu_boost = true
       }
 
       env {
@@ -57,9 +58,16 @@ resource "google_cloud_run_v2_service" "mcp_catalog" {
         http_get {
           path = "/healthz"
         }
-        initial_delay_seconds = 5
-        period_seconds        = 5
-        failure_threshold     = 6
+        # ~5 minutes. Importing fastmcp and the Google client libraries costs
+        # tens of seconds on Cloud Run's startup CPU — measured at ~100s on a
+        # live revision against 6s on a developer machine. A tight window here
+        # kills the container mid-import, and because its stdout is still
+        # buffered the logs show nothing at all, which reads as a container that
+        # never ran rather than one that was not given time.
+        initial_delay_seconds = 10
+        period_seconds        = 10
+        timeout_seconds       = 5
+        failure_threshold     = 30
       }
     }
   }
@@ -128,12 +136,16 @@ resource "google_cloud_run_v2_service" "mcp_media" {
         http_get {
           path = "/healthz"
         }
+        # ~5 minutes. Importing fastmcp and the Google client libraries costs
+        # tens of seconds on Cloud Run's startup CPU — measured at ~100s on a
+        # live revision against 6s on a developer machine. A tight window here
+        # kills the container mid-import, and because its stdout is still
+        # buffered the logs show nothing at all, which reads as a container that
+        # never ran rather than one that was not given time.
         initial_delay_seconds = 10
-        period_seconds        = 5
-        # 1s (the default) is tight for a cold gen2 instance still mounting its
-        # GCS volume; a slow first response is not a dead container.
-        timeout_seconds   = 5
-        failure_threshold = 12
+        period_seconds        = 10
+        timeout_seconds       = 5
+        failure_threshold     = 30
       }
     }
 
@@ -173,7 +185,8 @@ resource "google_cloud_run_v2_service" "api" {
           cpu    = "2"
           memory = "2Gi"
         }
-        cpu_idle = true
+        cpu_idle          = true
+        startup_cpu_boost = true
       }
 
       env {
@@ -254,9 +267,16 @@ resource "google_cloud_run_v2_service" "api" {
         http_get {
           path = "/healthz"
         }
-        initial_delay_seconds = 5
-        period_seconds        = 5
-        failure_threshold     = 12
+        # ~5 minutes. Importing fastmcp and the Google client libraries costs
+        # tens of seconds on Cloud Run's startup CPU — measured at ~100s on a
+        # live revision against 6s on a developer machine. A tight window here
+        # kills the container mid-import, and because its stdout is still
+        # buffered the logs show nothing at all, which reads as a container that
+        # never ran rather than one that was not given time.
+        initial_delay_seconds = 10
+        period_seconds        = 10
+        timeout_seconds       = 5
+        failure_threshold     = 30
       }
     }
   }
@@ -292,7 +312,8 @@ resource "google_cloud_run_v2_service" "web" {
           cpu    = "1"
           memory = "512Mi"
         }
-        cpu_idle = true
+        cpu_idle          = true
+        startup_cpu_boost = true
       }
 
       # Runtime config is injected into /config.js by the container entrypoint so
@@ -322,9 +343,16 @@ resource "google_cloud_run_v2_service" "web" {
         http_get {
           path = "/healthz"
         }
-        initial_delay_seconds = 3
-        period_seconds        = 3
-        failure_threshold     = 10
+        # ~5 minutes. Importing fastmcp and the Google client libraries costs
+        # tens of seconds on Cloud Run's startup CPU — measured at ~100s on a
+        # live revision against 6s on a developer machine. A tight window here
+        # kills the container mid-import, and because its stdout is still
+        # buffered the logs show nothing at all, which reads as a container that
+        # never ran rather than one that was not given time.
+        initial_delay_seconds = 10
+        period_seconds        = 10
+        timeout_seconds       = 5
+        failure_threshold     = 30
       }
     }
   }

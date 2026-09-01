@@ -6,21 +6,25 @@ import concurrent.futures
 import logging
 import mimetypes
 import threading
-import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import google.auth
-import google.auth.transport.requests
-from google.cloud import storage
+if TYPE_CHECKING:  # pragma: no cover
+    from google.cloud import storage
 
 logger = logging.getLogger(__name__)
 
-_client: storage.Client | None = None
+_client: "storage.Client | None" = None
 
 
-def client() -> storage.Client:
+def client() -> "storage.Client":
+    """Lazy on purpose — see the note in catalog_server.store. The Google client
+    libraries cost tens of seconds to import on Cloud Run, and the server must
+    answer its health check long before that."""
     global _client
     if _client is None:
+        from google.cloud import storage
+
         _client = storage.Client()
     return _client
 
@@ -34,6 +38,9 @@ def bearer_token() -> str | None:
     concern the way it would be for a full re-encode.
     """
     try:
+        import google.auth
+        import google.auth.transport.requests
+
         credentials, _ = google.auth.default(
             scopes=["https://www.googleapis.com/auth/devstorage.read_only"]
         )
