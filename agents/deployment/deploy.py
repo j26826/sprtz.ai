@@ -16,6 +16,23 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("deploy")
 
 
+def normalize_resource_name(value: str, project: str, location: str) -> str:
+    """Return a fully-qualified reasoningEngines path.
+
+    Terraform's `name` attribute for google_vertex_ai_reasoning_engine is not
+    guaranteed to be the full path — depending on provider version it can be a
+    bare numeric id, or a path keyed by project number rather than id. The SDK
+    only accepts the full form, so normalize here instead of discovering the
+    difference during a deploy.
+    """
+    value = (value or "").strip()
+    if not value:
+        raise ValueError("No Agent Runtime resource name configured.")
+    if value.startswith("projects/"):
+        return value
+    return f"projects/{project}/locations/{location}/reasoningEngines/{value.rsplit('/', 1)[-1]}"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", required=True)
@@ -68,15 +85,16 @@ def main() -> int:
             if line.strip() and not line.startswith(("#", "-e"))
         ]
 
-    logger.info("updating %s with %d requirements", args.resource_name, len(requirements))
+    resource_name = normalize_resource_name(args.resource_name, args.project, args.location)
+    logger.info("updating %s with %d requirements", resource_name, len(requirements))
 
     try:
-        remote = agent_engines.get(args.resource_name)
+        remote = agent_engines.get(resource_name)
     except Exception:
         logger.exception(
             "could not read %s. Terraform creates this resource; run terraform "
             "apply before deploying.",
-            args.resource_name,
+            resource_name,
         )
         return 1
 
@@ -93,7 +111,7 @@ def main() -> int:
         logger.exception("deployment failed")
         return 1
 
-    logger.info("deployed %s", args.resource_name)
+    logger.info("deployed %s", resource_name)
     return 0
 
 
