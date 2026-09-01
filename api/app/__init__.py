@@ -1,0 +1,1 @@
+"""Sprtz AI API service."""

@@ -1,0 +1,66 @@
+rules_version = '2';
+
+// The SPA talks to Firestore directly for realtime sync, so these rules are the
+// only tenant boundary. Everything is owner-scoped and read-only from the
+// client — all writes go through the agents via the mcp-catalog server, which
+// uses Admin credentials and bypasses these rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function ownsJob(jobId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/jobs/$(jobId))
+        && get(/databases/$(database)/documents/jobs/$(jobId)).data.ownerUid == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      // A user may edit their own display preferences and nothing else.
+      allow update: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName', 'defaultPlatforms', 'updatedAt']);
+      allow create, delete: if false;
+    }
+
+    match /jobs/{jobId} {
+      allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      // Creation and status transitions are the API's and the agents' job.
+      allow write: if false;
+
+      match /events/{eventId} {
+        allow read: if ownsJob(jobId);
+        allow write: if false;
+      }
+
+      match /moments/{momentId} {
+        allow read: if ownsJob(jobId);
+        allow write: if false;
+      }
+
+      match /clips/{clipId} {
+        allow read: if ownsJob(jobId);
+        allow write: if false;
+      }
+
+      match /segments/{segmentId} {
+        allow read: if ownsJob(jobId);
+        allow write: if false;
+      }
+    }
+
+    match /renders/{renderId} {
+      allow read: if isSignedIn() && resource.data.requestedBy == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
