@@ -176,11 +176,25 @@ package — bigger than any sensible instance. So:
   deleted locally, so disk stays bounded to the last few segments whatever the
   match length.
 
-The shape stays small on purpose — and small is also what starts reliably: on
-this project, every Cloud Run shape above 1 GiB of memory per CPU (4Gi/2cpu,
-8Gi/2cpu, 8Gi/4cpu) failed to launch its instance at all, with zero application
-output, while 2Gi/2cpu and 4Gi/4cpu start immediately. If the worker ever needs
-more memory, scale CPU with it and verify the shape starts before relying on it.
+### Cold start, and why the probe budget is large
+
+Python is slow to start here. Measured on a live Cloud Run revision with
+startup CPU boost: `grpc` 3s, `google.cloud.firestore` 45s, `google.genai` 72s,
+the server module 100s — against 6s for the same image on a developer machine.
+
+Two consequences are baked into the configuration:
+
+- **Heavy imports are lazy.** `catalog_server.store` and `media_server.gcs`
+  import the Google libraries inside their accessors, so the process binds a
+  port and answers `/healthz` in seconds and pays the cost on first use, warm
+  for the life of the instance.
+- **Startup probes allow ~5 minutes** and every service sets
+  `startup_cpu_boost`. A tight window kills the container mid-import, and
+  because stdout is still buffered the logs show *nothing* — which reads as a
+  container that never ran rather than one that was not given time to. That
+  failure mode cost a full debugging cycle: it was misread first as an image
+  problem, then as a memory-to-CPU ratio, before instrumenting the import chain
+  showed plain slowness.
 
 | Tool | Purpose |
 |---|---|

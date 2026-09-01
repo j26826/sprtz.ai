@@ -2,6 +2,14 @@
 
 This module is the only place that knows the document shape, so the agents, the
 API and the UI all agree on one contract.
+
+The Google client libraries are imported inside the accessors rather than at
+module scope. They are startlingly expensive to import on Cloud Run — measured
+on a live revision, `google.cloud.firestore` alone took 45s and `google.genai`
+another 27s, about 100s before the process could bind a port, against 6s on a
+developer machine. Importing them lazily lets the server answer its health
+check in a couple of seconds and pay that cost on the first tool call instead,
+where it is warm for the life of the instance.
 """
 
 from __future__ import annotations
@@ -9,13 +17,12 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from google import genai
-from google.cloud import firestore
-from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
-from google.cloud.firestore_v1.vector import Vector
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:  # pragma: no cover
+    from google.cloud import firestore
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +37,24 @@ RERANK_MODEL = os.environ.get("RERANK_MODEL", "gemini-2.5-flash")
 RERANK_OVERFETCH = int(os.environ.get("RERANK_OVERFETCH", "4"))
 RERANK_MAX_CANDIDATES = int(os.environ.get("RERANK_MAX_CANDIDATES", "60"))
 
-_db: firestore.Client | None = None
-_genai_client: genai.Client | None = None
+_db: "firestore.Client | None" = None
+_genai_client: Any = None
 
 
-def db() -> firestore.Client:
+def db() -> "firestore.Client":
     global _db
     if _db is None:
+        from google.cloud import firestore
+
         _db = firestore.Client(project=PROJECT_ID or None)
     return _db
 
 
-def genai_client() -> genai.Client:
+def genai_client() -> Any:
     global _genai_client
     if _genai_client is None:
+        from google import genai
+
         _genai_client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
     return _genai_client
 
@@ -193,6 +204,9 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
     if not moments:
         return 0
 
+    from google.cloud import firestore
+    from google.cloud.firestore_v1.vector import Vector
+
     owner_uid = get_job(job_id).get("ownerUid", "")
     texts = [m.pop("embed_text", None) or f"{m.get('label', '')}. {m.get('description', '')}"
              for m in moments]
@@ -259,6 +273,8 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_moments(job_id: str, limit: int = 100, min_score: float = 0.0) -> list[dict[str, Any]]:
+    from google.cloud import firestore
+
     query = (
         job_ref(job_id)
         .collection("moments")
@@ -395,6 +411,10 @@ def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
     library via a collection-group query. When ``rerank`` is set the index is
     over-fetched and the candidates are reordered by relevance.
     """
+    from google.cloud import firestore
+    from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+    from google.cloud.firestore_v1.vector import Vector
+
     vector = embed([query], task_type="RETRIEVAL_QUERY")[0]
 
     if job_id:
@@ -441,6 +461,7 @@ def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
 def upsert_clips(job_id: str, clips: list[dict[str, Any]]) -> int:
     if not clips:
         return 0
+
     owner_uid = get_job(job_id).get("ownerUid", "")
     batch = db().batch()
     collection = job_ref(job_id).collection("clips")
@@ -500,6 +521,8 @@ def _clip_out(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_clips(job_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    from google.cloud import firestore
+
     query = (
         job_ref(job_id)
         .collection("clips")
