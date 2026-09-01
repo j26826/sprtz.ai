@@ -10,6 +10,12 @@ substitutions:
   _APP_NAME: sprtz
   _AR_REPO: sprtz-dev-containers
   _TF_STATE_BUCKET: ""
+  # Deployment-specific settings. Empty is a working default, but note what each
+  # one costs you: with no _IAP_MEMBERS nobody can reach the editor, and with no
+  # _CDN_DOMAIN the CDN is HTTP-only, so the HTTPS editor blocks HLS playback as
+  # mixed content. Set them on the trigger.
+  _IAP_MEMBERS: ""
+  _CDN_DOMAIN: ""
 
 options:
   # No machineType on purpose. E2_HIGHCPU_8 had no capacity in us-south1: a
@@ -183,7 +189,15 @@ steps:
                -var="region=${_REGION}" \
                -var="environment=${_ENVIRONMENT}" \
                -var="app_name=${_APP_NAME}" \
-               -var="image_tag=$SHORT_SHA"
+               -var="image_tag=$SHORT_SHA" \
+               -var="cdn_domain=${_CDN_DOMAIN}"
+
+        # iap_members is a list; build the HCL literal only when it is set, so
+        # an empty substitution does not become a list containing "".
+        if [ -n "${_IAP_MEMBERS}" ]; then
+          MEMBERS=$$(printf '"%s",' $$(echo "${_IAP_MEMBERS}" | tr ',' ' '))
+          set -- "$$@" -var="iap_members=[$${MEMBERS%,}]"
+        fi
 
         # bootstrap.sh created the registry outside Terraform, so adopt it into
         # state on the first run. Already-managed is the normal case.
