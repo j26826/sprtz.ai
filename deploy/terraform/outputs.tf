@@ -39,8 +39,8 @@ output "media_bucket" {
 }
 
 output "tf_state_bucket" {
-  description = "Bucket holding Terraform state for CI applies."
-  value       = google_storage_bucket.tf_state.name
+  description = "Bucket holding Terraform state. Created by deploy/scripts/bootstrap.sh, not by Terraform."
+  value       = local.tf_state_bucket
 }
 
 output "artifact_registry" {
