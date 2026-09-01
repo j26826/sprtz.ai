@@ -26,7 +26,10 @@ UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET", "")
 MEDIA_BUCKET = os.environ.get("MEDIA_BUCKET", "")
 HLS_BUCKET = os.environ.get("HLS_BUCKET", "")
 CDN_BASE_URL = os.environ.get("CDN_BASE_URL", "").rstrip("/")
-SCRATCH = Path(os.environ.get("SCRATCH_DIR", "/scratch"))
+# Cloud Run's writable filesystem is memory-backed, so scratch is only ever
+# used for small artefacts: playlists in flight, thumbnails, rendered clips.
+# Multi-gigabyte sources are read over HTTPS and never land here.
+SCRATCH = Path(os.environ.get("SCRATCH_DIR", "/tmp/scratch"))
 
 # Enough of an MP4 to contain a faststart moov atom on a long recording.
 _HEADER_BYTES = 32 * 1024 * 1024
@@ -65,12 +68,12 @@ def probe_media(gcs_uri: str) -> dict:
             if info["duration_sec"] > 0:
                 return {"status": "success", "gcs_uri": gcs_uri, "partial_read": True, **info}
         except Exception as exc:  # noqa: BLE001
-            logger.info("header probe failed (%s); falling back to full download", exc)
+            logger.info("header probe failed (%s); probing over HTTPS", exc)
 
-        full = work / "full.mp4"
-        gcs.download(gcs_uri, full)
-        info = ffmpeg_ops.probe(full)
-        return {"status": "success", "gcs_uri": gcs_uri, "partial_read": False, **info}
+        # Non-faststart file: probe it in place over HTTPS. ffprobe range-reads
+        # the moov atom from the tail; the object never lands on local disk.
+        info = ffmpeg_ops.probe(gcs.https_url(gcs_uri), bearer_token=gcs.bearer_token())
+        return {"status": "success", "gcs_uri": gcs_uri, "partial_read": True, **info}
     except Exception as exc:  # noqa: BLE001
         logger.exception("probe_media failed for %s", gcs_uri)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "gcs_uri": gcs_uri}
@@ -96,19 +99,26 @@ def transcode_hls(gcs_uri: str, job_id: str) -> dict:
 
     work = _scratch()
     try:
-        source = work / "source.mp4"
-        gcs.download(gcs_uri, source)
-        info = ffmpeg_ops.probe(source)
+        token = gcs.bearer_token()
+        source_url = gcs.https_url(gcs_uri)
+        info = ffmpeg_ops.probe(source_url, bearer_token=token)
 
+        # Copy-remux streamed in over HTTPS and drained out segment by segment,
+        # so neither the source nor the package is ever held locally — local
+        # disk here is instance memory, and a full match is bigger than any
+        # instance this service runs on.
         out_dir = work / "hls"
-        package = ffmpeg_ops.transcode_hls(source, out_dir, source_height=info.get("height", 0))
-
+        out_dir.mkdir(parents=True, exist_ok=True)
         prefix = f"jobs/{job_id}/hls"
-        uploaded = gcs.upload_directory(out_dir, HLS_BUCKET, prefix)
+        with gcs.SegmentUploader(out_dir, HLS_BUCKET, prefix) as uploader:
+            package = ffmpeg_ops.remux_hls(source_url, out_dir, bearer_token=token)
+            uploaded = uploader.finish()
 
         poster_rel = f"jobs/{job_id}/poster.jpg"
         poster = work / "poster.jpg"
-        ffmpeg_ops.thumbnail(source, poster, at_sec=min(30.0, info["duration_sec"] / 2))
+        ffmpeg_ops.thumbnail(source_url, poster,
+                             at_sec=min(30.0, info["duration_sec"] / 2),
+                             bearer_token=token)
         gcs.upload(
             poster,
             f"gs://{HLS_BUCKET}/{poster_rel}",
@@ -153,11 +163,11 @@ def cut_clip(gcs_uri: str, job_id: str, clip_id: str, start_sec: float, end_sec:
 
     work = _scratch()
     try:
-        source = work / "source.mp4"
-        gcs.download(gcs_uri, source)
-
         out = work / f"{clip_id}.mp4"
-        ffmpeg_ops.cut(source, out, start_sec, end_sec)
+        # -ss over HTTPS is a range seek: a 30-second clip out of a three-hour
+        # match reads megabytes, not the whole object.
+        ffmpeg_ops.cut(gcs.https_url(gcs_uri), out, start_sec, end_sec,
+                       bearer_token=gcs.bearer_token())
 
         dest = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/clips/{clip_id}.mp4"
         gcs.upload(out, dest)
@@ -248,11 +258,11 @@ def render_preview(gcs_uri: str, job_id: str, start_sec: float, end_sec: float) 
     """
     work = _scratch()
     try:
-        source = work / "source.mp4"
-        gcs.download(source_uri := gcs_uri, source)
+        source_uri = gcs_uri
         preview_id = uuid.uuid4().hex[:12]
         out = work / f"{preview_id}.mp4"
-        ffmpeg_ops.cut(source, out, start_sec, end_sec)
+        ffmpeg_ops.cut(gcs.https_url(gcs_uri), out, start_sec, end_sec,
+                       bearer_token=gcs.bearer_token())
         dest = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/previews/{preview_id}.mp4"
         gcs.upload(out, dest)
         return {

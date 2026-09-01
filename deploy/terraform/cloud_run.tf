@@ -124,29 +124,19 @@ resource "google_cloud_run_v2_service" "mcp_media" {
         value = local.cdn_base_url
       }
 
-      volume_mounts {
-        name       = "scratch"
-        mount_path = "/scratch"
-      }
-
       startup_probe {
         http_get {
           path = "/healthz"
         }
         initial_delay_seconds = 10
         period_seconds        = 5
-        failure_threshold     = 12
+        # 1s (the default) is tight for a cold gen2 instance still mounting its
+        # GCS volume; a slow first response is not a dead container.
+        timeout_seconds   = 5
+        failure_threshold = 12
       }
     }
 
-    # ffmpeg needs real scratch space for anything longer than a few minutes.
-    volumes {
-      name = "scratch"
-      empty_dir {
-        medium     = "MEMORY"
-        size_limit = "4Gi"
-      }
-    }
   }
 
   depends_on = [google_project_service.services]

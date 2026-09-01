@@ -127,16 +127,24 @@ variable "agent_max_instances" {
   default     = 10
 }
 
+# The worker streams sources over HTTPS and drains HLS segments to GCS as they
+# are written, so it holds only a few segments locally and copy-remuxes rather
+# than re-encodes. That is what lets it run this small — and small is also what
+# starts reliably here: on this project, every Cloud Run shape above 1GiB of
+# memory per CPU (4Gi/2cpu, 8Gi/2cpu, 8Gi/4cpu) failed to launch its instance
+# at all, with zero application output, while 2Gi/2cpu and 4Gi/4cpu start
+# immediately. If you raise memory, raise CPU with it and verify the shape
+# starts before relying on it.
 variable "media_worker_cpu" {
   type        = string
   description = "CPU allocation for the ffmpeg-backed MCP server."
-  default     = "4"
+  default     = "2"
 }
 
 variable "media_worker_memory" {
   type        = string
-  description = "Memory allocation for the ffmpeg-backed MCP server."
-  default     = "8Gi"
+  description = "Memory allocation for the ffmpeg-backed MCP server. Keep at or below 1GiB per CPU."
+  default     = "2Gi"
 }
 
 variable "video_retention_days" {

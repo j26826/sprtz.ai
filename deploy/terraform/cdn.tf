@@ -40,11 +40,22 @@ resource "google_storage_bucket_iam_member" "media_worker_hls_write" {
   member = "serviceAccount:${google_service_account.mcp_media.email}"
 }
 
-# The load balancer reads the bucket as this well-known service agent.
+# The load balancer reads the bucket as the cloud-cdn-fill service agent. That
+# agent does not exist until the project's first CDN-enabled backend is created,
+# and its creation is asynchronous — granting it access in the same apply that
+# creates the backend fails with "service account does not exist" unless the
+# grant waits.
+resource "time_sleep" "cdn_fill_agent" {
+  depends_on      = [google_compute_backend_bucket.hls]
+  create_duration = "120s"
+}
+
 resource "google_storage_bucket_iam_member" "cdn_read" {
   bucket = google_storage_bucket.hls.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:service-${data.google_project.this.number}@cloud-cdn-fill.iam.gserviceaccount.com"
+
+  depends_on = [time_sleep.cdn_fill_agent]
 }
 
 resource "google_compute_backend_bucket" "hls" {
@@ -128,6 +139,10 @@ resource "google_compute_url_map" "cdn" {
   project         = var.project_id
   name            = "${local.prefix}-cdn-urlmap"
   default_service = google_compute_backend_bucket.hls.id
+
+  # A freshly created backend bucket can report resourceNotReady for a short
+  # window; the first apply hit exactly that. The wait absorbs it.
+  depends_on = [time_sleep.cdn_fill_agent]
 }
 
 # HTTPS is not optional in practice: the editor is served over HTTPS, so a

@@ -5,8 +5,12 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import mimetypes
+import threading
+import time
 from pathlib import Path
 
+import google.auth
+import google.auth.transport.requests
 from google.cloud import storage
 
 logger = logging.getLogger(__name__)
@@ -19,6 +23,30 @@ def client() -> storage.Client:
     if _client is None:
         _client = storage.Client()
     return _client
+
+
+def bearer_token() -> str | None:
+    """Access token for reading GCS objects over plain HTTPS.
+
+    This is how ffmpeg reads a multi-gigabyte source without it ever touching
+    local disk — which on Cloud Run is memory. Tokens last an hour; the remux
+    reads at I/O speed and finishes in minutes, so expiry mid-job is not a
+    concern the way it would be for a full re-encode.
+    """
+    try:
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/devstorage.read_only"]
+        )
+        credentials.refresh(google.auth.transport.requests.Request())
+        return credentials.token
+    except Exception:  # noqa: BLE001
+        logger.warning("no credentials for a bearer token", exc_info=True)
+        return None
+
+
+def https_url(gcs_uri: str) -> str:
+    bucket, name = split_uri(gcs_uri)
+    return f"https://storage.googleapis.com/{bucket}/{name}"
 
 
 def split_uri(gcs_uri: str) -> tuple[str, str]:
@@ -108,3 +136,79 @@ def upload_directory(local_dir: Path, bucket: str, prefix: str, workers: int = 1
             total += size
 
     return {"files": len(files), "bytes": total, "prefix": prefix.rstrip("/")}
+
+
+class SegmentUploader:
+    """Drains finished HLS segments to GCS while ffmpeg is still writing.
+
+    A three-hour remux emits several gigabytes of segments, and Cloud Run's
+    writable filesystem is memory. Uploading each segment as it completes and
+    deleting it locally keeps disk usage bounded to the last few segments,
+    whatever the length of the match. Only .ts files are drained mid-run: the
+    playlists are rewritten until ffmpeg exits and are uploaded by finish().
+    """
+
+    def __init__(self, local_dir: Path, bucket: str, prefix: str, poll_seconds: float = 2.0):
+        self._dir = local_dir
+        self._bucket = client().bucket(bucket)
+        self._prefix = prefix.rstrip("/")
+        self._poll = poll_seconds
+        self._stop = threading.Event()
+        self._uploaded = 0
+        self._bytes = 0
+        self._errors: list[str] = []
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def __enter__(self) -> "SegmentUploader":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        self._thread.join(timeout=60)
+
+    def _ready_segments(self) -> list[Path]:
+        # The newest .ts may still be open in ffmpeg; everything older is final
+        # because HLS segments are written strictly in sequence.
+        segments = sorted(self._dir.glob("*.ts"))
+        return segments[:-1]
+
+    def _upload_one(self, path: Path) -> None:
+        blob = self._bucket.blob(f"{self._prefix}/{path.name}")
+        blob.cache_control = _SEGMENT_CACHE
+        blob.upload_from_filename(str(path), content_type=_content_type(path))
+        size = path.stat().st_size
+        path.unlink()
+        self._uploaded += 1
+        self._bytes += size
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                for segment in self._ready_segments():
+                    self._upload_one(segment)
+            except Exception as exc:  # noqa: BLE001
+                # Remember and retry next tick; the file is still on disk.
+                logger.warning("segment upload failed; will retry", exc_info=True)
+                self._errors.append(str(exc))
+            self._stop.wait(self._poll)
+
+    def finish(self) -> dict:
+        """Drain everything left — the last segment and the playlists."""
+        self._stop.set()
+        self._thread.join(timeout=120)
+        for path in sorted(self._dir.glob("*.ts")):
+            self._upload_one(path)
+        for path in sorted(self._dir.glob("*.m3u8")):
+            blob = self._bucket.blob(f"{self._prefix}/{path.name}")
+            blob.cache_control = _PLAYLIST_CACHE
+            blob.upload_from_filename(str(path), content_type=_content_type(path))
+            self._uploaded += 1
+            self._bytes += path.stat().st_size
+            path.unlink()
+        return {
+            "files": self._uploaded,
+            "bytes": self._bytes,
+            "prefix": self._prefix,
+            "upload_retries": len(self._errors),
+        }
