@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+.parcel-cache/
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
+
+# Local config / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+service-account*.json
+
+# Build / media scratch
+build/
+.tmp/
+*.mp4
+*.mov
+*.mkv
+!web/assets/*.mp4
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
