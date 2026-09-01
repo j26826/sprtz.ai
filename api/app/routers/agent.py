@@ -34,8 +34,17 @@ def _agent_engine(settings: Settings):
         import vertexai
         from vertexai import agent_engines
 
+        # Terraform's name attribute is not reliably a full resource path; the
+        # SDK only accepts the full form.
+        resource = settings.agent_engine_resource
+        if not resource.startswith("projects/"):
+            resource = (
+                f"projects/{settings.project_id}/locations/{settings.location}"
+                f"/reasoningEngines/{resource.rsplit('/', 1)[-1]}"
+            )
+
         vertexai.init(project=settings.project_id, location=settings.location)
-        _engine = agent_engines.get(settings.agent_engine_resource)
+        _engine = agent_engines.get(resource)
     return _engine
 
 
