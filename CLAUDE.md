@@ -191,6 +191,19 @@ checks it, but a check that *cannot run* is advisory, not fatal — it once
 failed a build claiming Firestore didn't serve a region it serves perfectly
 well. A guard that fails a correct config is worse than no guard.
 
+**A green build is not a usable deployment.** CI applies Terraform *defaults*, not
+`envs/*.tfvars`. Two settings decide whether the thing actually works, and both
+default to empty:
+
+| Trigger substitution | Empty means |
+|---|---|
+| `_IAP_MEMBERS` | IAP is on but nobody is authorised — no one can reach the editor |
+| `_CDN_DOMAIN` | CDN is HTTP-only, so the HTTPS editor blocks HLS playback as mixed content |
+
+Set them on the trigger (`_IAP_MEMBERS` is comma-separated, e.g.
+`user:you@example.com,domain:example.com`). Point the domain's A record at the
+`cdn_ip` output before the managed certificate can provision.
+
 **No `google_iap_brand`.** The IAP OAuth Admin APIs were shut down in March
 2026. Cloud Run's `iap_enabled` uses a Google-managed client.
 
