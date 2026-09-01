@@ -38,6 +38,8 @@ locals {
   # on so neither has to discover a resource id the other invented.
   agent_display_name = "${var.app_name}-${var.environment}-producer"
 
+  web_service_name = var.web_service_name != "" ? var.web_service_name : "${local.prefix}-web"
+
   common_labels = {
     app         = var.app_name
     environment = var.environment

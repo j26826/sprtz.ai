@@ -16,6 +16,10 @@ substitutions:
   # mixed content. Set them on the trigger.
   _IAP_MEMBERS: ""
   _CDN_DOMAIN: ""
+  # Editor service name. Overridden away from the default because IAP keeps
+  # accessSettings per service name and a stale gcipSettings block could not be
+  # cleared on the old one by any means.
+  _WEB_SERVICE_NAME: "sportz-agent"
 
 options:
   # No machineType on purpose. E2_HIGHCPU_8 had no capacity in us-south1: a
@@ -202,7 +206,8 @@ steps:
                -var="environment=${_ENVIRONMENT}" \
                -var="app_name=${_APP_NAME}" \
                -var="image_tag=$SHORT_SHA" \
-               -var="cdn_domain=${_CDN_DOMAIN}"
+               -var="cdn_domain=${_CDN_DOMAIN}" \
+               -var="web_service_name=${_WEB_SERVICE_NAME}"
 
         # iap_members is a list; build the HCL literal only when it is set, so
         # an empty substitution does not become a list containing "".
