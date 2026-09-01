@@ -5,17 +5,17 @@
 # the agent is deployed last because it calls the MCP services Terraform creates.
 
 substitutions:
-  _REGION: us-south1
+  _REGION: us-central1
   _ENVIRONMENT: dev
   _APP_NAME: sprtz
   _AR_REPO: sprtz-dev-containers
   _TF_STATE_BUCKET: ""
 
 options:
-  # No machineType on purpose. E2_HIGHCPU_8 has no capacity in us-south1: a
-  # build requesting it is accepted and then sits in PENDING forever with no
-  # error, which reads as a queue backlog rather than an unavailable machine.
-  # The default pool starts immediately here.
+  # No machineType on purpose. E2_HIGHCPU_8 had no capacity in us-south1: a
+  # build requesting it was accepted and then sat in PENDING forever with no
+  # error, reading as a queue backlog rather than an unavailable machine. The
+  # default pool starts immediately, so this stays unset regardless of region.
   substitutionOption: ALLOW_LOOSE
   logging: CLOUD_LOGGING_ONLY
   env:

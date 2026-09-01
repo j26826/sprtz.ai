@@ -298,10 +298,9 @@ Cloud Build reports both of these as an ordinary queue wait, with no error and
 no failed step:
 
 - **A service account with no roles.** The build never starts.
-- **An unavailable machine type.** `E2_HIGHCPU_8` is accepted in us-south1 but
-  has no capacity there, so the build queues indefinitely. The pipeline
-  deliberately sets no `machineType` and uses the default pool, which starts
-  immediately.
+- **An unavailable machine type.** `E2_HIGHCPU_8` was accepted in us-south1 but
+  had no capacity there, so builds queued indefinitely. The pipeline sets no
+  `machineType` and uses the default pool, which starts immediately.
 
 If a build sits in `PENDING`, check those two before anything else.
 
@@ -309,9 +308,8 @@ If a build sits in `PENDING`, check those two before anything else.
 
 `region` (Cloud Run, GCS, Artifact Registry, Cloud Build) and `vertex_region`
 (Agent Runtime, Gemini, embeddings) are separate variables. They both default to
-`us-south1`, which was verified to support Vertex AI, Agent Runtime, Gemini 2.5
-Flash, Cloud Run and Firestore. Keeping them separate means the app can sit in a
-region Vertex does not serve, without the whole deploy failing.
+`us-central1`. Keeping them separate means the app can sit in a region Vertex
+does not serve, without the whole deploy failing.
 
 > The preflight probes Gemini with a real `generateContent` call, not a GET on
 > the publisher model resource — that GET returns 404 in regions that serve the
@@ -335,8 +333,8 @@ service account in `iam.tf`.
 ### Bootstrapping a clean project
 
 ```bash
-PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/preflight.sh
-PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/bootstrap.sh
+PROJECT_ID=<project> REGION=us-central1 bash deploy/scripts/preflight.sh
+PROJECT_ID=<project> REGION=us-central1 bash deploy/scripts/bootstrap.sh
 
 cd deploy/terraform
 terraform init \
