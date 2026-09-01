@@ -1,20 +1,26 @@
 """Cloud CDN signed cookies for HLS playback.
 
-Signed **cookies**, not signed URLs, and the distinction is not cosmetic. An HLS
-playlist references its segments relatively, so a player resolving
+An HLS playlist references its segments relatively, so a player resolving
 `v0_00000.ts` against the playlist URL drops any query string the playlist
-carried. A signed URL therefore authorises the playlist and nothing else, and
-every segment request arrives unsigned. Signing a cookie instead means the
-browser attaches the credential to the playlist, the variant playlists and all
-several thousand segments without the player having to know anything about it.
+carried. A signed URL on the playlist alone therefore authorises the playlist
+and nothing else, and every segment request arrives unsigned.
 
-The cookie is scoped two ways at once, and both matter:
+There are two ways out of that, and which one applies is decided by whether the
+deployment has a custom domain:
 
-* ``URLPrefix`` is what Cloud CDN actually enforces — the signature is only
-  valid for URLs starting with that prefix.
-* The cookie's own ``Path`` decides when the browser bothers to send it. Scoping
-  it to the job's prefix lets several jobs hold valid cookies simultaneously
-  despite the cookie name being fixed by Cloud CDN.
+* **Signed cookies** are cleanest, but a browser only sends a cookie to the CDN
+  if the CDN host falls under the cookie's domain — so the API and the CDN must
+  share a registrable domain. On the default ``*.run.app`` hostnames this cannot
+  work at all: ``run.app`` is on the Public Suffix List, so no cookie can span
+  two services there.
+* **Rewriting the playlists** works anywhere. The API serves the playlists
+  itself, turning every relative reference into an absolute CDN URL carrying the
+  prefix signature. The player then requests already-signed segments, and the
+  CDN still serves every byte of video — the API only ever touches the few
+  kilobytes of playlist text.
+
+Rewriting is the default because it holds on any hostname. Cookie signing is
+kept for deployments that do have a custom domain configured.
 """
 
 from __future__ import annotations
@@ -60,6 +66,28 @@ def sign_cookie(
     return f"{to_sign}:Signature={_b64url(signature)}"
 
 
+def sign_query(
+    *,
+    url_prefix: str,
+    key_name: str,
+    key_value: str,
+    expires_at: int,
+) -> str:
+    """Return the query string authorising everything under ``url_prefix``.
+
+    Cloud CDN validates a signed *prefix*, so the identical query string can be
+    appended to the playlist and to every segment beneath it — which is what
+    makes playlist rewriting cheap.
+    """
+    if not url_prefix.startswith(("http://", "https://")):
+        raise ValueError("url_prefix must include the scheme and host.")
+
+    encoded_prefix = _b64url(url_prefix.encode())
+    to_sign = f"URLPrefix={encoded_prefix}&Expires={expires_at}&KeyName={key_name}"
+    signature = hmac.new(_decode_key(key_value), to_sign.encode(), hashlib.sha1).digest()
+    return f"{to_sign}&Signature={_b64url(signature)}"
+
+
 def playback(
     *,
     cdn_base_url: str,
@@ -95,3 +123,52 @@ def playback(
         "expires_at": expires_at,
         "url_prefix": prefix,
     }
+
+
+def rewrite_playlist(
+    body: str,
+    *,
+    cdn_base_url: str,
+    job_id: str,
+    signature: str,
+    api_playlist_base: str,
+) -> str:
+    """Rewrite an HLS playlist so nothing in it resolves to an unsigned URL.
+
+    Two kinds of reference need different destinations:
+
+    * A nested **playlist** must come back through the API, because its own
+      contents need rewriting in turn.
+    * A **segment** goes straight to the CDN with the prefix signature attached,
+      so the video bytes never pass through Cloud Run.
+
+    Lines beginning with ``#`` are tags and are passed through untouched, except
+    that ``EXT-X-KEY``/``EXT-X-MAP`` carry a ``URI="..."`` which is a real
+    reference and must be signed like any other.
+    """
+    cdn_prefix = f"{cdn_base_url.rstrip('/')}/jobs/{job_id}/hls"
+    api_base = api_playlist_base.rstrip("/")
+
+    def destination(ref: str) -> str:
+        # Absolute references are already someone else's problem; leave them.
+        if ref.startswith(("http://", "https://")):
+            return ref
+        if ref.endswith(".m3u8"):
+            return f"{api_base}/{ref}"
+        return f"{cdn_prefix}/{ref}?{signature}"
+
+    out: list[str] = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            out.append(raw)
+        elif line.startswith("#"):
+            if 'URI="' in line:
+                head, _, rest = line.partition('URI="')
+                ref, _, tail = rest.partition('"')
+                out.append(f'{head}URI="{destination(ref)}"{tail}')
+            else:
+                out.append(raw)
+        else:
+            out.append(destination(line))
+    return "\n".join(out) + "\n"

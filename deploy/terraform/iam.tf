@@ -68,6 +68,14 @@ resource "google_storage_bucket_iam_member" "api_uploads" {
   member = "serviceAccount:${google_service_account.api.email}"
 }
 
+# The API reads playlists out of the HLS bucket to rewrite them; it never
+# touches segments, which go straight from the CDN to the player.
+resource "google_storage_bucket_iam_member" "api_hls_read" {
+  bucket = google_storage_bucket.hls.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.api.email}"
+}
+
 resource "google_storage_bucket_iam_member" "api_media_read" {
   bucket = google_storage_bucket.media.name
   role   = "roles/storage.objectViewer"
