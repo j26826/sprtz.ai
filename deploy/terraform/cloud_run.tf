@@ -222,8 +222,8 @@ resource "google_cloud_run_v2_service" "api" {
         value = google_cloud_run_v2_service.mcp_media.uri
       }
       env {
-        name  = "AGENT_ENGINE_RESOURCE"
-        value = google_vertex_ai_reasoning_engine.producer.name
+        name  = "AGENT_ENGINE_DISPLAY_NAME"
+        value = local.agent_display_name
       }
       env {
         name  = "IAP_AUDIENCE"

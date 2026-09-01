@@ -33,6 +33,11 @@ locals {
     "videointelligence.googleapis.com",
   ]
 
+  # The Agent Runtime engine is created by the SDK, not Terraform — see
+  # agents/deployment/deploy.py. Terraform publishes the name both sides agree
+  # on so neither has to discover a resource id the other invented.
+  agent_display_name = "${var.app_name}-${var.environment}-producer"
+
   common_labels = {
     app         = var.app_name
     environment = var.environment
