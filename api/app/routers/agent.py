@@ -88,7 +88,7 @@ async def create_session(
     try:
         engine = _agent_engine(settings)
         session = await asyncio.to_thread(engine.create_session, user_id=user.uid)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("could not create an agent session")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="Agent is unavailable."
@@ -114,7 +114,7 @@ async def send_message(
     """
     try:
         engine = _agent_engine(settings)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="Agent is unavailable."
         ) from exc
@@ -134,7 +134,7 @@ async def send_message(
                     user_id=user.uid, session_id=body.session_id, message=prompt
                 ):
                     loop.call_soon_threadsafe(queue.put_nowait, ("event", event))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.exception("agent stream failed")
                 loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
             finally:

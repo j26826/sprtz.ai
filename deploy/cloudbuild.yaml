@@ -93,8 +93,9 @@ steps:
       - |
         set -euo pipefail
         cd api
-        pip install --quiet -r requirements.txt pytest
+        pip install --quiet -r requirements.txt pytest ruff
         ENVIRONMENT=local python -m pytest tests -q
+        ruff check app tests
 
   - id: mcp-tests
     name: python:3.12-slim

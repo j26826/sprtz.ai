@@ -111,19 +111,17 @@ in a batch job.
 
 ### Playback
 
-One HLS stream per job behind Cloud CDN. HLS playlists reference segments
-relatively, so a query-string signature on the playlist is dropped when the
-player resolves them — sign only the playlist and every segment 403s.
+One HLS stream per job behind Cloud CDN, authorised by a **signed cookie**.
 
-**The API serves the playlists, rewritten.** Each segment reference becomes an
-absolute CDN URL carrying the prefix signature, and each nested playlist points
-back at the API so it gets rewritten in turn. The CDN still delivers every byte
-of video; only the few kilobytes of playlist text pass through Cloud Run.
+HLS playlists reference segments relatively, so a query-string signature is
+dropped when the player resolves them — sign only the playlist and every one of
+the thousands of segments 403s. A cookie is attached by the browser to all of
+them.
 
-This works on the default `*.run.app` hostnames, which is why it is the default.
-Signed *cookies* are cleaner but need the API and CDN under one registrable
-domain — impossible on `run.app`, which is on the Public Suffix List. The cookie
-signer is kept for deployments that do have a custom domain.
+That works because the **CDN is served from the app's own hostname**: the load
+balancer routes `/jobs/*` to the HLS bucket, so the cookie is same-origin. On
+separate `*.run.app` hostnames it would be impossible — `run.app` is on the
+Public Suffix List, so no cookie can span two services.
 
 Reviewing a moment is a seek to its in point with a stop at its out point — that
 is what replaces a timeline.

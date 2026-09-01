@@ -481,14 +481,13 @@ let playerFor = null;     // which moment playerEl is bound to
  * cookie to every one of them without the player knowing.
  */
 /**
- * Fetch the playback URL.
+ * Fetch the playback URL; the API sets the Cloud CDN cookie alongside it.
  *
- * It points at the API, not the CDN: the API rewrites each playlist so every
- * segment reference is an absolute CDN URL carrying a prefix signature. That
- * keeps playback working on the default *.run.app hostnames — a signed cookie
- * could not, since run.app is on the Public Suffix List and no cookie can span
- * two services there. The CDN still delivers every byte of video; only the
- * playlist text passes through the API.
+ * The CDN is served from this same hostname through the load balancer, so the
+ * cookie is same-origin and the browser attaches it to the playlist and to
+ * every segment automatically. A signed URL could not do this: HLS playlists
+ * reference segments relatively, so the query string is dropped on resolution
+ * and only the playlist itself would be authorised.
  */
 async function ensurePlaybackUrl() {
   if (playbackUrl) return playbackUrl;
@@ -542,9 +541,9 @@ async function mountPlayer() {
     hls = new window.Hls({
       startPosition: start,
       maxBufferLength: 30,
-      // Playlists come from the API and need the caller's credentials;
-      // segments are pre-signed CDN URLs and must not carry them.
-      xhrSetup: (xhr, url) => { xhr.withCredentials = url.includes('/api/jobs/'); },
+      // Same-origin, so the CDN cookie rides along on every playlist and
+      // segment request without any per-request setup.
+      xhrSetup: (xhr) => { xhr.withCredentials = true; },
     });
     hls.loadSource(url);
     hls.attachMedia(video);
