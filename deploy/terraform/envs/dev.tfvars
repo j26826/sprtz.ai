@@ -1,11 +1,11 @@
 project_id = "REPLACE_WITH_PROJECT_ID"
-region     = "us-south1"
+region     = "us-central1"
 
 # Vertex AI (Agent Runtime + Gemini) supports fewer regions than Cloud Run.
-# Run deploy/scripts/preflight.sh to confirm us-south1 is offered for your
+# Run deploy/scripts/preflight.sh to confirm this region is offered for your
 # project; if it is not, set this to the nearest supported region.
-vertex_region      = "us-south1"
-firestore_location = "us-south1"
+vertex_region      = "us-central1"
+firestore_location = "us-central1"
 environment        = "dev"
 
 
