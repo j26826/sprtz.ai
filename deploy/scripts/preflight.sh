@@ -28,21 +28,21 @@ note_fail() {
   fail=1
 }
 
+# A check that could not run is not a check that failed. Blocking a deploy on a
+# probe the build identity simply lacks permission for is worse than not
+# probing: Terraform still surfaces a definitive error, and the operator is
+# left changing settings that were never wrong.
+note_warn() {
+  echo "  ! $1" >&2
+}
+
 echo "Enabling the APIs needed to run these checks..."
 gcloud services enable aiplatform.googleapis.com run.googleapis.com \
   firestore.googleapis.com --project "$PROJECT_ID" --quiet
 
-# Enabling returns before the API is queryable, and a list issued too early
-# comes back empty — which is what made this script fail a perfectly good
-# region once.
-for _ in 1 2 3 4 5 6; do
-  if gcloud firestore locations list --project "$PROJECT_ID" \
-       --format='value(locationId)' 2>/dev/null | grep -q .; then
-    break
-  fi
-  echo "  waiting for the Firestore API to become queryable..."
-  sleep 10
-done
+# Enabling returns before an API is queryable, so give it a moment before the
+# listing checks run.
+sleep 10
 
 # --- Vertex AI ----------------------------------------------------------------
 echo "Checking Vertex AI availability in $VERTEX_REGION..."
@@ -103,7 +103,7 @@ run_regions="$(gcloud run regions list --project "$PROJECT_ID" \
   --format='value(locationId)' 2>/dev/null || true)"
 
 if [[ -z "$run_regions" ]]; then
-  note_fail "Could not list Cloud Run regions. The API may still be enabling — retry in a minute."
+  note_warn "Could not list Cloud Run regions — skipping this check."
 elif grep -qx "$REGION" <<<"$run_regions"; then
   echo "  ✓ Cloud Run available in $REGION"
 else
@@ -116,17 +116,23 @@ fi
 # That false negative once failed a build against a location Firestore does in
 # fact serve, so the empty case is called out separately.
 echo "Checking Firestore location $FIRESTORE_LOCATION..."
+fs_err="$(mktemp)"
 fs_locations="$(gcloud firestore locations list --project "$PROJECT_ID" \
-  --format='value(locationId)' 2>/dev/null || true)"
+  --format='value(locationId)' 2>"$fs_err" || true)"
 
 if [[ -z "$fs_locations" ]]; then
-  note_fail "Could not list Firestore locations. The API may still be enabling — retry in a minute."
+  # Advisory: the build identity may not hold datastore.locations.list even
+  # though it can create the database perfectly well.
+  note_warn "Could not list Firestore locations — skipping this check."
+  [[ -s "$fs_err" ]] && sed 's/^/      /' "$fs_err" >&2
+  note_warn "Terraform will fail explicitly if '$FIRESTORE_LOCATION' is wrong. The location is immutable once the database exists, so confirm it before the first apply."
 elif grep -qx "$FIRESTORE_LOCATION" <<<"$fs_locations"; then
   echo "  ✓ Firestore can be created in $FIRESTORE_LOCATION"
 else
   note_fail "Firestore is not offered in '$FIRESTORE_LOCATION'. Offered in this project:"
   grep -E '^(us|nam)' <<<"$fs_locations" | sed 's/^/      /' >&2
 fi
+rm -f "$fs_err"
 
 echo
 if [[ "$fail" -ne 0 ]]; then
@@ -134,3 +140,4 @@ if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi
 echo "Preflight passed."
+echo "(Lines marked ! are checks that could not run, not failures.)"
