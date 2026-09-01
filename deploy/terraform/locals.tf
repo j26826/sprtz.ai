@@ -10,6 +10,7 @@ locals {
   # brand new project only needs billing linked.
   services = [
     "aiplatform.googleapis.com",
+    "apikeys.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
     "cloudresourcemanager.googleapis.com",

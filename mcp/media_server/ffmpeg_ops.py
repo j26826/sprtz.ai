@@ -25,6 +25,18 @@ def _run(cmd: list[str], timeout: int = 3600) -> str:
     return proc.stdout
 
 
+# ffmpeg reads GCS objects straight over HTTPS with range seeks, so multi-GB
+# sources never touch local disk — which on Cloud Run is memory.
+def http_input_args(url: str, bearer_token: str | None) -> list[str]:
+    args: list[str] = []
+    if bearer_token:
+        # ffmpeg wants the raw header line, CRLF-terminated.
+        args += ["-headers", f"Authorization: Bearer {bearer_token}\r\n"]
+    # Survive transient resets on a long read.
+    args += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+    return args
+
+
 @dataclass(frozen=True)
 class Rendition:
     """One rung of the HLS ladder."""
@@ -53,11 +65,15 @@ HLS_LADDER: tuple[Rendition, ...] = (
 HLS_SEGMENT_SECONDS = 2
 
 
-def probe(path: str | Path) -> dict:
-    """ffprobe a local file into a flat dict."""
+def probe(path: str | Path, bearer_token: str | None = None) -> dict:
+    """ffprobe a local file or an HTTPS URL into a flat dict."""
+    header_args: list[str] = []
+    if bearer_token and str(path).startswith("http"):
+        header_args = ["-headers", f"Authorization: Bearer {bearer_token}\r\n"]
     out = _run(
         [
             "ffprobe", "-v", "error",
+            *header_args,
             "-show_entries",
             "format=duration,size,bit_rate,format_name",
             "-show_entries",
@@ -95,6 +111,41 @@ def probe(path: str | Path) -> dict:
         "audio_channels": int(audio.get("channels") or 0),
         "audio_sample_rate": int(audio.get("sample_rate") or 0),
         "has_audio": bool(audio),
+    }
+
+
+def remux_hls(source_url: str, out_dir: Path, bearer_token: str | None = None) -> dict:
+    """Repackage a source into HLS without re-encoding.
+
+    The uploads Sprtz sees are already H.264 at delivery-grade bitrates, so
+    review playback needs segmentation, not a new encode. Copy-remuxing a
+    three-hour match is I/O-bound and takes minutes; a rendition ladder for the
+    same source is hours of CPU and cannot finish inside Cloud Run's one-hour
+    request ceiling. The ladder belongs in a batch job if it is ever needed.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg", "-hide_banner", "-y",
+        *(http_input_args(source_url, bearer_token) if source_url.startswith("http") else []),
+        "-i", source_url,
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-c", "copy",
+        "-f", "hls",
+        "-hls_time", str(HLS_SEGMENT_SECONDS),
+        "-hls_playlist_type", "vod",
+        "-hls_flags", "independent_segments",
+        "-hls_segment_type", "mpegts",
+        "-hls_segment_filename", str(out_dir / "v0_%05d.ts"),
+        "-master_pl_name", "master.m3u8",
+        str(out_dir / "v0.m3u8"),
+    ]
+    _run(cmd, timeout=45 * 60)
+
+    return {
+        "master_playlist": "master.m3u8",
+        "renditions": ["source"],
+        "segment_seconds": HLS_SEGMENT_SECONDS,
+        "reencoded": False,
     }
 
 
@@ -162,16 +213,21 @@ def transcode_hls(source: Path, out_dir: Path, source_height: int = 0) -> dict:
     }
 
 
-def cut(source: Path, dest: Path, start_sec: float, end_sec: float, reencode: bool = True) -> None:
-    """Extract [start, end). Re-encodes by default.
+def cut(source: str | Path, dest: Path, start_sec: float, end_sec: float,
+        reencode: bool = True, bearer_token: str | None = None) -> None:
+    """Extract [start, end) from a local file or an HTTPS URL. Re-encodes by default.
 
     Stream copy is much faster but can only cut on a keyframe, which drifts the
     in-point by up to the GOP length — visible and wrong when the clip is built
-    around a specific frame.
+    around a specific frame. With a URL source, -ss becomes a range seek, so a
+    30-second clip out of a 3 GB match reads megabytes, not gigabytes.
     """
     duration = max(0.0, end_sec - start_sec)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["ffmpeg", "-hide_banner", "-y", "-ss", f"{start_sec:.3f}", "-i", str(source),
+    src = str(source)
+    cmd = ["ffmpeg", "-hide_banner", "-y",
+           *(http_input_args(src, bearer_token) if src.startswith("http") else []),
+           "-ss", f"{start_sec:.3f}", "-i", src,
            "-t", f"{duration:.3f}"]
     if reencode:
         cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "128k"]
@@ -207,10 +263,14 @@ def reframe(source: Path, dest: Path, aspect: str = "9:16", blur_pad: bool = Tru
     _run(cmd)
 
 
-def thumbnail(source: Path, dest: Path, at_sec: float, width: int = 640) -> None:
+def thumbnail(source: str | Path, dest: Path, at_sec: float, width: int = 640,
+              bearer_token: str | None = None) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
+    src = str(source)
     _run([
-        "ffmpeg", "-hide_banner", "-y", "-ss", f"{at_sec:.3f}", "-i", str(source),
+        "ffmpeg", "-hide_banner", "-y",
+        *(http_input_args(src, bearer_token) if src.startswith("http") else []),
+        "-ss", f"{at_sec:.3f}", "-i", src,
         "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "3", str(dest),
     ], timeout=600)
 

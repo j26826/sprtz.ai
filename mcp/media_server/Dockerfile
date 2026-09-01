@@ -16,12 +16,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY media_server/ ./media_server/
 
+# Scratch holds only small artefacts (playlists in flight, thumbnails,
+# rendered clips). Big sources are streamed over HTTPS, never stored.
 ENV PORT=8080 \
-    SCRATCH_DIR=/scratch
+    SCRATCH_DIR=/tmp/scratch
 EXPOSE 8080
 
 RUN useradd --create-home --uid 1001 sprtz \
-    && mkdir -p /scratch && chown -R sprtz:sprtz /app /scratch
+    && chown -R sprtz:sprtz /app
 USER sprtz
 
 CMD ["python", "-m", "media_server.server"]

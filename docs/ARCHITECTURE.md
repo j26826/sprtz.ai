@@ -159,6 +159,29 @@ public ingress.
 
 ### `mcp-media` — ffmpeg-backed, long timeouts, high CPU
 
+The worker never holds a match locally. On Cloud Run every writable path is
+memory-backed, and a three-hour match is a ~3 GB source plus a comparable HLS
+package — bigger than any sensible instance. So:
+
+- **Sources are read over HTTPS**, straight from GCS with a bearer token;
+  ffmpeg's `-ss` becomes a range seek, so cutting a 30-second clip out of a
+  3 GB match reads megabytes.
+- **Playback packaging is a copy-remux, not a re-encode.** Uploads are already
+  H.264 at delivery-grade bitrates; segmentation is all review playback needs.
+  A remux is I/O-bound and takes minutes, where a rendition ladder for the same
+  source is hours of CPU that cannot finish inside Cloud Run's one-hour request
+  ceiling. If a ladder is ever wanted for public delivery, it belongs in a
+  batch job.
+- **Finished segments drain to GCS while ffmpeg is still writing** and are
+  deleted locally, so disk stays bounded to the last few segments whatever the
+  match length.
+
+The shape stays small on purpose — and small is also what starts reliably: on
+this project, every Cloud Run shape above 1 GiB of memory per CPU (4Gi/2cpu,
+8Gi/2cpu, 8Gi/4cpu) failed to launch its instance at all, with zero application
+output, while 2Gi/2cpu and 4Gi/4cpu start immediately. If the worker ever needs
+more memory, scale CPU with it and verify the shape starts before relying on it.
+
 | Tool | Purpose |
 |---|---|
 | `probe_media` | Duration, resolution, fps, codecs. Reads the file header first, so a 3 GB match does not cross the wire just to read its duration. |
@@ -285,9 +308,12 @@ the UI updates without any polling or websocket of our own.
 ### CI permissions
 
 The trigger's service account needs `roles/editor` **plus**
-`roles/resourcemanager.projectIamAdmin`, `roles/iap.admin` and
-`roles/firebaserules.admin`. Editor alone cannot create project IAM bindings,
-IAP access bindings, or a Firestore rules release.
+`roles/resourcemanager.projectIamAdmin`, `roles/iap.admin`,
+`roles/firebaserules.admin`, `roles/iam.serviceAccountAdmin`,
+`roles/secretmanager.admin` and `roles/datastore.owner`. Editor alone cannot
+create project IAM bindings, set IAM policy on service accounts or secrets,
+create the Firestore database, or release Firestore rules — each of which this
+Terraform does.
 
 A service account with no roles produces no error — the build stays `PENDING`
 forever, which reads as a queue backlog rather than a permissions failure.
