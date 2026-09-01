@@ -216,6 +216,15 @@ Set them on the trigger (`_IAP_MEMBERS` is comma-separated, e.g.
 `user:you@example.com,domain:example.com`). Point the domain's A record at the
 `cdn_ip` output before the managed certificate can provision.
 
+**IAP `accessSettings` are sticky per service *name*.** They survive deleting and
+recreating a service under the same name — verified: the settings vanished the
+instant `sprtz-dev-web` was deleted and came straight back when Terraform
+recreated it. A stale `gcipSettings` block, left over from external-identity
+mode and pointing at a hosted sign-in UI that no longer existed, made IAP deny
+every request while Policy Troubleshooter reported `ACCESS: GRANTED`. No API
+call clears it (nine variants across v1/v1beta1, plus IAP off/on). The only
+reliable escape is a **new service name** — hence `web_service_name`.
+
 **No `google_iap_brand`.** The IAP OAuth Admin APIs were shut down in March
 2026. Cloud Run's `iap_enabled` uses a Google-managed client.
 

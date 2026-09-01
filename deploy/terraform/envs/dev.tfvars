@@ -45,3 +45,6 @@ google_oauth_client_secret = ""
 # so both need custom domains under one registrable domain. Leave empty while
 # running on *.run.app — cookies cannot span services there.
 cdn_cookie_domain = ""
+
+# Editor service name. See the variable description for why this is overridden.
+web_service_name = "sportz-agent"

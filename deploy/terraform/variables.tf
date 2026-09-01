@@ -205,3 +205,19 @@ variable "google_oauth_client_secret" {
   default     = ""
   sensitive   = true
 }
+
+variable "web_service_name" {
+  type        = string
+  description = <<-EOT
+    Cloud Run service name for the editor. Empty falls back to "<app>-<env>-web".
+
+    Overriding this is the only reliable way to shed stale IAP settings: IAP
+    stores accessSettings against the service *name*, and they survive deleting
+    and recreating a service under the same name — a service recreated as
+    sprtz-dev-web inherited a gcipSettings block pointing at a hosted sign-in UI
+    that no longer existed, and no API call could clear it. A new name starts
+    clean. Note this is not environment-prefixed, so set it per environment if
+    two share a project.
+  EOT
+  default     = ""
+}

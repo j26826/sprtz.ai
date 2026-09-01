@@ -291,7 +291,7 @@ resource "google_cloud_run_v2_service" "api" {
 # --- Web SPA (behind IAP) -----------------------------------------------------
 resource "google_cloud_run_v2_service" "web" {
   project             = var.project_id
-  name                = "${local.prefix}-web"
+  name                = local.web_service_name
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = var.environment == "prod"
