@@ -47,6 +47,14 @@ class Settings:
     cdn_signed_url_ttl: int = field(
         default_factory=lambda: int(os.environ.get("CDN_SIGNED_URL_TTL", "21600"))
     )
+    # Domain the Cloud-CDN-Cookie is set on. A browser will only send the cookie
+    # to the CDN if the CDN host is covered by it, which means the API and the
+    # CDN must share a registrable domain (e.g. api.sprtz.ai + cdn.sprtz.ai,
+    # cookie domain .sprtz.ai). Empty means the cookie is returned in the
+    # response body but not set — see the note in app/core/cdn.py.
+    cdn_cookie_domain: str = field(
+        default_factory=lambda: os.environ.get("CDN_COOKIE_DOMAIN", "")
+    )
 
     # Upload cap. A three-hour broadcast at a sane bitrate lands well under this.
     max_upload_bytes: int = field(

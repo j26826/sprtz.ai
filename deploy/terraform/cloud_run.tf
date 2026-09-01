@@ -250,6 +250,10 @@ resource "google_cloud_run_v2_service" "api" {
         value = tostring(var.hls_signed_url_ttl_seconds)
       }
       env {
+        name  = "CDN_COOKIE_DOMAIN"
+        value = var.cdn_cookie_domain
+      }
+      env {
         name = "CDN_SIGNING_KEY"
         value_source {
           secret_key_ref {

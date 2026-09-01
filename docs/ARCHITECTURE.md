@@ -139,10 +139,25 @@ counting rather than reading.
 uploads it to the HLS bucket, which sits behind Cloud CDN via a backend bucket on
 an external Application Load Balancer.
 
-Access uses **Cloud CDN signed URL prefixes** rather than a public bucket.
-Signing a prefix is what makes this workable for HLS: one signature covers a
-job's master playlist, its variant playlists and every segment, so the player
-never re-signs mid-stream. The API mints these from a key in Secret Manager.
+Access uses **Cloud CDN signed cookies** rather than a public bucket, and the
+choice of cookie over signed URL is forced by HLS rather than preferred.
+
+A playlist references its segments *relatively*. A player resolving
+`v0_00000.ts` against the playlist URL discards any query string the playlist
+carried, so a signed URL authorises the playlist and nothing else — every one of
+the several thousand segment requests then arrives unsigned. A cookie is
+attached by the browser to all of them without the player knowing anything about
+it. The API mints the cookie from a key in Secret Manager, signing the job's
+`URLPrefix` and scoping the cookie's `Path` to the same job so several jobs can
+hold valid cookies at once despite Cloud CDN fixing the cookie's name.
+
+> **This needs custom domains.** A browser only sends the cookie to the CDN if
+> the CDN host falls under the cookie's domain, so the API and the CDN must share
+> a registrable domain (`api.sprtz.ai` + `cdn.sprtz.ai`, cookie domain
+> `.sprtz.ai`). On the default `*.run.app` hostnames it cannot work at all:
+> `run.app` is on the Public Suffix List, so no cookie can span two services
+> there. `/api/jobs/{id}/playback` reports `cookie_set: false` in that case and
+> the editor says so, rather than letting the player fail with an opaque 403.
 
 Playlists carry `max-age=60` so a re-transcode is picked up; segments are
 immutable and carry a one-year immutable TTL.

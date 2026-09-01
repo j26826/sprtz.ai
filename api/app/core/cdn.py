@@ -1,11 +1,20 @@
-"""Cloud CDN signed URLs for HLS playback.
+"""Cloud CDN signed cookies for HLS playback.
 
-Signing a *prefix* rather than a single URL is what makes this usable for HLS:
-one signature covers the master playlist, the variant playlists and every
-segment under a job, so the player never has to re-sign mid-stream.
+Signed **cookies**, not signed URLs, and the distinction is not cosmetic. An HLS
+playlist references its segments relatively, so a player resolving
+`v0_00000.ts` against the playlist URL drops any query string the playlist
+carried. A signed URL therefore authorises the playlist and nothing else, and
+every segment request arrives unsigned. Signing a cookie instead means the
+browser attaches the credential to the playlist, the variant playlists and all
+several thousand segments without the player having to know anything about it.
 
-Reference: Cloud CDN signed URL prefixes are base64url of the prefix, then an
-HMAC-SHA1 of the query string using the key registered on the backend bucket.
+The cookie is scoped two ways at once, and both matter:
+
+* ``URLPrefix`` is what Cloud CDN actually enforces — the signature is only
+  valid for URLs starting with that prefix.
+* The cookie's own ``Path`` decides when the browser bothers to send it. Scoping
+  it to the job's prefix lets several jobs hold valid cookies simultaneously
+  despite the cookie name being fixed by Cloud CDN.
 """
 
 from __future__ import annotations
@@ -15,38 +24,43 @@ import hashlib
 import hmac
 import time
 
+# Cloud CDN reads this exact name; it is not configurable.
+COOKIE_NAME = "Cloud-CDN-Cookie"
+
 
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
-def sign_url_prefix(
+def _decode_key(key_value: str) -> bytes:
+    """Terraform stores the key base64url-encoded, as the API expects."""
+    padding = "=" * (-len(key_value) % 4)
+    return base64.urlsafe_b64decode(key_value + padding)
+
+
+def sign_cookie(
     *,
     url_prefix: str,
     key_name: str,
     key_value: str,
     expires_at: int,
 ) -> str:
-    """Return the signed query string for everything under ``url_prefix``.
+    """Return a Cloud-CDN-Cookie value authorising everything under ``url_prefix``.
 
-    ``url_prefix`` must include the scheme and host and end at a path boundary,
-    because Cloud CDN grants access to every URL that starts with it.
+    ``url_prefix`` must include the scheme and host, and should end at a path
+    boundary — Cloud CDN grants access to every URL that starts with it, so a
+    prefix ending mid-segment-name would authorise more than intended.
     """
     if not url_prefix.startswith(("http://", "https://")):
         raise ValueError("url_prefix must include the scheme and host.")
 
-    # The key is stored base64url-encoded, matching what Terraform registered on
-    # the backend bucket.
-    padding = "=" * (-len(key_value) % 4)
-    secret = base64.urlsafe_b64decode(key_value + padding)
-
     encoded_prefix = _b64url(url_prefix.encode())
-    to_sign = f"URLPrefix={encoded_prefix}&Expires={expires_at}&KeyName={key_name}"
-    signature = hmac.new(secret, to_sign.encode(), hashlib.sha1).digest()
-    return f"{to_sign}&Signature={_b64url(signature)}"
+    to_sign = f"URLPrefix={encoded_prefix}:Expires={expires_at}:KeyName={key_name}"
+    signature = hmac.new(_decode_key(key_value), to_sign.encode(), hashlib.sha1).digest()
+    return f"{to_sign}:Signature={_b64url(signature)}"
 
 
-def playback_url(
+def playback(
     *,
     cdn_base_url: str,
     job_id: str,
@@ -55,27 +69,29 @@ def playback_url(
     ttl_seconds: int,
     playlist: str = "master.m3u8",
 ) -> dict:
-    """Build a signed HLS URL for one job.
-
-    Returns the master playlist URL plus the raw query string, because a player
-    that fetches segments itself needs to append the same signature to each of
-    them when the prefix is not automatically inherited.
-    """
+    """Build the playback URLs and the cookie that authorises them."""
     if not (key_name and key_value and cdn_base_url):
-        # Unsigned delivery is only viable when the bucket is public, which it is
-        # not; surfacing an unsigned URL would produce a silent 403 in the player.
+        # Unsigned delivery is not viable: the bucket is private, so handing back
+        # a bare URL would surface as an opaque 403 inside the player.
         raise RuntimeError("CDN signing is not configured.")
 
-    prefix = f"{cdn_base_url.rstrip('/')}/jobs/{job_id}/"
+    base = cdn_base_url.rstrip("/")
+    prefix = f"{base}/jobs/{job_id}/"
     expires_at = int(time.time()) + ttl_seconds
-    query = sign_url_prefix(
-        url_prefix=prefix, key_name=key_name, key_value=key_value, expires_at=expires_at
-    )
 
     return {
-        "hls_url": f"{prefix}hls/{playlist}?{query}",
-        "poster_url": f"{prefix}poster.jpg?{query}",
-        "signature": query,
+        "hls_url": f"{prefix}hls/{playlist}",
+        "poster_url": f"{prefix}poster.jpg",
+        "cookie_name": COOKIE_NAME,
+        "cookie_value": sign_cookie(
+            url_prefix=prefix,
+            key_name=key_name,
+            key_value=key_value,
+            expires_at=expires_at,
+        ),
+        # Path deliberately matches the signed prefix, so one browser can hold
+        # valid cookies for several jobs at once.
+        "cookie_path": f"/jobs/{job_id}/",
         "expires_at": expires_at,
         "url_prefix": prefix,
     }

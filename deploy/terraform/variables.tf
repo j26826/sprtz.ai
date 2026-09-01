@@ -167,8 +167,20 @@ variable "cdn_domain" {
 
 variable "hls_signed_url_ttl_seconds" {
   type        = number
-  description = "Lifetime of a Cloud CDN signed URL prefix handed to the player."
+  description = "Lifetime of the Cloud CDN signed cookie handed to the player."
   default     = 21600 # 6 hours — long enough to review a full match in one sitting.
+}
+
+variable "cdn_cookie_domain" {
+  type        = string
+  description = <<-EOT
+    Domain the Cloud-CDN-Cookie is set on, e.g. ".sprtz.ai". A browser only sends
+    the cookie to the CDN if the CDN host falls under it, so the API and the CDN
+    must share a registrable domain (api.sprtz.ai + cdn.sprtz.ai). Leave empty on
+    the default *.run.app hostnames: run.app is on the Public Suffix List, so no
+    cookie can span two services there and playback will not authorise.
+  EOT
+  default     = ""
 }
 
 variable "rerank_overfetch" {
