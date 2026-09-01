@@ -273,9 +273,37 @@ the UI updates without any polling or websocket of our own.
    against the live APIs before anything is created. Firestore's location is
    immutable once the database exists and Vertex is not offered everywhere, so
    this is much cheaper to catch here than mid-apply.
-4. **Terraform apply** — enables every API and creates all resources.
-5. **Deploy the agent** — last, because its tools are the MCP services Terraform
+4. **Bootstrap** — `deploy/scripts/bootstrap.sh` idempotently creates the two
+   resources Terraform cannot own: the state bucket (it would be holding the
+   state that manages it) and the Artifact Registry repository (images are
+   pushed before the full apply). The apply then adopts the registry with a
+   guarded `terraform import`.
+5. **Terraform apply** — enables every API and creates everything else.
+6. **Deploy the agent** — last, because its tools are the MCP services Terraform
    just created.
+
+### CI permissions
+
+The trigger's service account needs `roles/editor` **plus**
+`roles/resourcemanager.projectIamAdmin`, `roles/iap.admin` and
+`roles/firebaserules.admin`. Editor alone cannot create project IAM bindings,
+IAP access bindings, or a Firestore rules release.
+
+A service account with no roles produces no error — the build stays `PENDING`
+forever, which reads as a queue backlog rather than a permissions failure.
+
+### Two silent PENDING traps
+
+Cloud Build reports both of these as an ordinary queue wait, with no error and
+no failed step:
+
+- **A service account with no roles.** The build never starts.
+- **An unavailable machine type.** `E2_HIGHCPU_8` is accepted in us-south1 but
+  has no capacity there, so the build queues indefinitely. The pipeline
+  deliberately sets no `machineType` and uses the default pool, which starts
+  immediately.
+
+If a build sits in `PENDING`, check those two before anything else.
 
 ### Regions
 
@@ -306,16 +334,16 @@ service account in `iam.tf`.
 
 ### Bootstrapping a clean project
 
-Terraform stores state in a GCS bucket it also creates, so the first apply runs
-without a backend:
-
 ```bash
-cd deploy/terraform
-terraform init -backend=false
-terraform apply -var-file=envs/dev.tfvars -var="project_id=<project>"
+PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/preflight.sh
+PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/bootstrap.sh
 
-# then migrate state into the bucket it just created
-terraform init -migrate-state \
-  -backend-config="bucket=$(terraform output -raw tf_state_bucket)" \
+cd deploy/terraform
+terraform init \
+  -backend-config="bucket=<project>-sprtz-dev-tfstate" \
   -backend-config="prefix=terraform/dev"
+terraform apply -var-file=envs/dev.tfvars -var="project_id=<project>"
 ```
+
+CI runs the same two scripts, so pushing to `main` on a clean project works
+without any of this being done by hand.

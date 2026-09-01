@@ -78,19 +78,19 @@ docs/ARCHITECTURE.md    how and why the pieces fit
 # 1. Confirm the target regions can host everything.
 PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/preflight.sh
 
-# 2. First apply (no backend yet — Terraform creates its own state bucket).
-cd deploy/terraform
-terraform init -backend=false
-terraform apply -var-file=envs/dev.tfvars -var="project_id=<project>"
+# 2. Create the two resources Terraform cannot own (state bucket, registry).
+PROJECT_ID=<project> REGION=us-south1 bash deploy/scripts/bootstrap.sh
 
-# 3. Move state into the bucket it just made.
-terraform init -migrate-state \
-  -backend-config="bucket=$(terraform output -raw tf_state_bucket)" \
-  -backend-config="prefix=terraform/dev"
+# 3. Apply.
+cd deploy/terraform
+terraform init -backend-config="bucket=<project>-sprtz-dev-tfstate" \
+               -backend-config="prefix=terraform/dev"
+terraform apply -var-file=envs/dev.tfvars -var="project_id=<project>"
 ```
 
 Then push to `main` and Cloud Build takes over: test → build four images →
-preflight → `terraform apply` → deploy the agent.
+preflight + bootstrap → `terraform apply` → deploy the agent. The pipeline runs
+`bootstrap.sh` itself, so a clean project needs nothing done by hand.
 
 Before the first apply, edit `deploy/terraform/envs/dev.tfvars`:
 
@@ -100,6 +100,35 @@ Before the first apply, edit `deploy/terraform/envs/dev.tfvars`:
 | `iap_members` | Who may reach the editor, e.g. `["user:you@example.com"]`. |
 | `cdn_domain` | Needed for real playback — an HTTPS page cannot load HTTP HLS. Point its A record at the `cdn_ip` output, then re-apply. |
 | `google_oauth_client_id/secret` | Optional; enables Google sign-in. Without it the tenant ships email/password only. |
+
+### The trigger's service account
+
+Cloud Build runs as whatever service account the trigger names, and that account
+needs more than `roles/editor`. Editor cannot create project IAM bindings, IAP
+access bindings, or a Firestore rules release, all of which Terraform does. Grant
+it `roles/editor` plus:
+
+```
+roles/resourcemanager.projectIamAdmin
+roles/iap.admin
+roles/firebaserules.admin
+```
+
+A trigger whose service account has no roles does not fail — the build sits in
+`PENDING` indefinitely, which looks like a queue backlog rather than a
+permissions problem.
+
+### Why bootstrap.sh exists
+
+Two resources cannot be owned by the Terraform that needs them:
+
+- **The state bucket** would be holding the state that manages it. The first
+  `init` would have nowhere to write, and a `destroy` would delete its own
+  backend. Its name is deterministic (`<project>-<app>-<env>-tfstate`) so CI can
+  derive it without reading state.
+- **The Artifact Registry repository** has to exist before CI pushes images,
+  which happens before the full apply. The first apply adopts it with a guarded
+  `terraform import`.
 
 ### Regions
 
