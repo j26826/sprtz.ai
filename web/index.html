@@ -3,157 +3,57 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SPRTZ AI Editor</title>
-  <meta name="description" content="Find the key moments in a match and turn them into short-form clips." />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234ade80'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='800' text-anchor='middle' fill='%23062a16'>S</text></svg>" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
-  <!-- Runtime configuration, written by the container entrypoint so one image
-       promotes between environments unchanged. -->
+  <title>SPRTZ AI</title>
+  <meta name="description" content="Ask for a moment, an edit, a cut, or a post. The agent watches the match and cuts it." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23f3f2f2'/><rect x='9' y='9' width='14' height='14' fill='%23ec3013'/></svg>" />
+  <link rel="stylesheet" href="/ds/styles.css" />
+  <link rel="stylesheet" href="/app.css" />
   <script src="/config.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
 </head>
 <body>
 
-<!-- Sign-in gate. IAP has already authenticated the user at the edge; this
-     second sign-in is what gives the browser an Identity Platform token so it
-     can open Firestore listeners directly for realtime updates. -->
+<!-- IAP authenticates at the edge; this sign-in gives the browser an Identity
+     Platform token so it can open Firestore listeners for realtime updates. -->
 <div class="signin" id="signin">
   <div class="signin-card">
-    <div class="brand-mark">S</div>
-    <h1>SPRTZ AI Editor</h1>
-    <p>Sign in to analyse a match and pull short-form clips out of it.</p>
-    <button class="btn btn-primary btn-block" id="signin-btn">Continue with Google</button>
+    <div class="brand-mark"></div>
+    <h1>Sports Agent</h1>
+    <p>Sign in to analyse a match and cut it into short-form clips.</p>
+    <button class="btn-solid" id="signin-btn" style="padding:11px 18px">Continue with Google</button>
     <div class="error-note hidden" id="signin-error"></div>
   </div>
 </div>
 
-<div class="app hidden" id="app">
+<div class="shell hidden" id="app">
 
-  <!-- ---------- Left rail ---------- -->
-  <nav class="rail">
+  <header class="app-header">
     <div class="brand">
-      <div class="brand-mark">S</div>
-      <div class="brand-name">SPRTZ <span>AI</span></div>
+      <div class="brand-mark"></div>
+      <div class="brand-name">Sports Agent</div>
     </div>
-
-    <div class="rail-section">Matches</div>
-    <div style="padding: 0 10px 8px;">
-      <button class="btn btn-primary btn-block btn-sm" id="upload-btn">Upload a match</button>
-      <input type="file" id="file-input" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" class="hidden" />
+    <div class="header-context">
+      <div class="game-title" id="game-title">No match loaded</div>
+      <div class="context-line" id="context-line">Upload a recording to begin</div>
     </div>
+    <button class="header-btn" id="new-session">New session</button>
+  </header>
 
-    <div id="upload-progress" class="upload-progress hidden">
-      <div class="upload-name" id="upload-name"></div>
-      <div class="upload-bar"><i id="upload-bar-fill" style="width:0%"></i></div>
-      <div class="upload-pct" id="upload-pct">0%</div>
-    </div>
+  <div class="scroll" id="scroll">
+    <div class="transcript" id="transcript"></div>
+  </div>
 
-    <div class="job-list" id="job-list">
-      <div class="empty" style="padding:24px 12px;">No matches yet.</div>
-    </div>
-
-    <div class="rail-foot">
-      <div class="user">
-        <div class="avatar" id="user-avatar">?</div>
-        <div class="user-email" id="user-email">…</div>
-      </div>
-    </div>
-  </nav>
-
-  <!-- ---------- Stage ---------- -->
-  <main class="stage">
-    <header class="stage-head">
-      <div style="min-width:0;">
-        <div class="stage-title" id="stage-title">No match selected</div>
-        <div class="stage-sub" id="stage-sub">Upload a match to get started</div>
-      </div>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <span class="pill hidden" id="status-pill"><i class="dot"></i><span id="status-text"></span></span>
-        <button class="btn btn-sm" id="analyze-btn" disabled>Analyse</button>
-      </div>
-    </header>
-
-    <div class="stages" id="stage-steps"></div>
-    <div class="stage-labels">
-      <span>Ingest</span><span>Playback</span><span>Analysis</span>
-      <span>Clips</span><span>Captions</span><span>Ready</span>
-    </div>
-
-    <div class="player-wrap">
-      <div class="player" id="player">
-        <video id="video" playsinline preload="metadata"></video>
-        <div class="player-empty" id="player-empty">
-          <div>
-            <strong>Nothing loaded</strong>
-            Select a match, or upload one. Playback becomes available once the
-            video has been packaged for streaming.
-          </div>
-        </div>
-        <div class="range-lock hidden" id="range-lock">
-          <span id="range-lock-text"></span>
-          <button id="range-lock-clear" title="Play the full match">&times;</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="transport">
-      <button class="icon-btn" id="play-btn" disabled aria-label="Play or pause">▶</button>
-      <button class="icon-btn" id="prev-btn" disabled aria-label="Previous moment">⏮</button>
-      <button class="icon-btn" id="next-btn" disabled aria-label="Next moment">⏭</button>
-      <div class="timecode"><b id="tc-current">0:00</b> / <span id="tc-total">0:00</span></div>
-      <div style="flex:1"></div>
-      <div class="timecode" id="moment-counter"></div>
-    </div>
-
-    <div class="timeline-block">
-      <div class="timeline" id="timeline">
-        <div class="timeline-progress" id="timeline-progress" style="width:0%"></div>
-      </div>
-      <div class="legend">
-        <span><i style="background:var(--offense)"></i>Offense</span>
-        <span><i style="background:var(--defense)"></i>Defense</span>
-        <span><i style="background:var(--transition)"></i>Transition</span>
-        <span><i style="background:var(--officiating)"></i>Officiating</span>
-        <span><i style="background:var(--tactical)"></i>Tactical</span>
-      </div>
-    </div>
-  </main>
-
-  <!-- ---------- Right aside ---------- -->
-  <aside class="aside">
-    <div class="tabs" role="tablist">
-      <button class="tab" role="tab" data-tab="clips" aria-selected="true">
-        Clips <span class="tab-count" id="count-clips">0</span>
-      </button>
-      <button class="tab" role="tab" data-tab="moments" aria-selected="false">
-        Moments <span class="tab-count" id="count-moments">0</span>
-      </button>
-      <button class="tab" role="tab" data-tab="activity" aria-selected="false">Activity</button>
-    </div>
-
-    <div class="search-row" id="search-row">
-      <input class="input" id="search-input" placeholder="Search moments by meaning…" />
-      <button class="btn btn-sm" id="search-btn">Search</button>
-    </div>
-
-    <div class="panel" id="panel"></div>
-
-    <div class="chat">
-      <div class="chat-log" id="chat-log">
-        <div class="msg msg-agent">
-          <div class="msg-role">Sprtz</div>
-          <div class="msg-body">Ask me about a match, or tell me how to re-cut a clip. I can also search by what happened — try "the keeper kept them in it".</div>
-        </div>
-      </div>
-      <form class="chat-form" id="chat-form">
-        <input class="input" id="chat-input" placeholder="Ask Sprtz…" autocomplete="off" />
-        <button class="btn btn-primary btn-sm" type="submit" id="chat-send">Send</button>
+  <div class="composer">
+    <div class="suggestions" id="suggestions"></div>
+    <div class="composer-inner">
+      <form class="composer-box" id="composer">
+        <input class="composer-input" id="draft" autocomplete="off"
+               placeholder="Ask for a moment, an edit, a cut, or a post &mdash; e.g. &ldquo;every wing shot in the second half, 30 seconds, vertical&rdquo;" />
+        <button class="composer-send" type="submit" id="send">Send</button>
       </form>
+      <div class="footer-line" id="footer-line">Enter to send &middot; the agent edits the reel in place &mdash; no timeline required</div>
     </div>
-  </aside>
+  </div>
 </div>
 
 <script type="module" src="/app.js"></script>

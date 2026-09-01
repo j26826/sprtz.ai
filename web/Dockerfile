@@ -5,10 +5,13 @@ RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY index.html /usr/share/nginx/html/index.html
 COPY src/app.js /usr/share/nginx/html/app.js
-COPY src/styles.css /usr/share/nginx/html/styles.css
+COPY src/app.css /usr/share/nginx/html/app.css
+# The Modernist design system, vendored. It is the source of truth for every
+# colour, space and radius the app uses.
+COPY src/ds/ /usr/share/nginx/html/ds/
 COPY entrypoint.sh /entrypoint.sh
 
-# nginx needs to write the generated config.js and its temp dirs at runtime.
+# nginx writes the generated config.js and its temp dirs at runtime.
 RUN chmod +x /entrypoint.sh \
     && chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx \
     && mkdir -p /tmp/client_body && chown -R nginx:nginx /tmp
