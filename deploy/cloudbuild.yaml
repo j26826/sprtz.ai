@@ -25,10 +25,44 @@ timeout: 3600s
 
 steps:
 
+  # ---------- Preflight --------------------------------------------------------
+  # Region support is checked before Terraform creates anything, because
+  # Firestore's location is immutable and Vertex is not in every region.
+
+  - id: preflight
+    name: gcr.io/cloud-builders/gcloud
+    waitFor: ["-"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        PROJECT_ID=$PROJECT_ID REGION=${_REGION} bash deploy/scripts/preflight.sh
+
+  # ---------- Bootstrap --------------------------------------------------------
+  # The state bucket and the container registry must exist before Terraform can
+  # initialise or CI can push. Neither can be owned by the apply that needs them.
+
+  - id: bootstrap
+    name: gcr.io/cloud-builders/gcloud
+    waitFor: ["-"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        PROJECT_ID=$PROJECT_ID \
+        REGION=${_REGION} \
+        APP_NAME=${_APP_NAME} \
+        ENVIRONMENT=${_ENVIRONMENT} \
+        AR_REPO=${_AR_REPO} \
+        bash deploy/scripts/bootstrap.sh
+
   # ---------- Verify -----------------------------------------------------------
 
   - id: agent-tests
     name: python:3.12-slim
+    waitFor: ["-"]
     entrypoint: bash
     args:
       - -c
@@ -42,6 +76,7 @@ steps:
 
   - id: mcp-tests
     name: python:3.12-slim
+    waitFor: ["-"]
     entrypoint: bash
     args:
       - -c
@@ -119,39 +154,6 @@ steps:
         for image in api web mcp-catalog mcp-media; do
           docker push --all-tags ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$$image
         done
-
-  # ---------- Preflight --------------------------------------------------------
-  # Region support is checked before Terraform creates anything, because
-  # Firestore's location is immutable and Vertex is not in every region.
-
-  - id: preflight
-    name: gcr.io/cloud-builders/gcloud
-    waitFor: ["-"]
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        PROJECT_ID=$PROJECT_ID REGION=${_REGION} bash deploy/scripts/preflight.sh
-
-  # ---------- Bootstrap --------------------------------------------------------
-  # The state bucket and the container registry must exist before Terraform can
-  # initialise or CI can push. Neither can be owned by the apply that needs them.
-
-  - id: bootstrap
-    name: gcr.io/cloud-builders/gcloud
-    waitFor: ["-"]
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        set -euo pipefail
-        PROJECT_ID=$PROJECT_ID \
-        REGION=${_REGION} \
-        APP_NAME=${_APP_NAME} \
-        ENVIRONMENT=${_ENVIRONMENT} \
-        AR_REPO=${_AR_REPO} \
-        bash deploy/scripts/bootstrap.sh
 
   # ---------- Provision --------------------------------------------------------
 
