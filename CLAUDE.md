@@ -167,10 +167,17 @@ indexes carry `ignore_changes = [fields]`. Change a vector definition by
 deleting the index and re-applying, never by editing in place.
 
 **Agent Runtime reserves `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`.**
-Supplying either fails outright. It injects them itself. This bites in **two**
-places that must stay in step — `deploy/terraform/agent_runtime.tf` and the
-`env_vars` in `agents/deployment/deploy.py`. The latter now refuses to run if a
-reserved name reappears, because fixing only one of the two costs a full build.
+Supplying either fails outright — it injects them itself. `deploy.py` refuses to
+run if a reserved name reappears in `--env`.
+
+**The Agent Runtime engine is not a Terraform resource, on purpose.** Terraform's
+`google_vertex_ai_reasoning_engine` creates it with `spec.deployment_source`,
+while the SDK's `update()` sends `spec.package_spec`, and the API refuses to move
+an engine from one to the other. So `agents/deployment/deploy.py` owns the whole
+lifecycle: Terraform publishes `agent_display_name`, the script creates-or-updates
+by that name, and the API resolves it the same way. Everything the engine needs at
+runtime is passed from Terraform outputs through the `deploy-agent` step — if you
+add an env var the agent reads, add it there too or it will be silently absent.
 
 **Bootstrap ordering.** The state bucket and Artifact Registry repo cannot be
 owned by the Terraform that needs them — `deploy/scripts/bootstrap.sh` creates

@@ -211,10 +211,14 @@ steps:
         apt-get update -qq && apt-get install -y -qq jq curl
         pip install --quiet uv
 
-        AGENT_RESOURCE=$(jq -r '.agent_engine_resource.value' /workspace/tf_outputs.json)
-        VERTEX_REGION=$(jq -r '.vertex_region.value' /workspace/tf_outputs.json)
-        AGENT_SA=$(jq -r '.agent_service_account.value' /workspace/tf_outputs.json)
-        LOGS_BUCKET=$(jq -r '.agent_logs_bucket.value // empty' /workspace/tf_outputs.json)
+        # The engine is created by the SDK, not Terraform, so everything it
+        # needs at runtime is read out of the outputs and passed through.
+        tf() { jq -r ".$$1.value // empty" /workspace/tf_outputs.json; }
+
+        DISPLAY_NAME=$$(tf agent_display_name)
+        VERTEX_REGION=$$(tf vertex_region)
+        AGENT_SA=$$(tf agent_service_account)
+        LOGS_BUCKET=$$(tf agent_logs_bucket)
 
         cd agents
         uv sync --no-dev
@@ -223,10 +227,21 @@ steps:
         uv run python deployment/deploy.py \
           --project "$PROJECT_ID" \
           --location "$$VERTEX_REGION" \
-          --resource-name "$$AGENT_RESOURCE" \
+          --display-name "$$DISPLAY_NAME" \
           --service-account "$$AGENT_SA" \
           --logs-bucket "$$LOGS_BUCKET" \
-          --commit "$SHORT_SHA"
+          --commit "$SHORT_SHA" \
+          --env "SPRTZ_MODEL=$$(tf gemini_model)" \
+          --env "SPRTZ_EMBEDDING_MODEL=$$(tf embedding_model)" \
+          --env "SPRTZ_EMBEDDING_DIMENSIONS=$$(tf embedding_dimensions)" \
+          --env "MCP_CATALOG_URL=$$(tf mcp_catalog_url)" \
+          --env "MCP_MEDIA_URL=$$(tf mcp_media_url)" \
+          --env "UPLOADS_BUCKET=$$(tf uploads_bucket)" \
+          --env "MEDIA_BUCKET=$$(tf media_bucket)" \
+          --env "HLS_BUCKET=$$(tf hls_bucket)" \
+          --env "CDN_BASE_URL=$$(tf cdn_base_url)" \
+          --env "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true" \
+          --env "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true"
 
   - id: summary
     name: gcr.io/cloud-builders/gcloud

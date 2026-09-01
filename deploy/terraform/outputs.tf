@@ -18,14 +18,29 @@ output "mcp_media_url" {
   value       = google_cloud_run_v2_service.mcp_media.uri
 }
 
+output "embedding_model" {
+  description = "Embedding model backing semantic search."
+  value       = var.embedding_model
+}
+
+output "embedding_dimensions" {
+  description = "Embedding width. Must match the Firestore vector index."
+  value       = var.embedding_dimensions
+}
+
+output "gemini_model" {
+  description = "Gemini model the agent runs on."
+  value       = var.gemini_model
+}
+
 output "vertex_region" {
   description = "Region hosting Agent Runtime and Gemini."
   value       = var.vertex_region
 }
 
-output "agent_engine_resource" {
-  description = "Fully-qualified Agent Runtime resource name for the producer agent."
-  value       = google_vertex_ai_reasoning_engine.producer.name
+output "agent_display_name" {
+  description = "Display name the deploy script creates the Agent Runtime engine under."
+  value       = local.agent_display_name
 }
 
 output "uploads_bucket" {

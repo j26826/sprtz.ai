@@ -1,9 +1,20 @@
-"""Deploy the Sprtz agent package to an existing Agent Runtime resource.
+"""Create or update the Sprtz agent on Vertex AI Agent Runtime.
 
-Terraform creates the resource with a placeholder package and then ignores
-source changes, so this script owns the code from the first deploy onward. It
-updates in place rather than creating a new resource, because the resource name
-is baked into the API service's configuration.
+This script owns the engine's whole lifecycle, deliberately.
+
+An earlier design had Terraform create the engine from a seed source archive
+and this script update it afterwards. That cannot work: Terraform's
+`google_vertex_ai_reasoning_engine` creates the engine with
+`spec.deployment_source`, while the SDK's `update()` sends `spec.package_spec`,
+and the API refuses to move an engine from one to the other —
+
+    Cannot update the agent engine deployed with spec.deployment_source to use
+    spec.package_spec. Please continue using spec.deployment_source for updates.
+
+So the engine is not a Terraform resource. Terraform publishes the display name
+(`agent_display_name`) that both sides agree on; this script looks the engine up
+by that name, creates it when absent and updates it when present. Nothing has to
+discover an id the other invented.
 """
 
 from __future__ import annotations
@@ -15,45 +26,80 @@ import sys
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("deploy")
 
-
+# Agent Runtime injects these and rejects the request if they are supplied.
 RESERVED_ENV = ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION")
-
-
-def normalize_resource_name(value: str, project: str, location: str) -> str:
-    """Return a fully-qualified reasoningEngines path.
-
-    Terraform's `name` attribute for google_vertex_ai_reasoning_engine is not
-    guaranteed to be the full path — depending on provider version it can be a
-    bare numeric id, or a path keyed by project number rather than id. The SDK
-    only accepts the full form, so normalize here instead of discovering the
-    difference during a deploy.
-    """
-    value = (value or "").strip()
-    if not value:
-        raise ValueError("No Agent Runtime resource name configured.")
-    if value.startswith("projects/"):
-        return value
-    return f"projects/{project}/locations/{location}/reasoningEngines/{value.rsplit('/', 1)[-1]}"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", required=True)
     parser.add_argument("--location", required=True)
-    parser.add_argument(
-        "--resource-name",
-        required=True,
-        help="Full Agent Runtime resource name from the Terraform output.",
-    )
+    parser.add_argument("--display-name", required=True)
     parser.add_argument("--service-account", default="")
     parser.add_argument("--logs-bucket", default="")
     parser.add_argument("--commit", default="")
     parser.add_argument(
-        "--requirements",
-        default="requirements.txt",
-        help="Requirements file exported by the build.",
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Environment variable for the deployed agent. Repeatable.",
     )
+    parser.add_argument("--requirements", default="requirements.txt")
     return parser.parse_args()
+
+
+def build_env(pairs: list[str], logs_bucket: str, commit: str) -> dict[str, str]:
+    env: dict[str, str] = {"GOOGLE_GENAI_USE_VERTEXAI": "True"}
+    for pair in pairs:
+        key, _, value = pair.partition("=")
+        key = key.strip()
+        if key and value:
+            env[key] = value
+    if logs_bucket:
+        env["LOGS_BUCKET_NAME"] = logs_bucket
+    if commit:
+        env["COMMIT_SHA"] = commit
+
+    clashes = sorted(set(env) & set(RESERVED_ENV))
+    if clashes:
+        raise SystemExit(
+            f"Agent Runtime reserves {', '.join(clashes)}; remove them from --env."
+        )
+    return env
+
+
+def read_requirements(path: str) -> list[str]:
+    with open(path) as handle:
+        return [
+            line.strip()
+            for line in handle
+            if line.strip() and not line.startswith(("#", "-e"))
+        ]
+
+
+def find_existing(agent_engines, display_name: str):
+    """Return the engine with this display name, or None.
+
+    Matched exactly rather than by the server-side filter alone, so a name that
+    is a prefix of another cannot be updated by mistake.
+    """
+    try:
+        matches = [
+            engine
+            for engine in agent_engines.list(filter=f'display_name="{display_name}"')
+            if getattr(engine, "display_name", None) == display_name
+        ]
+    except Exception:
+        logger.exception("could not list existing agent engines")
+        raise
+
+    if len(matches) > 1:
+        raise SystemExit(
+            f"{len(matches)} engines share the display name {display_name!r}. "
+            "Delete the duplicates before deploying."
+        )
+    return matches[0] if matches else None
 
 
 def main() -> int:
@@ -68,61 +114,40 @@ def main() -> int:
         staging_bucket=f"gs://{args.logs_bucket}" if args.logs_bucket else None,
     )
 
-    # Imported after vertexai.init so the agent picks up the right project.
+    # Imported after vertexai.init so the agent resolves the right project.
     from sprtz_agents.agent_runtime_app import agent_runtime
 
-    # Agent Runtime reserves GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION and
-    # rejects the update outright if either is supplied. It injects both itself,
-    # and sprtz_agents.config reads them from the environment either way. The
-    # same constraint applies to the Terraform resource — keep the two in step.
-    env_vars = {
-        "GOOGLE_GENAI_USE_VERTEXAI": "True",
+    env_vars = build_env(args.env, args.logs_bucket, args.commit)
+    requirements = read_requirements(args.requirements)
+
+    common = {
+        "requirements": requirements,
+        "extra_packages": ["sprtz_agents"],
+        "env_vars": env_vars,
+        "display_name": args.display_name,
+        "description": "Sprtz AI sports video analysis agent.",
     }
-    if args.logs_bucket:
-        env_vars["LOGS_BUCKET_NAME"] = args.logs_bucket
-    if args.commit:
-        env_vars["COMMIT_SHA"] = args.commit
+    if args.service_account:
+        common["service_account"] = args.service_account
 
-    clashes = sorted(set(env_vars) & set(RESERVED_ENV))
-    if clashes:
-        raise SystemExit(
-            f"Agent Runtime reserves {', '.join(clashes)}; remove them from env_vars."
-        )
-
-    with open(args.requirements) as handle:
-        requirements = [
-            line.strip()
-            for line in handle
-            if line.strip() and not line.startswith(("#", "-e"))
-        ]
-
-    resource_name = normalize_resource_name(args.resource_name, args.project, args.location)
-    logger.info("updating %s with %d requirements", resource_name, len(requirements))
+    existing = find_existing(agent_engines, args.display_name)
 
     try:
-        remote = agent_engines.get(resource_name)
-    except Exception:
-        logger.exception(
-            "could not read %s. Terraform creates this resource; run terraform "
-            "apply before deploying.",
-            resource_name,
-        )
-        return 1
-
-    try:
-        remote.update(
-            agent_engine=agent_runtime,
-            requirements=requirements,
-            extra_packages=["sprtz_agents"],
-            env_vars=env_vars,
-            display_name="sprtz-producer",
-            description="Sprtz AI sports video analysis agent.",
-        )
+        if existing is None:
+            logger.info(
+                "creating %r with %d requirements", args.display_name, len(requirements)
+            )
+            remote = agent_engines.create(agent_engine=agent_runtime, **common)
+        else:
+            logger.info(
+                "updating %s with %d requirements", existing.resource_name, len(requirements)
+            )
+            remote = existing.update(agent_engine=agent_runtime, **common)
     except Exception:
         logger.exception("deployment failed")
         return 1
 
-    logger.info("deployed %s", resource_name)
+    logger.info("deployed %s", getattr(remote, "resource_name", args.display_name))
     return 0
 
 

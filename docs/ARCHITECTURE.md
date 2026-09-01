@@ -319,6 +319,15 @@ the UI updates without any polling or websocket of our own.
 6. **Deploy the agent** — last, because its tools are the MCP services Terraform
    just created.
 
+The Agent Runtime engine is deliberately *not* a Terraform resource. Terraform
+creates such an engine from a source archive (`spec.deployment_source`), the SDK
+updates it as a package (`spec.package_spec`), and the API will not move an
+engine between the two. `agents/deployment/deploy.py` therefore owns its
+lifecycle end to end: Terraform publishes the `agent_display_name` both sides
+agree on, the script creates or updates the engine under that name, and the API
+resolves it the same way — so neither side has to discover an id the other
+invented.
+
 ### CI permissions
 
 The trigger's service account needs `roles/editor` **plus**

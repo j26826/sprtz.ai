@@ -26,25 +26,51 @@ _engine = None
 
 
 def _agent_engine(settings: Settings):
-    """Resolve the deployed Agent Runtime once and reuse it."""
-    global _engine
-    if _engine is None:
-        if not settings.agent_engine_resource:
-            raise RuntimeError("AGENT_ENGINE_RESOURCE is not configured.")
-        import vertexai
-        from vertexai import agent_engines
+    """Resolve the deployed Agent Runtime once and reuse it.
 
-        # Terraform's name attribute is not reliably a full resource path; the
-        # SDK only accepts the full form.
-        resource = settings.agent_engine_resource
+    Prefers an explicit resource name, falling back to a lookup by the display
+    name Terraform and the deploy script agree on.
+    """
+    global _engine
+    if _engine is not None:
+        return _engine
+
+    import vertexai
+    from vertexai import agent_engines
+
+    vertexai.init(project=settings.project_id, location=settings.location)
+
+    resource = settings.agent_engine_resource
+    if resource:
+        # Terraform's name attribute is not reliably a full path; the SDK only
+        # accepts the full form.
         if not resource.startswith("projects/"):
             resource = (
                 f"projects/{settings.project_id}/locations/{settings.location}"
                 f"/reasoningEngines/{resource.rsplit('/', 1)[-1]}"
             )
-
-        vertexai.init(project=settings.project_id, location=settings.location)
         _engine = agent_engines.get(resource)
+        return _engine
+
+    display_name = settings.agent_engine_display_name
+    if not display_name:
+        raise RuntimeError(
+            "Neither AGENT_ENGINE_RESOURCE nor AGENT_ENGINE_DISPLAY_NAME is set."
+        )
+
+    matches = [
+        engine
+        for engine in agent_engines.list(filter=f'display_name="{display_name}"')
+        if getattr(engine, "display_name", None) == display_name
+    ]
+    if not matches:
+        raise RuntimeError(
+            f"No Agent Runtime engine named {display_name!r}. Has deploy-agent run?"
+        )
+    if len(matches) > 1:
+        raise RuntimeError(f"{len(matches)} engines share the name {display_name!r}.")
+
+    _engine = matches[0]
     return _engine
 
 

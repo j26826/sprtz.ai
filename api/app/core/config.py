@@ -26,6 +26,13 @@ class Settings:
 
     mcp_catalog_url: str = field(default_factory=lambda: os.environ.get("MCP_CATALOG_URL", ""))
     mcp_media_url: str = field(default_factory=lambda: os.environ.get("MCP_MEDIA_URL", ""))
+    # The engine is created by the deploy script, not Terraform, so the API
+    # resolves it by the display name both sides share rather than by an id
+    # Terraform never sees. AGENT_ENGINE_RESOURCE still wins when set, which
+    # keeps a manual override possible.
+    agent_engine_display_name: str = field(
+        default_factory=lambda: os.environ.get("AGENT_ENGINE_DISPLAY_NAME", "")
+    )
     agent_engine_resource: str = field(
         default_factory=lambda: os.environ.get("AGENT_ENGINE_RESOURCE", "")
     )
