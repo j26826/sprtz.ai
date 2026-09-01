@@ -167,8 +167,10 @@ indexes carry `ignore_changes = [fields]`. Change a vector definition by
 deleting the index and re-applying, never by editing in place.
 
 **Agent Runtime reserves `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`.**
-Supplying either in `deployment_spec.env` fails the resource outright. It
-injects them itself.
+Supplying either fails outright. It injects them itself. This bites in **two**
+places that must stay in step — `deploy/terraform/agent_runtime.tf` and the
+`env_vars` in `agents/deployment/deploy.py`. The latter now refuses to run if a
+reserved name reappears, because fixing only one of the two costs a full build.
 
 **Bootstrap ordering.** The state bucket and Artifact Registry repo cannot be
 owned by the Terraform that needs them — `deploy/scripts/bootstrap.sh` creates

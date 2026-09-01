@@ -16,6 +16,9 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("deploy")
 
 
+RESERVED_ENV = ("GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION")
+
+
 def normalize_resource_name(value: str, project: str, location: str) -> str:
     """Return a fully-qualified reasoningEngines path.
 
@@ -68,15 +71,23 @@ def main() -> int:
     # Imported after vertexai.init so the agent picks up the right project.
     from sprtz_agents.agent_runtime_app import agent_runtime
 
+    # Agent Runtime reserves GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION and
+    # rejects the update outright if either is supplied. It injects both itself,
+    # and sprtz_agents.config reads them from the environment either way. The
+    # same constraint applies to the Terraform resource — keep the two in step.
     env_vars = {
-        "GOOGLE_CLOUD_PROJECT": args.project,
-        "GOOGLE_CLOUD_LOCATION": args.location,
         "GOOGLE_GENAI_USE_VERTEXAI": "True",
     }
     if args.logs_bucket:
         env_vars["LOGS_BUCKET_NAME"] = args.logs_bucket
     if args.commit:
         env_vars["COMMIT_SHA"] = args.commit
+
+    clashes = sorted(set(env_vars) & set(RESERVED_ENV))
+    if clashes:
+        raise SystemExit(
+            f"Agent Runtime reserves {', '.join(clashes)}; remove them from env_vars."
+        )
 
     with open(args.requirements) as handle:
         requirements = [
