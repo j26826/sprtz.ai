@@ -42,10 +42,15 @@ else
     --project "$PROJECT_ID" \
     --location "$REGION" \
     --uniform-bucket-level-access
-  # Versioning is what makes a corrupted or half-written state recoverable.
-  gcloud storage buckets update "gs://$STATE_BUCKET" --versioning
   echo "✓ state bucket created"
 fi
+
+# Enforced whether or not this run created the bucket. A bucket that already
+# exists may have been made by something else — gcloud will happily auto-create
+# a staging bucket of the same name without versioning — and unversioned state
+# has no recovery path from a corrupted or half-written write.
+gcloud storage buckets update "gs://$STATE_BUCKET" --versioning --project "$PROJECT_ID" >/dev/null
+echo "✓ state bucket versioning on"
 
 # --- Artifact Registry --------------------------------------------------------
 if gcloud artifacts repositories describe "$AR_REPO" \

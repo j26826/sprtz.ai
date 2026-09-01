@@ -220,10 +220,10 @@ steps:
 
         uv run python deployment/deploy.py \
           --project "$PROJECT_ID" \
-          --location "$VERTEX_REGION" \
-          --resource-name "$AGENT_RESOURCE" \
-          --service-account "$AGENT_SA" \
-          --logs-bucket "$LOGS_BUCKET" \
+          --location "$$VERTEX_REGION" \
+          --resource-name "$$AGENT_RESOURCE" \
+          --service-account "$$AGENT_SA" \
+          --logs-bucket "$$LOGS_BUCKET" \
           --commit "$SHORT_SHA"
 
   - id: summary
