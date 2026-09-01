@@ -246,20 +246,33 @@ steps:
   - id: summary
     name: gcr.io/cloud-builders/gcloud
     waitFor: ["deploy-agent"]
-    entrypoint: bash
+    entrypoint: python3
     args:
       - -c
       - |
-        set -euo pipefail
-        apt-get install -y -qq jq >/dev/null 2>&1 || true
-        echo "──────────────────────────────────────────────"
-        echo " Sprtz AI deployed  (${_ENVIRONMENT} / ${_REGION})"
-        echo "──────────────────────────────────────────────"
-        cat /workspace/tf_outputs.json | jq -r '
-          "  Editor : \(.web_url.value)",
-          "  API    : \(.api_url.value)",
-          "  CDN    : \(.cdn_base_url.value)",
-          "  Agent  : \(.agent_engine_resource.value)"'
+        # python3 rather than jq: the gcloud builder ships python but not jq,
+        # and the apt-get that used to install it was suppressed with `|| true`,
+        # so a missing jq surfaced as a 127 that failed the whole build after a
+        # completely successful deploy.
+        import json
+        with open("/workspace/tf_outputs.json") as fh:
+            out = json.load(fh)
+        def v(key):
+            return (out.get(key) or {}).get("value", "(unset)")
+        line = "-" * 62
+        print(line)
+        print(" Sprtz AI deployed")
+        print(line)
+        for label, key in (
+            ("Editor", "web_url"),
+            ("API", "api_url"),
+            ("CDN", "cdn_base_url"),
+            ("Agent", "agent_display_name"),
+            ("MCP catalog", "mcp_catalog_url"),
+            ("MCP media", "mcp_media_url"),
+        ):
+            print(f"  {label:<12} {v(key)}")
+        print(line)
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/api:$SHORT_SHA
