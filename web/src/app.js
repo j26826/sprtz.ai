@@ -26,6 +26,9 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 const CONFIG = window.SPRTZ_CONFIG || {};
+// Empty means same-origin, which is how the load balancer serves it: `/` is
+// the SPA and `/api/*` is the API on one hostname. That removes CORS entirely
+// and lets the Identity Platform token travel on a plain relative fetch.
 const API = (CONFIG.apiBaseUrl || '').replace(/\/$/, '');
 const $ = (id) => document.getElementById(id);
 

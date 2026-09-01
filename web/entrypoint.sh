@@ -5,7 +5,7 @@ set -eu
 
 cat > /usr/share/nginx/html/config.js <<CONFIG
 window.SPRTZ_CONFIG = {
-  apiBaseUrl:         "${API_BASE_URL:-}",
+  apiBaseUrl:         "${API_BASE_URL:-}",   // empty = same-origin via the load balancer
   projectId:          "${GOOGLE_CLOUD_PROJECT:-}",
   firebaseApiKey:     "${FIREBASE_API_KEY:-}",
   firebaseAuthDomain: "${FIREBASE_AUTH_DOMAIN:-}",
