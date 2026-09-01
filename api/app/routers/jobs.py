@@ -5,11 +5,9 @@ from __future__ import annotations
 import datetime
 import logging
 import re
-import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from google.cloud import storage
 from pydantic import BaseModel, Field
 
@@ -92,7 +90,7 @@ async def create_upload_url(
             service_account_email=settings.signer_service_account or None,
             access_token=None,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("could not sign an upload URL")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -153,27 +151,23 @@ async def get_job(job_id: str, user: CallerIdentity = Depends(current_user)) -> 
     return await _load_owned_job(job_id, user)
 
 
-def _playlist_signature(job_id: str, settings: Settings) -> str:
-    return cdn.sign_query(
-        url_prefix=f"{settings.cdn_base_url.rstrip('/')}/jobs/{job_id}/",
-        key_name=settings.cdn_signing_key_name,
-        key_value=settings.cdn_signing_key,
-        expires_at=int(time.time()) + settings.cdn_signed_url_ttl,
-    )
-
-
 @router.get("/{job_id}/playback")
 async def get_playback(
     job_id: str,
-    request: Request,
+    response: Response,
     user: CallerIdentity = Depends(current_user),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    """Return the URL the editor should play.
+    """Return the HLS URL and set the Cloud CDN cookie that authorises it.
 
-    That URL points at this API, not the CDN: the playlists are rewritten here
-    so every segment reference carries a CDN signature. The CDN still delivers
-    all the video; only the few kilobytes of playlist text pass through here.
+    A cookie rather than a signed URL, because an HLS playlist references its
+    segments relatively: a query-string signature is dropped when the player
+    resolves them, so it would authorise the playlist and none of its several
+    thousand segments. The browser attaches a cookie to all of them.
+
+    This works because the CDN is served from the app's own hostname through the
+    load balancer. On separate hosts it could not be — the cookie would have to
+    span two domains, which is impossible on *.run.app.
     """
     job = await _load_owned_job(job_id, user)
     playback = job.get("playback") or {}
@@ -182,76 +176,42 @@ async def get_playback(
             status_code=status.HTTP_409_CONFLICT,
             detail="Playback is still being prepared for this job.",
         )
-    if not (settings.cdn_base_url and settings.cdn_signing_key_name and settings.cdn_signing_key):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="CDN signing is not configured.",
-        )
 
-    base = str(request.base_url).rstrip("/")
+    try:
+        signed = cdn.playback(
+            cdn_base_url=settings.cdn_base_url,
+            job_id=job_id,
+            key_name=settings.cdn_signing_key_name,
+            key_value=settings.cdn_signing_key,
+            ttl_seconds=settings.cdn_signed_url_ttl,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+
+    # Path-scoped to the job so several jobs can hold valid cookies at once,
+    # despite Cloud CDN fixing the cookie's name.
+    response.set_cookie(
+        key=signed["cookie_name"],
+        value=signed["cookie_value"],
+        domain=settings.cdn_cookie_domain or None,
+        path=signed["cookie_path"],
+        max_age=settings.cdn_signed_url_ttl,
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
+
     return {
         "job_id": job_id,
-        "hls_url": f"{base}/api/jobs/{job_id}/hls/master.m3u8",
-        "poster_url": f"{base}/api/jobs/{job_id}/hls/poster.jpg",
-        "expires_at": int(time.time()) + settings.cdn_signed_url_ttl,
+        "hls_url": signed["hls_url"],
+        "poster_url": signed["poster_url"],
+        "expires_at": signed["expires_at"],
         "renditions": playback.get("renditions", []),
         "segment_seconds": playback.get("segmentSeconds", 2),
         "duration_sec": (job.get("media") or {}).get("durationSec", 0.0),
     }
-
-
-@router.get("/{job_id}/hls/{filename}")
-async def get_playlist(
-    job_id: str,
-    filename: str,
-    request: Request,
-    user: CallerIdentity = Depends(current_user),
-    settings: Settings = Depends(get_settings),
-) -> Response:
-    """Serve a rewritten HLS playlist, or redirect anything else to the CDN.
-
-    Only playlists are read and rewritten here. A segment request that somehow
-    arrives is answered with a signed redirect rather than proxied, so video
-    bytes never traverse Cloud Run.
-    """
-    if "/" in filename or ".." in filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bad filename.")
-
-    await _load_owned_job(job_id, user)
-    signature = _playlist_signature(job_id, settings)
-    cdn_prefix = f"{settings.cdn_base_url.rstrip('/')}/jobs/{job_id}"
-
-    if not filename.endswith(".m3u8"):
-        target = (
-            f"{cdn_prefix}/{filename}?{signature}"
-            if filename == "poster.jpg"
-            else f"{cdn_prefix}/hls/{filename}?{signature}"
-        )
-        return RedirectResponse(url=target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-
-    blob_path = f"jobs/{job_id}/hls/{filename}"
-    try:
-        blob = _storage_client().bucket(settings.hls_bucket).blob(blob_path)
-        body = blob.download_as_text()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("could not read playlist %s: %s", blob_path, exc)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"No playlist {filename}."
-        ) from exc
-
-    rewritten = cdn.rewrite_playlist(
-        body,
-        cdn_base_url=settings.cdn_base_url,
-        job_id=job_id,
-        signature=signature,
-        api_playlist_base=f"{str(request.base_url).rstrip('/')}/api/jobs/{job_id}/hls",
-    )
-    return Response(
-        content=rewritten,
-        media_type="application/vnd.apple.mpegurl",
-        # Must not outlive the signature it carries.
-        headers={"Cache-Control": f"private, max-age={min(60, settings.cdn_signed_url_ttl)}"},
-    )
 
 
 @router.get("/{job_id}/moments")

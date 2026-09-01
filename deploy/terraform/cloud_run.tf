@@ -243,9 +243,10 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "HLS_BUCKET"
         value = google_storage_bucket.hls.name
       }
+      # Same hostname as the app, so the playback cookie is same-origin.
       env {
         name  = "CDN_BASE_URL"
-        value = local.cdn_base_url
+        value = local.app_url
       }
       env {
         name  = "CDN_SIGNING_KEY_NAME"
@@ -255,9 +256,12 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "CDN_SIGNED_URL_TTL"
         value = tostring(var.hls_signed_url_ttl_seconds)
       }
+      # The CDN is served from the app's own hostname, so the cookie needs no
+      # parent-domain trick — and none was possible on *.run.app, which is on
+      # the Public Suffix List.
       env {
         name  = "CDN_COOKIE_DOMAIN"
-        value = var.cdn_cookie_domain
+        value = var.cdn_cookie_domain != "" ? var.cdn_cookie_domain : local.app_host
       }
       env {
         name = "CDN_SIGNING_KEY"

@@ -98,6 +98,15 @@ resource "google_compute_url_map" "app" {
       paths   = ["/api/*"]
       service = google_compute_backend_service.api.id
     }
+
+    # HLS on the same hostname as the app. The objects already live at
+    # jobs/<id>/hls/... in the bucket, so this path maps straight through with
+    # no rewrite — and being same-origin is what makes signed *cookies* work,
+    # which is the only mechanism that authorises every segment of a playlist.
+    path_rule {
+      paths   = ["/jobs/*"]
+      service = google_compute_backend_bucket.hls.id
+    }
   }
 }
 
