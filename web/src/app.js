@@ -477,15 +477,19 @@ let playerFor = null;     // which moment playerEl is bound to
  * playlist and none of its thousands of segments. The browser attaches the
  * cookie to every one of them without the player knowing.
  */
+/**
+ * Fetch the playback URL.
+ *
+ * It points at the API, not the CDN: the API rewrites each playlist so every
+ * segment reference is an absolute CDN URL carrying a prefix signature. That
+ * keeps playback working on the default *.run.app hostnames — a signed cookie
+ * could not, since run.app is on the Public Suffix List and no cookie can span
+ * two services there. The CDN still delivers every byte of video; only the
+ * playlist text passes through the API.
+ */
 async function ensurePlaybackUrl() {
   if (playbackUrl) return playbackUrl;
   const p = await api(`/api/jobs/${state.jobId}/playback`);
-  if (p.cookie_set === false) {
-    throw new Error(
-      'Playback is not authorised: the CDN cookie could not be set. '
-      + 'The API and CDN need custom domains under one registrable domain.',
-    );
-  }
   playbackUrl = p.hls_url;
   return playbackUrl;
 }
@@ -535,9 +539,9 @@ async function mountPlayer() {
     hls = new window.Hls({
       startPosition: start,
       maxBufferLength: 30,
-      // Segment requests must carry the Cloud CDN cookie, and they are
-      // cross-origin, so credentials have to be opted into explicitly.
-      xhrSetup: (xhr) => { xhr.withCredentials = true; },
+      // Playlists come from the API and need the caller's credentials;
+      // segments are pre-signed CDN URLs and must not carry them.
+      xhrSetup: (xhr, url) => { xhr.withCredentials = url.includes('/api/jobs/'); },
     });
     hls.loadSource(url);
     hls.attachMedia(video);
