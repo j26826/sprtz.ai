@@ -107,7 +107,7 @@ steps:
 
   - id: push-images
     name: gcr.io/cloud-builders/docker
-    waitFor: ["build-api", "build-web", "build-mcp-catalog", "build-mcp-media"]
+    waitFor: ["build-api", "build-web", "build-mcp-catalog", "build-mcp-media", "bootstrap"]
     entrypoint: bash
     args:
       - -c
@@ -131,6 +131,25 @@ steps:
         set -euo pipefail
         PROJECT_ID=$PROJECT_ID REGION=${_REGION} bash deploy/scripts/preflight.sh
 
+  # ---------- Bootstrap --------------------------------------------------------
+  # The state bucket and the container registry must exist before Terraform can
+  # initialise or CI can push. Neither can be owned by the apply that needs them.
+
+  - id: bootstrap
+    name: gcr.io/cloud-builders/gcloud
+    waitFor: ["-"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        PROJECT_ID=$PROJECT_ID \
+        REGION=${_REGION} \
+        APP_NAME=${_APP_NAME} \
+        ENVIRONMENT=${_ENVIRONMENT} \
+        AR_REPO=${_AR_REPO} \
+        bash deploy/scripts/bootstrap.sh
+
   # ---------- Provision --------------------------------------------------------
 
   - id: terraform-apply
@@ -142,15 +161,35 @@ steps:
       - |
         set -eu
         cd deploy/terraform
+
+        # The trigger need not define _TF_STATE_BUCKET: the name is
+        # deterministic and matches what bootstrap.sh created.
+        STATE_BUCKET="${_TF_STATE_BUCKET}"
+        if [ -z "$$STATE_BUCKET" ]; then
+          STATE_BUCKET="$PROJECT_ID-${_APP_NAME}-${_ENVIRONMENT}-tfstate"
+        fi
+        echo "state: gs://$$STATE_BUCKET"
+
         terraform init -input=false \
-          -backend-config="bucket=${_TF_STATE_BUCKET}" \
+          -backend-config="bucket=$$STATE_BUCKET" \
           -backend-config="prefix=terraform/${_ENVIRONMENT}"
-        terraform apply -input=false -auto-approve \
-          -var="project_id=$PROJECT_ID" \
-          -var="region=${_REGION}" \
-          -var="environment=${_ENVIRONMENT}" \
-          -var="app_name=${_APP_NAME}" \
-          -var="image_tag=$SHORT_SHA" \
+
+        set -- -var="project_id=$PROJECT_ID" \
+               -var="region=${_REGION}" \
+               -var="environment=${_ENVIRONMENT}" \
+               -var="app_name=${_APP_NAME}" \
+               -var="image_tag=$SHORT_SHA"
+
+        # bootstrap.sh created the registry outside Terraform, so adopt it into
+        # state on the first run. Already-managed is the normal case.
+        if ! terraform state show google_artifact_registry_repository.containers >/dev/null 2>&1; then
+          echo "adopting the bootstrapped artifact registry"
+          terraform import "$$@" \
+            google_artifact_registry_repository.containers \
+            "projects/$PROJECT_ID/locations/${_REGION}/repositories/${_AR_REPO}" || true
+        fi
+
+        terraform apply -input=false -auto-approve "$$@"
         terraform output -json > /workspace/tf_outputs.json
 
   # ---------- Deploy the agent -------------------------------------------------
