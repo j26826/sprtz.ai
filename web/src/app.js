@@ -166,6 +166,8 @@ function selectJob(jobId) {
   state.clips = [];
   state.events = [];
   state.playing = null;
+  playbackUrl = null;
+  destroyPlayer();
 
   state.unsubscribe.push(onSnapshot(doc(db, 'jobs', jobId), (snap) => {
     if (snap.exists()) { state.job = { id: snap.id, ...snap.data() }; render(); }
@@ -245,16 +247,17 @@ function momentsCard(msg) {
   }).join('')}</div>`;
 }
 
+/**
+ * A slot, not the player itself.
+ *
+ * render() rebuilds the transcript's innerHTML, which would destroy a live
+ * <video> and restart the clip. Since the events subcollection updates
+ * continuously while an analysis runs, that would make a moment unwatchable.
+ * The player element is created once and re-parented into this slot after each
+ * render, so playback survives.
+ */
 function playerMarkup(m) {
-  return `
-    <div class="inline-player">
-      <video id="v-${esc(m.momentId)}" playsinline controls preload="none"></video>
-      <div class="player-bar">
-        <span>${clock(m.startSec)} → ${clock(m.endSec)}</span>
-        <span style="flex:1"></span>
-        <button class="link-btn" data-close-player="1">Close</button>
-      </div>
-    </div>`;
+  return `<div class="player-slot" data-slot="${esc(m.momentId)}"></div>`;
 }
 
 function ingestCard() {
@@ -463,6 +466,8 @@ function render() {
 
 let hls = null;
 let playbackUrl = null;
+let playerEl = null;      // survives innerHTML rebuilds
+let playerFor = null;     // which moment playerEl is bound to
 
 async function ensurePlaybackUrl() {
   if (playbackUrl) return playbackUrl;
@@ -471,17 +476,42 @@ async function ensurePlaybackUrl() {
   return playbackUrl;
 }
 
+function buildPlayerEl(m) {
+  const el = document.createElement('div');
+  el.className = 'inline-player';
+  el.innerHTML = `
+    <video playsinline controls preload="none"></video>
+    <div class="player-bar">
+      <span>${clock(m.startSec)} → ${clock(m.endSec)}</span>
+      <span style="flex:1"></span>
+      <button class="link-btn" data-close-player="1">Close</button>
+    </div>`;
+  return el;
+}
+
+/** Re-parent the live player into this render's slot, building it once. */
 async function mountPlayer() {
   const { momentId, start, end } = state.playing;
-  const video = $(`v-${momentId}`);
-  if (!video || video.dataset.mounted) return;
+  const slot = document.querySelector(`[data-slot="${CSS.escape(momentId)}"]`);
+  if (!slot) return;
+
+  if (playerFor !== momentId) {
+    destroyPlayer();
+    playerEl = buildPlayerEl(momentById(momentId) || { startSec: start, endSec: end });
+    playerFor = momentId;
+  }
+
+  if (playerEl.parentElement !== slot) slot.appendChild(playerEl);
+
+  const video = playerEl.querySelector('video');
+  if (video.dataset.mounted) return;
   video.dataset.mounted = '1';
 
   let url;
   try {
     url = await ensurePlaybackUrl();
   } catch (err) {
-    video.insertAdjacentHTML('afterend',
+    playerEl.insertAdjacentHTML('beforeend',
       `<div class="error-note">Playback is not ready yet: ${esc(err.message)}</div>`);
     return;
   }
@@ -505,11 +535,17 @@ async function mountPlayer() {
   });
 }
 
+function destroyPlayer() {
+  if (hls) { hls.destroy(); hls = null; }
+  if (playerEl?.parentElement) playerEl.remove();
+  playerEl = null;
+  playerFor = null;
+}
+
 function playMoment(momentId) {
   const m = momentById(momentId);
   if (!m) return;
   state.playing = { momentId, start: m.startSec, end: m.endSec };
-  playbackUrl = null;
   render();
 }
 
@@ -712,7 +748,7 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (t.dataset.play) { playMoment(t.dataset.play); return; }
-  if (t.dataset.closePlayer) { state.playing = null; render(); return; }
+  if (t.dataset.closePlayer) { state.playing = null; destroyPlayer(); render(); return; }
   if (t.dataset.add) {
     const m = momentById(t.dataset.add);
     ask(`Add the ${m?.label || 'moment'} at ${clock(m?.startSec || 0)} to the reel.`);
