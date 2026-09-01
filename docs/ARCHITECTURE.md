@@ -1,0 +1,321 @@
+# Sprtz AI — Architecture
+
+Sprtz AI turns a long-form sports video into a ranked set of short-form clips ready
+for TikTok, Instagram Reels and YouTube Shorts. Everything runs on Google Cloud
+native services and is provisioned by Terraform.
+
+```
+                         ┌──────────────────────────────────────┐
+  Browser ──► IAP ──────►│  web (Cloud Run, static SPA)         │
+   │  Identity Platform  │  "SPRTZ AI Editor"                   │
+   │                     └──────────────────────────────────────┘
+   │                                    │ REST (IAP-signed JWT)
+   │                                    ▼
+   │                     ┌──────────────────────────────────────┐
+   │                     │  api (Cloud Run, FastAPI)            │
+   │                     │  signed uploads · signed CDN URLs ·  │
+   │                     │  search · agent session proxy (SSE)  │
+   │                     └───────────┬──────────────────────────┘
+   │                                 │ streamQuery
+   │                                 ▼
+   │                     ┌──────────────────────────────────────┐
+   │                     │  Vertex AI Agent Runtime             │
+   │                     │  sprtz_producer (ADK)                │
+   │                     │       │                              │
+   │                     │       └─► Gemini 2.5 Flash ──────────┼──► gs:// source
+   │                     │           13 × 15-min segments,      │    (video_metadata
+   │                     │           concurrent, then merged    │     offsets)
+   │                     └───────────┬──────────────────────────┘
+   │                                 │ MCP (streamable HTTP, OIDC)
+   │                     ┌───────────┴───────────┐
+   │                     ▼                       ▼
+   │        ┌────────────────────┐   ┌────────────────────────────┐
+   │        │ mcp-media          │   │ mcp-catalog                │
+   │        │ (Cloud Run, ffmpeg)│   │ Firestore · embeddings ·   │
+   │        │ probe · HLS · cut  │   │ KNN + Gemini rerank        │
+   │        └─────────┬──────────┘   └─────────┬──────────────────┘
+   │                  │ HLS package            │
+   │                  ▼                        ▼
+   │        ┌────────────────────┐      Firestore (native mode)
+   │        │ GCS (hls bucket)   │      jobs · moments · clips · events
+   │        └─────────┬──────────┘      + vector index (KNN, 768-d)
+   │                  │                        │
+   │                  ▼                        │
+   │        Cloud CDN + external ALB           │
+   │        (signed URL prefixes)              │
+   │                  │                        │
+   └── HLS playback ──┘        realtime onSnapshot ◄──┘
+       seek to a moment's start, stop at its end
+```
+
+## 1. Agents
+
+All agents are ADK agents packaged into a single Agent Runtime deployment
+(`sprtz_agents`). The root agent is an `LlmAgent` that owns the conversation with
+the editor; the run itself goes through a `SequentialAgent` so the per-stage
+status written to Firestore is predictable and the UI can render it as steps.
+
+```
+sprtz_producer  (LlmAgent — talks to the editor)
+└── analysis_pipeline  (SequentialAgent)
+    ├── ingest_agent
+    ├── prepare_and_analyze  (ParallelAgent)
+    │   ├── transcode_agent
+    │   └── analysis_agent
+    ├── clip_agent
+    ├── caption_agent
+    └── publish_agent
+```
+
+| Agent | Responsibility |
+|---|---|
+| `sprtz_producer` | Talks to the editor. Answers questions about a job, searches the match semantically, adjusts clips, and delegates a full run to `analysis_pipeline`. |
+| `ingest_agent` | Probes the upload, records duration/fps/resolution/codec, works out the segment plan. |
+| `transcode_agent` | Packages the video into an HLS ladder behind the CDN so the editor can play it. |
+| `analysis_agent` | Runs the segmented Gemini 2.5 Flash pass over the whole match, merges the results, embeds and saves the moments. |
+| `clip_agent` | Turns moments into publishable cuts: in/out points per moment type, overlap resolution, 9:16 target. |
+| `caption_agent` | Per-platform copy — on-screen hook, title, TikTok/Instagram/YouTube captions, hashtags. |
+| `publish_agent` | Validates each clip against platform limits and closes the job out. |
+
+### Why transcode and analysis run together
+
+Both read the source from GCS and neither needs the other's output. On a
+three-hour recording the HLS package takes longer than the analysis, so running
+them in a `ParallelAgent` takes it off the critical path — the editor gets
+moments to look at while the stream is still being built.
+
+### Why there is no separate audio agent
+
+Gemini 2.5 Flash consumes the video's audio track in the same pass as the
+picture, so commentary emphasis, crowd noise and the whistle are already
+evidence available to the single analysis call. A separate speech-to-text stage
+would add a service, a failure mode and a cost for signals the model already has.
+
+### Adding a sport
+
+Everything handball-specific lives in `agents/sprtz_agents/sports/handball.py`:
+18 moment types across five categories, plus the court and broadcast context.
+A new sport is one module registering a `SportProfile` — no agent, tool or UI
+code changes.
+
+## 2. Segmented analysis
+
+A full match is far too long for one model call, so `analyse_segments`:
+
+1. Splits the video into 15-minute windows overlapping by 20 seconds.
+2. Sends each window to Gemini 2.5 Flash concurrently (bounded by a semaphore),
+   using `video_metadata` start/end offsets so the model reads the range straight
+   out of GCS — no clipping, no re-upload.
+3. Merges the per-window results into one absolute-timestamped timeline,
+   collapsing anything a boundary caused to be reported twice.
+
+A 180-minute recording becomes 13 segments. The overlap exists so an action
+straddling a boundary is seen whole by at least one window; the merge resolves
+the duplicate by temporal IoU within a moment type, keeping the wider time range
+and the more confident reading. One failed segment is reported and skipped
+rather than failing the match.
+
+### Three findings from real footage that shaped this
+
+**Prompt length caused fabricated timestamps.** An earlier version inlined the
+full 18-type catalogue into every per-segment prompt. On real match footage the
+model stopped reporting observed positions and emitted a sequential counter
+instead — thirty "moments" inside a three-second span, all at identical
+confidence. Moving the catalogue into the system instruction (where it is also
+byte-stable, so it caches) fixed it: timestamps then spread properly across the
+window. `test_segment_prompt_stays_short` guards the regression.
+
+**Timecodes beat float seconds.** The model is asked for `MM:SS` within the clip
+rather than float seconds. Anything landing outside the window is rejected rather
+than clamped, because a clamp would place a moment at a timestamp nobody observed.
+
+**1 fps, not 2.** Doubling the sample rate doubled the token cost *and* made
+timestamps markedly worse — a longer frame sequence pushes the model toward
+counting rather than reading.
+
+## 3. Playback
+
+`transcode_hls` produces a 360p/540p/720p HLS ladder with 2-second segments and
+uploads it to the HLS bucket, which sits behind Cloud CDN via a backend bucket on
+an external Application Load Balancer.
+
+Access uses **Cloud CDN signed URL prefixes** rather than a public bucket.
+Signing a prefix is what makes this workable for HLS: one signature covers a
+job's master playlist, its variant playlists and every segment, so the player
+never re-signs mid-stream. The API mints these from a key in Secret Manager.
+
+Playlists carry `max-age=60` so a re-transcode is picked up; segments are
+immutable and carry a one-year immutable TTL.
+
+The editor plays this one stream for everything. Reviewing a key moment is a seek
+to its start time with a stop at its out point — nothing is rendered to watch a
+suggestion. Clips are only rendered to MP4 on export.
+
+## 4. MCP servers
+
+Two servers, split by runtime shape rather than by domain. Both are private Cloud
+Run services; the agent calls them with an OIDC identity token and neither has
+public ingress.
+
+### `mcp-media` — ffmpeg-backed, long timeouts, high CPU
+
+| Tool | Purpose |
+|---|---|
+| `probe_media` | Duration, resolution, fps, codecs. Reads the file header first, so a 3 GB match does not cross the wire just to read its duration. |
+| `transcode_hls` | The HLS ladder, uploaded to the CDN bucket. |
+| `cut_clip` | Render an in/out range to a standalone MP4 for export. |
+| `reframe_vertical` | 9:16 or 1:1 with a blurred fill, so a wide court shot still reads on a phone. |
+| `burn_captions` | Burn the on-screen hook over the opening second. |
+| `render_preview` | Quick proxy of a proposed cut. |
+
+### `mcp-catalog` — Firestore, embeddings and search
+
+| Tool | Purpose |
+|---|---|
+| `create_job` / `get_job` / `update_job_status` | Job lifecycle. |
+| `record_media_info` / `record_playback` | Probe results and the CDN playback URL. |
+| `emit_event` | Append to `jobs/{id}/events` — what the UI streams live. |
+| `upsert_moments` / `list_moments` | Moments. Embeddings are generated here so the vector width can never drift from the index. |
+| `upsert_clips` / `list_clips` / `update_clip` | Clip suggestions. `update_clip` rejects derived fields rather than writing them. |
+| `knn_search_moments` | Vector retrieval plus Gemini reranking. |
+
+### Search: retrieve, then rerank
+
+Retrieval and ranking answer different questions. The embedding index finds
+moments *worded like* the query, which is not the same as moments that *answer*
+it. So `knn_search_moments` over-fetches (4x the requested limit, capped at 60)
+and hands the candidates to Gemini 2.5 Flash to score for relevance.
+
+Measured on the query *"the goalkeeper single-handedly kept them in the game"*:
+vector similarity alone put two conceded goals and a timeout on top, because all
+three mention a goalkeeper. The reranker moved both double saves to the top and
+scored the conceded goal 0.1, reasoning "the opposite of keeping the team in the
+game".
+
+Each result carries `similarity` (vector), `rerank_score` and `rerank_reason`
+(shown in the UI), and `rank`. A null `rerank_score` means the reranker was
+unavailable and the vector order stands — reranking failure degrades the
+ordering, it never empties the result set.
+
+## 5. Firestore data model
+
+```
+users/{uid}
+  displayName, email, defaultPlatforms[], createdAt
+
+jobs/{jobId}
+  ownerUid, title, sport, status, stage, progress,
+  source:   { gcsUri, bytes, originalName },
+  media:    { durationSec, fps, width, height, videoCodec, audioCodec,
+              bitrate, segmentCount },
+  playback: { hlsUrl, posterUrl, renditions[], segmentSeconds, readyAt },
+  counts:   { moments, clips },
+  error, createdAt, updatedAt
+
+jobs/{jobId}/events/{eventId}          # realtime agent activity feed
+  ts, agent, level, stage, message, data
+
+jobs/{jobId}/moments/{momentId}
+  startSec, endSec, type, label, description,
+  confidence, excitement, highlightScore,
+  evidence[], scoreboard, isGoal, segmentIndexes[],
+  embedding: Vector(768),              # KNN index
+  createdAt
+
+jobs/{jobId}/clips/{clipId}
+  momentId, startSec, endSec, durationSec, platforms[],
+  aspect, hookText, title, rationale,
+  captions: { tiktok, instagram, youtube },
+  hashtags[], status, renderUri, thumbnailUri, score
+
+renders/{renderId}
+  jobId, clipId, state, outputUri, requestedBy, startedAt, finishedAt
+```
+
+`embedding` is indexed with a Firestore vector index (`COSINE`, 768 dims) so
+`knn_search_moments` is a single `find_nearest` query — no separate vector store.
+
+### Realtime sync
+
+The SPA holds three `onSnapshot` listeners per open job: the job document
+(status/progress), the `events` subcollection (agent activity feed), and the
+`clips` subcollection (suggestion grid). Agents write through `mcp-catalog`, so
+the UI updates without any polling or websocket of our own.
+
+## 6. Identity
+
+- **Identity Platform** is the identity provider (email/password out of the box;
+  Google sign-in once an OAuth web client is supplied).
+- **IAP** fronts the `web` and `api` Cloud Run services using Cloud Run's built-in
+  integration, so unauthenticated traffic never reaches application code.
+- The SPA additionally signs in to the Firebase JS SDK against the same tenant so
+  it can open Firestore listeners directly. Security rules restrict every
+  document to `ownerUid == request.auth.uid` and make the client read-only —
+  every write goes through the agents.
+- `api` verifies the `x-goog-iap-jwt-assertion` header on every request and takes
+  the caller identity from it. Ownership on a new job comes from that verified
+  assertion, never from the request body.
+
+> **Note on IAP OAuth:** there is deliberately no `google_iap_brand` or
+> `google_iap_client` in the Terraform. Those drive the IAP OAuth Admin APIs,
+> which were deprecated in January 2025 and permanently shut down in March 2026 —
+> new projects cannot use them. Cloud Run's `iap_enabled` uses a Google-managed
+> OAuth client and needs no brand.
+
+## 7. Deployment
+
+`deploy/cloudbuild.yaml` is the single CI entry point, triggered on merge to
+`main`. In order:
+
+1. **Verify** — agent unit tests + ruff, MCP unit tests.
+2. **Build** — four images in parallel (`api`, `web`, `mcp-catalog`, `mcp-media`).
+3. **Preflight** — `deploy/scripts/preflight.sh` checks the target regions
+   against the live APIs before anything is created. Firestore's location is
+   immutable once the database exists and Vertex is not offered everywhere, so
+   this is much cheaper to catch here than mid-apply.
+4. **Terraform apply** — enables every API and creates all resources.
+5. **Deploy the agent** — last, because its tools are the MCP services Terraform
+   just created.
+
+### Regions
+
+`region` (Cloud Run, GCS, Artifact Registry, Cloud Build) and `vertex_region`
+(Agent Runtime, Gemini, embeddings) are separate variables. They both default to
+`us-south1`, which was verified to support Vertex AI, Agent Runtime, Gemini 2.5
+Flash, Cloud Run and Firestore. Keeping them separate means the app can sit in a
+region Vertex does not serve, without the whole deploy failing.
+
+> The preflight probes Gemini with a real `generateContent` call, not a GET on
+> the publisher model resource — that GET returns 404 in regions that serve the
+> model perfectly well.
+
+### Trigger substitutions
+
+The Cloud Build trigger should set:
+
+| Substitution | Example |
+|---|---|
+| `_REGION` | `us-south1` |
+| `_ENVIRONMENT` | `dev` or `prod` |
+| `_APP_NAME` | `sprtz` |
+| `_AR_REPO` | `sprtz-dev-containers` |
+| `_TF_STATE_BUCKET` | the `tf_state_bucket` Terraform output |
+
+The trigger's service account needs the roles granted to the `cloudbuild`
+service account in `iam.tf`.
+
+### Bootstrapping a clean project
+
+Terraform stores state in a GCS bucket it also creates, so the first apply runs
+without a backend:
+
+```bash
+cd deploy/terraform
+terraform init -backend=false
+terraform apply -var-file=envs/dev.tfvars -var="project_id=<project>"
+
+# then migrate state into the bucket it just created
+terraform init -migrate-state \
+  -backend-config="bucket=$(terraform output -raw tf_state_bucket)" \
+  -backend-config="prefix=terraform/dev"
+```
