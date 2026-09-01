@@ -1,11 +1,11 @@
-output "web_url" {
-  description = "SPRTZ AI Editor URL (IAP-protected)."
-  value       = google_cloud_run_v2_service.web.uri
+output "app_url" {
+  description = "The editor and API, same-origin behind the load balancer."
+  value       = local.app_url
 }
 
-output "api_url" {
-  description = "API base URL (IAP-protected)."
-  value       = google_cloud_run_v2_service.api.uri
+output "app_ip" {
+  description = "Load balancer IP. The managed certificate is issued for <ip>.nip.io."
+  value       = google_compute_global_address.app.address
 }
 
 output "mcp_catalog_url" {

@@ -221,3 +221,13 @@ variable "web_service_name" {
   EOT
   default     = ""
 }
+
+variable "app_domain" {
+  type        = string
+  description = <<-EOT
+    Hostname serving the editor and API. Empty derives <lb-ip>.nip.io, which
+    resolves back to the load balancer and lets Google issue a managed
+    certificate without owning a domain.
+  EOT
+  default     = ""
+}

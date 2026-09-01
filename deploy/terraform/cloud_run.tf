@@ -156,16 +156,13 @@ resource "google_cloud_run_v2_service" "mcp_media" {
 
 # --- API (behind IAP) ---------------------------------------------------------
 resource "google_cloud_run_v2_service" "api" {
-  project             = var.project_id
-  name                = "${local.prefix}-api"
-  location            = var.region
-  ingress             = "INGRESS_TRAFFIC_ALL"
+  project  = var.project_id
+  name     = "${local.prefix}-api"
+  location = var.region
+  # Only the load balancer may reach this; the run.app URL is a dead end.
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   deletion_protection = var.environment == "prod"
   labels              = local.common_labels
-
-  # Cloud Run's built-in IAP integration. Requests are rejected at the edge
-  # before they reach the container.
-  iap_enabled = true
 
   template {
     service_account                  = google_service_account.api.email
@@ -225,9 +222,18 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "AGENT_ENGINE_DISPLAY_NAME"
         value = local.agent_display_name
       }
+      # Empty because IAP is not in front of this service. It cannot be derived
+      # here either: the value would be the LB backend service's id, and that
+      # backend points at this service through a NEG, so referencing it creates
+      # a dependency cycle.
+      #
+      # If IAP is ever reinstated, set this from the backend service id — the
+      # audience is "/projects/<num>/global/backendServices/<id>", not the Cloud
+      # Run form, which would silently 401 every request IAP had already
+      # admitted. auth.py ignores an IAP assertion when this is unset.
       env {
         name  = "IAP_AUDIENCE"
-        value = "/projects/${data.google_project.this.number}/locations/${var.region}/services/${local.prefix}-api"
+        value = ""
       }
       env {
         name  = "IDENTITY_PLATFORM_API_KEY"
@@ -290,14 +296,13 @@ resource "google_cloud_run_v2_service" "api" {
 
 # --- Web SPA (behind IAP) -----------------------------------------------------
 resource "google_cloud_run_v2_service" "web" {
-  project             = var.project_id
-  name                = local.web_service_name
-  location            = var.region
-  ingress             = "INGRESS_TRAFFIC_ALL"
+  project  = var.project_id
+  name     = local.web_service_name
+  location = var.region
+  # Only the load balancer may reach these; the run.app URLs are dead ends.
+  ingress             = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   deletion_protection = var.environment == "prod"
   labels              = local.common_labels
-
-  iap_enabled = true
 
   template {
     service_account                  = google_service_account.web.email
@@ -322,9 +327,13 @@ resource "google_cloud_run_v2_service" "web" {
 
       # Runtime config is injected into /config.js by the container entrypoint so
       # the same image can be promoted between environments unchanged.
+      # Empty on purpose: the load balancer serves the SPA and the API on one
+      # hostname, so the browser calls /api/* same-origin. Pointing this at the
+      # API's own run.app URL would reintroduce CORS and, since ingress is
+      # restricted to the load balancer, would not be reachable anyway.
       env {
         name  = "API_BASE_URL"
-        value = google_cloud_run_v2_service.api.uri
+        value = ""
       }
       env {
         name  = "GOOGLE_CLOUD_PROJECT"

@@ -216,14 +216,27 @@ Set them on the trigger (`_IAP_MEMBERS` is comma-separated, e.g.
 `user:you@example.com,domain:example.com`). Point the domain's A record at the
 `cdn_ip` output before the managed certificate can provision.
 
-**IAP `accessSettings` are sticky per service *name*.** They survive deleting and
-recreating a service under the same name — verified: the settings vanished the
-instant `sprtz-dev-web` was deleted and came straight back when Terraform
-recreated it. A stale `gcipSettings` block, left over from external-identity
-mode and pointing at a hosted sign-in UI that no longer existed, made IAP deny
-every request while Policy Troubleshooter reported `ACCESS: GRANTED`. No API
-call clears it (nine variants across v1/v1beta1, plus IAP off/on). The only
-reliable escape is a **new service name** — hence `web_service_name`.
+**IAP does not work in this project, and authentication is enforced by the
+application instead.** IAP's authorization step ran with an *empty principal*
+(`authenticationInfo: {}` in the audit log) on both the Cloud Run built-in
+integration and a load-balancer backend service — so no IAM binding could match
+and even `allAuthenticatedUsers` was refused, while Policy Troubleshooter
+reported `ACCESS: GRANTED` throughout. The project's legacy OAuth brand has zero
+clients and the API that could create one shut down in March 2026.
+
+The SPA signs in with Identity Platform and `api/app/core/auth.py` verifies that
+token. That also fixes an identity mismatch IAP would have caused: a Firebase
+uid is what Firestore rules compare against, whereas an IAP subject is not, so
+jobs written under an IAP identity would have been invisible to the browser's
+own listeners.
+
+Reach is controlled by **ingress**: both public services accept traffic only
+from the load balancer, so their `allUsers` invoker bindings cannot be used to
+call them directly, and the `run.app` URLs are dead ends.
+
+**One load balancer, one hostname.** `/` serves the editor and `/api/*` the API,
+so they are same-origin — no CORS. With no custom domain, `<lb-ip>.nip.io`
+resolves back to the balancer, which is enough for a Google-managed certificate.
 
 **No `google_iap_brand`.** The IAP OAuth Admin APIs were shut down in March
 2026. Cloud Run's `iap_enabled` uses a Google-managed client.
