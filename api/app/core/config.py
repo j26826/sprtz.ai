@@ -15,6 +15,14 @@ class Settings:
     )
     location: str = field(default_factory=lambda: os.environ.get("GOOGLE_CLOUD_LOCATION", "us-south1"))
     environment: str = field(default_factory=lambda: os.environ.get("ENVIRONMENT", "dev"))
+    # Federated sign-in providers actually configured on the Identity Platform
+    # tenant. The editor only shows a provider button when one is listed —
+    # offering an unconfigured provider just yields auth/operation-not-allowed.
+    federated_providers: list[str] = field(
+        default_factory=lambda: [
+            p for p in os.environ.get("FEDERATED_PROVIDERS", "").split(",") if p.strip()
+        ]
+    )
 
     uploads_bucket: str = field(default_factory=lambda: os.environ.get("UPLOADS_BUCKET", ""))
     media_bucket: str = field(default_factory=lambda: os.environ.get("MEDIA_BUCKET", ""))

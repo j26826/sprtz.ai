@@ -155,6 +155,13 @@ startup probe failing with no application output, suspect time, not the image.
 > committed into comments before a plain control deploy disproved it. When a
 > platform behaviour looks arbitrary, run the boring control first.
 
+**Sign-in is email/password, because that is what the tenant has enabled.**
+Google sign-in needs a `defaultSupportedIdpConfig`, which needs an OAuth 2.0 web
+client created by hand — the IAP OAuth Admin APIs that used to supply one shut
+down in March 2026. The editor only renders a federated button when
+`/api/config` reports a provider, so it never offers a method that can only
+fail with `auth/operation-not-allowed`. Set `google_oauth_client_id` to enable it.
+
 **Every hostname the app is served from must be in Identity Platform's
 `authorizedDomains`,** or the browser SDK fails sign-in with
 `auth/unauthorized-domain`. Terraform includes the load balancer host; add any

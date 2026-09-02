@@ -279,6 +279,13 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "ENVIRONMENT"
         value = var.environment
       }
+      # Only advertise a federated provider the tenant actually has configured,
+      # so the editor never shows a sign-in button that can only fail with
+      # auth/operation-not-allowed.
+      env {
+        name  = "FEDERATED_PROVIDERS"
+        value = var.google_oauth_client_id != "" ? "google.com" : ""
+      }
 
       startup_probe {
         http_get {
