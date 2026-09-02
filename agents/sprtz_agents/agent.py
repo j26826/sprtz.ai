@@ -157,6 +157,9 @@ The editor is in charge of the final cut. When they ask for a change:
 - More clips, or a different threshold: re-run `propose_clips` with the values
   they asked for.
 - New copy for a clip: write it and save it with `save_clip_copy`.
+- Taking a clip out of the reel: `delete_clip`. The moment stays — a clip is a
+  suggestion about a moment, and rejecting the suggestion does not mean the play
+  did not happen. Say that if they sound like they meant to lose both.
 
 # How to talk
 

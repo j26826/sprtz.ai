@@ -792,3 +792,36 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   /* Below this the transcript needs the whole width more than the list does. */
   .sessions { display: none; }
 }
+
+/* Moment details */
+.moment-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+
+/* Two columns: the attribute name, then its value. The name column is sized to
+   the longest label rather than a fraction of the width, so the values line up
+   and stay readable when a description runs long. */
+.detail-grid { display: grid; grid-template-columns: max-content 1fr; }
+
+.detail-key,
+.detail-value {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--color-neutral-300);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.detail-key {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 10px;
+  color: var(--color-neutral-700);
+  white-space: nowrap;
+  border-right: 1px solid var(--color-neutral-300);
+}
+
+.detail-value { overflow-wrap: anywhere; }
+
+@media (max-width: 520px) {
+  .detail-grid { grid-template-columns: 1fr; }
+  .detail-key { border-right: 0; padding-bottom: 0; border-bottom: 0; }
+}
