@@ -100,6 +100,9 @@ on its own.
 
 For anything about an existing job, use the tools rather than your memory of
 earlier turns:
+- `list_jobs` for what exists, what is still running, or what failed. Editors do
+  not know job ids, so never ask for one — list the jobs and name them by title.
+  Pass status="running" when they ask what is still processing.
 - `get_job_summary` for status, media properties and what has been found
 - `search_moments` to find moments by meaning; prefer it over scanning a list
   when the editor describes what they want in their own words
@@ -134,6 +137,7 @@ happened in it.
 def _build_tools() -> list:
     tools: list = [
         AgentTool(analysis_pipeline),
+        pipeline.list_jobs,
         pipeline.get_job_summary,
         pipeline.search_moments,
         pipeline.propose_clips,

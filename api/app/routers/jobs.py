@@ -134,7 +134,18 @@ async def create_job(
 ) -> dict:
     """Register an uploaded video as a job, ready to analyse."""
     safe_name = _SAFE_NAME.sub("_", body.filename)[:120]
-    gcs_uri = f"gs://{settings.uploads_bucket}/uploads/{user.uid}/{body.job_id}/{safe_name}"
+    blob_name = f"uploads/{user.uid}/{body.job_id}/{safe_name}"
+    gcs_uri = f"gs://{settings.uploads_bucket}/{blob_name}"
+
+    # The path is built from the verified uid, so a caller can only ever name an
+    # object of their own — but they can still name one that was never uploaded.
+    # Checking here keeps a job from existing with nothing behind it, which the
+    # pipeline would only discover on its first read.
+    if not _storage_client().bucket(settings.uploads_bucket).blob(blob_name).exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No upload found for that job. Upload the file first.",
+        )
 
     result = await clients.call_mcp(
         "catalog",
@@ -154,6 +165,58 @@ async def create_job(
     if result.get("status") == "error":
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
     return result
+
+
+@router.get("/pending-uploads")
+async def list_pending_uploads(
+    user: CallerIdentity = Depends(current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Files uploaded by this caller that never became a job.
+
+    The browser mints a job id, uploads straight to GCS, then registers the job
+    in a second call. If that second call fails — or the tab is closed between
+    the two — the bytes are in the bucket and nothing points at them. This lets
+    the editor pick one up rather than send a match-length file again.
+
+    Only the caller's own prefix is listed, so this cannot expose another
+    tenant's uploads regardless of what the caller asks for.
+    """
+    prefix = f"uploads/{user.uid}/"
+    try:
+        blobs = list(
+            _storage_client().list_blobs(settings.uploads_bucket, prefix=prefix, max_results=200)
+        )
+    except Exception as exc:
+        logger.exception("could not list uploads for %s", user.uid)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not list earlier uploads.",
+        ) from exc
+
+    registered = {
+        job.get("job_id")
+        for job in (await clients.call_mcp(
+            "catalog", "list_jobs", {"owner_uid": user.uid, "limit": 200},
+        )).get("jobs", [])
+    }
+
+    pending = []
+    for blob in blobs:
+        parts = blob.name[len(prefix):].split("/")
+        if len(parts) != 2 or parts[0] in registered:
+            continue
+        pending.append({
+            "job_id": parts[0],
+            "filename": parts[1],
+            "size_bytes": blob.size or 0,
+            "content_type": blob.content_type or "",
+            "uploaded_at": blob.time_created,
+        })
+
+    epoch = datetime.datetime.min.replace(tzinfo=datetime.UTC)
+    pending.sort(key=lambda item: item["uploaded_at"] or epoch, reverse=True)
+    return {"uploads": pending}
 
 
 async def _load_owned_job(job_id: str, user: CallerIdentity) -> dict:

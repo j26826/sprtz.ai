@@ -108,6 +108,63 @@ def get_job(job_id: str) -> dict[str, Any]:
     return {"job_id": job_id, **snapshot.to_dict()}
 
 
+# Statuses that mean the pipeline still owes the editor an answer. Kept here so
+# the agent, the API and the UI cannot drift on what "still processing" means.
+RUNNING_STATUSES = ("uploaded", "transcoding", "analyzing")
+
+
+def list_jobs(owner_uid: str, limit: int = 20, status: str = "") -> list[dict[str, Any]]:
+    """Recent jobs for one owner, newest first.
+
+    Ordering and the owner filter go to Firestore, which already has the
+    composite index the UI's listener needs. The status filter is applied here
+    instead: it would need an index of its own per status, and over a page of
+    jobs it costs nothing.
+    """
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    wanted = (
+        RUNNING_STATUSES if status == "running"
+        else (status,) if status
+        else ()
+    )
+    query = (
+        db().collection("jobs")
+        .where(filter=FieldFilter("ownerUid", "==", owner_uid))
+        .order_by("createdAt", direction="DESCENDING")
+        # Over-read when filtering so a page of finished jobs cannot hide the
+        # running ones underneath it.
+        .limit(limit * 4 if wanted else limit)
+    )
+
+    jobs: list[dict[str, Any]] = []
+    for snapshot in query.stream():
+        doc = snapshot.to_dict() or {}
+        if wanted and doc.get("status") not in wanted:
+            continue
+        jobs.append(_job_summary(snapshot.id, doc))
+        if len(jobs) >= limit:
+            break
+    return jobs
+
+
+def _job_summary(job_id: str, doc: dict[str, Any]) -> dict[str, Any]:
+    """The fields worth spending tokens on. The full document is get_job's job."""
+    created = doc.get("createdAt")
+    return {
+        "job_id": job_id,
+        "title": doc.get("title") or doc.get("source", {}).get("originalName") or job_id,
+        "sport": doc.get("sport", ""),
+        "status": doc.get("status", "unknown"),
+        "stage": doc.get("stage", ""),
+        "progress": doc.get("progress", 0),
+        "error": doc.get("error"),
+        "duration_sec": doc.get("media", {}).get("durationSec"),
+        "counts": doc.get("counts", {}),
+        "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
+    }
+
+
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
                original_name: str, size_bytes: int, content_type: str = "") -> dict[str, Any]:
     payload = {
