@@ -39,8 +39,16 @@ input, button, textarea { font-family: var(--font-body); }
 }
 
 /* The wordmark carries its own weight and letterspacing, so it is sized by
-   height and left to keep its own proportions. */
-.brand-logo { height: 16px; width: auto; display: block; }
+   height and left to keep its own proportions. The max-width caps it in a
+   narrow header; object-fit keeps the aspect ratio when that cap binds, since
+   a fixed height plus a clamped width would otherwise squash the letterforms. */
+.brand-logo {
+  height: 16px;
+  width: auto;
+  max-width: 8em;
+  object-fit: contain;
+  display: block;
+}
 
 .signin-logo { height: 30px; width: auto; margin-bottom: var(--space-4); }
 
