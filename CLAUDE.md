@@ -231,6 +231,13 @@ actually takes: analysis is 20-80 because it is an hour of Gemini calls against
 minutes for everything else, and equal slices would park the bar mid-way for
 most of a run. The web `STAGES` table mirrors it; change one and change both.
 
+**Ingesting is not analysing.** "Ingest a new game" asks for the upload panel:
+there is no video yet and nothing to run. The agent used to answer it by
+starting `analysis_pipeline`, which spends an hour on the wrong match and holds
+the turn open — so the panel the editor asked for never appeared either, because
+a card chosen from the finished reply cannot arrive while the reply is still
+running.
+
 Cards are normally chosen from the finished reply, which is useless for
 anything long: an analysis would have shown its progress widget an hour after
 the progress was worth watching. `ask()` takes the cards to attach up front for
