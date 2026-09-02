@@ -221,7 +221,7 @@ function mountSettings() {
     if (e.target.id === 'settings') closeSettings();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSettings();
+    if (e.key === 'Escape') { closeSettings(); closeDetails(); }
   });
 }
 
@@ -467,45 +467,93 @@ function momentsCard(msg) {
   if (!list.length) return '';
 
   return `<div class="panel-light">${list.map((m) => {
-    const inReel = state.clips.some((c) => c.momentId === m.momentId);
+    const clip = state.clips.find((c) => c.momentId === m.momentId);
     const meta = [
+      m.label || m.momentType,
       m.category,
       `${Math.round(m.endSec - m.startSec)}s`,
       (m.highlightScore ?? 0).toFixed(2),
     ].filter(Boolean).join(' · ');
     const open = state.playing?.momentId === m.momentId;
+
+    // The summary is the line an editor scans by — who did what — so it takes
+    // the emphasis. The type and category drop into the meta line beneath,
+    // where they are still there to filter on but are not the headline.
+    const headline = m.summary || m.label || m.momentType;
+
     return `
       <div class="row">
         <div class="moment-row">
-          <button class="thumb" data-play="${esc(m.momentId)}" title="Play this moment">
+          <button class="thumb" data-play="${esc(m.momentId)}" title="${esc(t('moment.play'))}">
             <span class="thumb-stripes"></span>
             <span class="thumb-clock">${clock(m.startSec)}</span>
           </button>
           <div style="min-width:0">
-            <div class="moment-label">${esc(m.label || m.momentType)}</div>
+            <div class="moment-label">${esc(headline)}</div>
             <div class="moment-meta">${esc(meta)}</div>
             ${m.rerankReason ? `<div class="rerank-why">${esc(m.rerankReason)}</div>` : ''}
           </div>
-          <button class="btn-outline" data-add="${esc(m.momentId)}" ${inReel ? 'disabled' : ''}>
-            ${inReel ? '✓ Added' : 'Add'}
-          </button>
+          <div class="moment-actions">
+            <button class="link-btn" data-details="${esc(m.momentId)}">${esc(t('moment.details'))}</button>
+            ${clip
+              ? `<button class="btn-outline" data-remove-clip="${esc(m.momentId)}">${esc(t('moment.remove'))}</button>`
+              : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
+          </div>
         </div>
         ${open ? playerMarkup(m) : ''}
       </div>`;
   }).join('')}</div>`;
 }
 
-/**
- * A slot, not the player itself.
- *
- * render() rebuilds the transcript's innerHTML, which would destroy a live
- * <video> and restart the clip. Since the events subcollection updates
- * continuously while an analysis runs, that would make a moment unwatchable.
- * The player element is created once and re-parented into this slot after each
- * render, so playback survives.
- */
-function playerMarkup(m) {
-  return `<div class="player-slot" data-slot="${esc(m.momentId)}"></div>`;
+
+// Everything the analysis recorded, in the order someone would read it: what
+// happened, then when, then who, then how sure. The row is skipped when the
+// value is empty rather than printed blank — a table half full of dashes reads
+// as broken data rather than as unreadable footage.
+const DETAIL_ROWS = [
+  ['moment.summary', (m) => m.summary],
+  ['moment.description', (m) => m.description],
+  ['moment.class', (m) => m.label || m.momentType],
+  ['moment.category', (m) => m.category],
+  ['moment.result', (m) => m.actionResult],
+  ['moment.start', (m) => clock(m.startSec)],
+  ['moment.end', (m) => clock(m.endSec)],
+  ['moment.peak', (m) => clock(m.peakSec)],
+  ['moment.participant', (m) => m.participant],
+  ['moment.participantRole', (m) => m.participantRole],
+  ['moment.actionTeam', (m) => m.actionTeam],
+  ['game.homeTeam', (m) => m.team1],
+  ['game.awayTeam', (m) => m.team2],
+  ['moment.score', (m) => (m.scoreTeam1 == null || m.scoreTeam2 == null
+    ? '' : `${m.scoreTeam1}-${m.scoreTeam2}`)],
+  ['moment.scoreboard', (m) => m.scoreboard],
+  ['moment.confidence', (m) => (m.confidence == null ? '' : `${Math.round(m.confidence * 100)}`)],
+  ['moment.excitement', (m) => (m.excitement == null ? '' : m.excitement.toFixed(2))],
+  ['moment.highlightScore', (m) => (m.highlightScore == null ? '' : m.highlightScore.toFixed(2))],
+  ['moment.evidence', (m) => (m.evidence || []).join('; ')],
+  ['moment.isGoal', (m) => (m.isGoal ? t('moment.yes') : '')],
+  ['moment.id', (m) => m.momentId],
+];
+
+
+function openDetails(momentId) {
+  const m = momentById(momentId);
+  if (!m) return;
+
+  const rows = DETAIL_ROWS
+    .map(([key, read]) => [t(key), read(m)])
+    .filter(([, value]) => value !== '' && value != null);
+
+  $('details-title').textContent = m.summary || m.label || t('moment.details');
+  $('details-body').innerHTML = rows.map(([label, value]) => `
+    <div class="detail-key">${esc(label)}</div>
+    <div class="detail-value">${esc(String(value))}</div>`).join('');
+  $('details').classList.remove('hidden');
+}
+
+
+function closeDetails() {
+  $('details').classList.add('hidden');
 }
 
 function ingestCard() {
@@ -1323,7 +1371,7 @@ document.addEventListener('click', (event) => {
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
-    + '[data-delete-session]');
+    + '[data-delete-session],[data-details],[data-remove-clip]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -1337,6 +1385,16 @@ document.addEventListener('click', (event) => {
   }
   if (hit.dataset.play) { playMoment(hit.dataset.play); return; }
   if (hit.dataset.closePlayer) { state.playing = null; destroyPlayer(); render(); return; }
+  if (hit.dataset.details) { openDetails(hit.dataset.details); return; }
+  if (hit.dataset.removeClip) {
+    const m = momentById(hit.dataset.removeClip);
+    const clip = state.clips.find((c) => c.momentId === hit.dataset.removeClip);
+    // Named so the agent removes the clip and leaves the moment: "remove the
+    // jump shot" on its own reads as either.
+    ask(`Remove the clip "${clip?.title || m?.label || 'this one'}" from the reel. `
+      + 'Keep the moment itself.');
+    return;
+  }
   if (hit.dataset.add) {
     const m = momentById(hit.dataset.add);
     ask(`Add the ${m?.label || 'moment'} at ${clock(m?.startSec || 0)} to the reel.`);

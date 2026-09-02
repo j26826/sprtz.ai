@@ -386,6 +386,20 @@ def list_clips(job_id: str, limit: int) -> dict:
 
 
 @mcp.tool
+def delete_clip(job_id: str, clip_id: str) -> dict:
+    """Remove a clip from the reel, leaving the moment it was cut from in place.
+
+    Args:
+        job_id: Job the clip belongs to.
+        clip_id: Clip to remove.
+    """
+    try:
+        return {"status": "success", **store.delete_clip(job_id, clip_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id, clip_id=clip_id)
+
+
+@mcp.tool
 def update_clip(job_id: str, clip_id: str, patch: dict) -> dict:
     """Apply a partial update to one clip.
 

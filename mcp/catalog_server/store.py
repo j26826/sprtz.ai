@@ -935,6 +935,21 @@ _CLIP_WRITABLE = {
 }
 
 
+def delete_clip(job_id: str, clip_id: str) -> dict[str, Any]:
+    """Drop a clip from the reel.
+
+    The moment it was cut from is untouched: a clip is a suggestion about a
+    moment, and rejecting the suggestion is not a claim that the moment did not
+    happen. Removing the moment as well would also lose its embedding, and with
+    it the ability to find the play again later.
+    """
+    ref = job_ref(job_id).collection("clips").document(clip_id)
+    existed = ref.get().exists
+    if existed:
+        ref.delete()
+    return {"job_id": job_id, "clip_id": clip_id, "deleted": existed}
+
+
 def update_clip(job_id: str, clip_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     """Apply a partial update, rejecting fields callers must not rewrite.
 

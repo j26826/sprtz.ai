@@ -131,6 +131,7 @@ def build_catalog_toolset() -> McpToolset | None:
             "list_moments",
             "list_clips",
             "update_clip",
+            "delete_clip",
             "knn_search_moments",
             "emit_event",
         ],
