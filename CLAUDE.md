@@ -343,6 +343,18 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### The media service needs delete on uploads, not just read
+
+It held `objectViewer` on the uploads bucket and `objectAdmin` on the HLS one,
+so deleting a job always ended half done: the package went, the source video
+did not, and the job stayed in Firestore because the media step reported the
+failure. That is the right order — a job pointing at a missing video is
+recoverable, orphaned gigabytes are not — but it meant delete never completed.
+
+`roles/storage.objectUser` rather than `objectAdmin`: this service has no
+business changing object ACLs on the bucket users upload into, and the narrower
+role is otherwise the same.
+
 ### A playback record is not a package
 
 `prepare_playback` used to return early whenever the job carried an `hlsUrl`,
