@@ -189,6 +189,14 @@ actually takes: analysis is 20-80 because it is an hour of Gemini calls against
 minutes for everything else, and equal slices would park the bar mid-way for
 most of a run. The web `STAGES` table mirrors it; change one and change both.
 
+Cards are normally chosen from the finished reply, which is useless for
+anything long: an analysis would have shown its progress widget an hour after
+the progress was worth watching. `ask()` takes the cards to attach up front for
+that reason, and the upload, retry, re-analyse and cancel paths all pass the
+jobs card so the stage strip is on screen from the moment the run starts. The
+Firestore listener re-renders on every job write, so it follows by itself
+afterwards.
+
 Segment completion is what moves the bar during analysis, counted rather than
 indexed because segments finish out of order.
 
