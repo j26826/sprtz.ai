@@ -34,12 +34,9 @@ input, button, textarea { font-family: var(--font-body); }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
   padding: 0 20px;
   border-right: 2px solid var(--color-text);
 }
-
-.brand-mark { width: 14px; height: 14px; background: var(--color-accent); }
 
 .brand-name {
   font-family: var(--font-heading);
@@ -566,7 +563,11 @@ input, button, textarea { font-family: var(--font-body); }
   padding: var(--space-8);
 }
 
-.signin-card h1 { font-size: 28px; margin: var(--space-4) 0 var(--space-2); }
+.signin-card h1 { font-size: 28px; margin: 0 0 var(--space-2); }
+
+.signin-alt { display: flex; align-items: center; gap: 10px; margin: 16px 0 12px; }
+.signin-alt > span:first-child,
+.signin-alt > span:last-child { flex: 1; height: 1px; background: var(--color-neutral-300); }
 .signin-card p { font-size: 14px; color: var(--color-neutral-800); margin-bottom: var(--space-6); }
 
 .error-note {
