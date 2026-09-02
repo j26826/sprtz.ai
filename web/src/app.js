@@ -506,6 +506,20 @@ function momentsCard(msg) {
 }
 
 
+
+/**
+ * A slot, not the player itself.
+ *
+ * render() rebuilds the transcript's innerHTML, which would destroy a live
+ * <video> and restart the clip. Since the events subcollection updates
+ * continuously while an analysis runs, that would make a moment unwatchable.
+ * The player element is created once and re-parented into this slot after each
+ * render, so playback survives.
+ */
+function playerMarkup(m) {
+  return `<div class="player-slot" data-slot="${esc(m.momentId)}"></div>`;
+}
+
 // Everything the analysis recorded, in the order someone would read it: what
 // happened, then when, then who, then how sure. The row is skipped when the
 // value is empty rather than printed blank — a table half full of dashes reads
@@ -1501,6 +1515,11 @@ $('composer').addEventListener('submit', (event) => {
 // chain of early returns that had already broken them once.
 $('open-settings')?.addEventListener('click', openSettings);
 $('close-settings')?.addEventListener('click', closeSettings);
+$('close-details')?.addEventListener('click', closeDetails);
+// Clicking the backdrop closes; clicking the card must not.
+$('details')?.addEventListener('click', (event) => {
+  if (event.target.id === 'details') closeDetails();
+});
 $('sign-out')?.addEventListener('click', signOutNow);
 
 $('new-session').addEventListener('click', startSession);
