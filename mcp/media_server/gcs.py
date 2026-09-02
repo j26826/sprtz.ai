@@ -197,3 +197,8 @@ def delete_object(gcs_uri: str) -> bool:
         return False
     logger.info("deleted %s", gcs_uri)
     return True
+
+
+def object_exists(bucket: str, name: str) -> bool:
+    """Whether one object is actually there."""
+    return client().bucket(bucket).blob(name).exists()

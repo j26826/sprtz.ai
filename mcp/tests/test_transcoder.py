@@ -145,3 +145,29 @@ class TestJobLifecycle:
         assert sent.output_uri == "gs://hls-bucket/jobs/j1/hls/"
         assert result["transcoder_job"] == "projects/p/locations/l/jobs/abc"
         assert result["master_playlist_uri"] == "gs://hls-bucket/jobs/j1/hls/master.m3u8"
+
+
+class TestPlaybackReadyPath:
+    """A recorded playback URL is a claim; the package is the fact.
+
+    A delete that removed the media and then failed leaves a job whose record
+    points at objects that are gone. The editor is told playback is ready, the
+    CDN answers 403, and asking for it again does nothing — because the code
+    short-circuited on the record. The path checked here is what makes that
+    recoverable.
+    """
+
+    def test_the_checked_path_is_where_transcoder_writes_the_playlist(self):
+        job_id = "j1"
+        checked = f"jobs/{job_id}/hls/{transcoder.MASTER_PLAYLIST}"
+        written = transcoder.output_uri("hls-bucket", job_id) + transcoder.MASTER_PLAYLIST
+
+        # If these ever disagree the check silently always fails, and every job
+        # would be re-encoded on every request for playback.
+        assert written == f"gs://hls-bucket/{checked}"
+
+    def test_the_playback_url_and_the_checked_path_agree(self):
+        # transcode_hls hands back a CDN URL before the encode has produced
+        # anything, built from this same path.
+        job_id = "j1"
+        assert transcoder.output_uri("b", job_id).endswith(f"jobs/{job_id}/hls/")

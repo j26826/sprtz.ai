@@ -223,9 +223,21 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     if not gcs_uri:
         return {"status": "error", "error": f"Job {job_id} has no source video."}
 
+    # A recorded playback URL is a claim, not a package. A delete that removed
+    # the media and then failed leaves the record pointing at objects that are
+    # gone, and short-circuiting on the record alone made that unrecoverable:
+    # the editor was told playback was ready while the CDN returned 403, and
+    # asking for it again did nothing.
     existing = job.get("playback") or {}
     if existing.get("hlsUrl"):
-        return {"status": "success", "job_id": job_id, "already_prepared": True, **existing}
+        check = await mcp_client.call_tool("media", "playback_ready", {"job_id": job_id})
+        if check.get("ready"):
+            return {"status": "success", "job_id": job_id, "already_prepared": True, **existing}
+        await _emit(
+            job_id, "transcode",
+            "The recorded playback package is missing from the bucket; encoding it again.",
+            level="warning",
+        )
 
     await _progress(job_id, "transcode", 0.1, status="transcoding")
     await _emit(job_id, "transcode", "Starting a 480p preview encode for playback.")
