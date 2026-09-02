@@ -17,6 +17,9 @@ const BASE = 'en-GB';
 const STRINGS = {
   'en-GB': {
     'lang.name': 'English (UK)',
+    'header.untitled': 'Untitled match',
+
+    'sessions.empty': 'No sessions yet. Upload a match to start one.',
 
     'header.settings': 'Settings',
     'settings.title': 'Settings',
@@ -143,6 +146,9 @@ const STRINGS = {
 
   de: {
     'lang.name': 'Deutsch',
+    'header.untitled': 'Unbenanntes Spiel',
+
+    'sessions.empty': 'Noch keine Sitzungen. Laden Sie ein Spiel hoch, um zu beginnen.',
 
     'header.settings': 'Einstellungen',
     'settings.title': 'Einstellungen',
@@ -252,6 +258,9 @@ const STRINGS = {
 
   it: {
     'lang.name': 'Italiano',
+    'header.untitled': 'Partita senza titolo',
+
+    'sessions.empty': 'Ancora nessuna sessione. Carica una partita per iniziarne una.',
 
     'header.settings': 'Impostazioni',
     'settings.title': 'Impostazioni',
@@ -359,6 +368,9 @@ const STRINGS = {
 
   fr: {
     'lang.name': 'Français',
+    'header.untitled': 'Match sans titre',
+
+    'sessions.empty': 'Aucune session pour le moment. Importez un match pour en démarrer une.',
 
     'header.settings': 'Paramètres',
     'settings.title': 'Paramètres',
@@ -470,6 +482,9 @@ const STRINGS = {
 
   es: {
     'lang.name': 'Español',
+    'header.untitled': 'Partido sin título',
+
+    'sessions.empty': 'Aún no hay sesiones. Sube un partido para empezar una.',
 
     'header.settings': 'Ajustes',
     'settings.title': 'Ajustes',

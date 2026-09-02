@@ -64,12 +64,20 @@
       <div class="context-line" id="context-line" data-i18n="header.uploadToBegin">Upload a recording to begin</div>
     </div>
     <button class="header-btn" id="open-settings" data-i18n="header.settings">Settings</button>
-    <button class="header-btn" id="new-session" data-i18n="header.newSession">New session</button>
     <button class="header-btn" id="sign-out" data-i18n="header.signOut">Sign out</button>
   </header>
 
-  <div class="scroll" id="scroll">
-    <div class="transcript" id="transcript"></div>
+  <div class="workspace">
+    <aside class="sessions" id="sessions">
+      <button class="sessions-new" id="new-session" data-i18n="header.newSession">
+        New session
+      </button>
+      <div class="sessions-list" id="sessions-list"></div>
+    </aside>
+
+    <div class="scroll" id="scroll">
+      <div class="transcript" id="transcript"></div>
+    </div>
   </div>
 
   <div class="composer">
