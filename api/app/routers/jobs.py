@@ -296,6 +296,12 @@ async def get_playback(
 
     # Path-scoped to the job so several jobs can hold valid cookies at once,
     # despite Cloud CDN fixing the cookie's name.
+    # Host-only: no Domain attribute. The load balancer serves the CDN from this
+    # same hostname, so a Domain widens the cookie for no benefit — and an
+    # attribute a browser refuses is an attribute that loses the whole cookie,
+    # which surfaces as an opaque 403 inside the player rather than as anything
+    # about cookies. cdn_cookie_domain is still read, for a deployment that
+    # genuinely serves the CDN from a sibling host.
     response.set_cookie(
         key=signed["cookie_name"],
         value=signed["cookie_value"],
