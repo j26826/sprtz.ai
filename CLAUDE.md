@@ -89,6 +89,13 @@ against the live project. Treat a merge as a deploy.
   the prompt claims its timecodes are relative to. Reading offsets into a long
   file, the model has been seen reporting match-absolute times instead — 54
   detections in one run, every one dropped as out of window.
+- **A segment analysis retries; it did not.** One 429 lost a whole fifteen-minute
+  window, and the job reported no moments found rather than a quota problem.
+  Vertex quota is per-minute and every window goes out at once, so exhausting it
+  is ordinary. Six attempts from 8s doubling to a 120s ceiling, with jitter so
+  thirteen segments do not retry in lockstep and rebuild the burst.
+  `max_concurrent_segments` is 3 rather than 6 for the same reason — retries
+  carry the rest, this reduces how often they are needed.
 - **1 fps, not 2.** Doubling the sample rate doubled cost *and* made timestamps
   worse.
 - The model reports **`MM:SS` timecodes within the clip**, not float seconds.

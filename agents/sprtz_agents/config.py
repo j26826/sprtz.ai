@@ -45,8 +45,12 @@ class Settings:
     segment_overlap_seconds: int = field(
         default_factory=lambda: _int_env("SPRTZ_SEGMENT_OVERLAP_SECONDS", 20)
     )
+    # How many segment analyses run at once. Six exhausted the per-minute Vertex
+    # quota on a thirteen-segment match and every one of those failures cost a
+    # whole window. Retries carry the rest; this reduces how often they are
+    # needed rather than relying on them.
     max_concurrent_segments: int = field(
-        default_factory=lambda: _int_env("SPRTZ_MAX_CONCURRENT_SEGMENTS", 6)
+        default_factory=lambda: _int_env("SPRTZ_MAX_CONCURRENT_SEGMENTS", 3)
     )
 
     # Frames per second Gemini samples from the video. 1 fps is deliberate: on

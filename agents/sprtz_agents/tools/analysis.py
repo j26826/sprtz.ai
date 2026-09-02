@@ -174,7 +174,27 @@ async def _analyse_one(
         # confidence and misses roughly half of them; with one it calibrates and
         # recall roughly doubles on the same footage.
         thinking_config=types.ThinkingConfig(thinking_budget=8192),
-        http_options=types.HttpOptions(timeout=15 * 60 * 1000),
+        http_options=types.HttpOptions(
+            timeout=15 * 60 * 1000,
+            # A segment analysis had no retry at all, so one 429 lost fifteen
+            # minutes of match outright. Quota is per-minute and thirteen
+            # windows go out at once, so exhausting it is ordinary rather than
+            # exceptional — and the answer to "try again later" is to try again
+            # later, not to drop the segment and report nothing found.
+            #
+            # The backoff is long because the window it waits for is a minute
+            # wide: retrying in two seconds asks the same exhausted quota the
+            # same question. Six attempts from 8s, doubling to 120s, covers
+            # roughly six minutes.
+            retry_options=types.HttpRetryOptions(
+                attempts=6,
+                initial_delay=8.0,
+                max_delay=120.0,
+                exp_base=2.0,
+                jitter=1.0,
+                http_status_codes=[429, 500, 502, 503, 504],
+            ),
+        ),
     )
 
     async with semaphore:
