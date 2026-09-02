@@ -17,6 +17,13 @@ const BASE = 'en-GB';
 const STRINGS = {
   'en-GB': {
     'lang.name': 'English (UK)',
+    'game.summary': 'Summary',
+    'game.matchDate': 'Date',
+    'game.groundedHomeTeam': 'Home team (from search)',
+    'game.groundedAwayTeam': 'Away team (from search)',
+    'game.groundedCompetition': 'Competition (from search)',
+    'game.groundedVenue': 'Venue (from search)',
+    'game.notIdentified': 'Nothing on screen identified this match',
     'moment.category': 'Category',
     'moment.play': 'Play this moment',
     'moment.details': 'Details',
@@ -171,6 +178,13 @@ const STRINGS = {
 
   de: {
     'lang.name': 'Deutsch',
+    'game.summary': 'Zusammenfassung',
+    'game.matchDate': 'Datum',
+    'game.groundedHomeTeam': 'Heimmannschaft (aus Websuche)',
+    'game.groundedAwayTeam': 'Gastmannschaft (aus Websuche)',
+    'game.groundedCompetition': 'Wettbewerb (aus Websuche)',
+    'game.groundedVenue': 'Spielstätte (aus Websuche)',
+    'game.notIdentified': 'Nichts auf dem Bild hat dieses Spiel identifiziert',
     'moment.category': 'Kategorie',
     'moment.play': 'Diese Szene abspielen',
     'moment.details': 'Details',
@@ -308,6 +322,13 @@ const STRINGS = {
 
   it: {
     'lang.name': 'Italiano',
+    'game.summary': 'Sintesi',
+    'game.matchDate': 'Data',
+    'game.groundedHomeTeam': 'Squadra di casa (da ricerca web)',
+    'game.groundedAwayTeam': 'Squadra ospite (da ricerca web)',
+    'game.groundedCompetition': 'Competizione (da ricerca web)',
+    'game.groundedVenue': 'Impianto (da ricerca web)',
+    'game.notIdentified': 'Nulla sullo schermo ha identificato questa partita',
     'moment.category': 'Categoria',
     'moment.play': 'Riproduci questa azione',
     'moment.details': 'Dettagli',
@@ -443,6 +464,13 @@ const STRINGS = {
 
   fr: {
     'lang.name': 'Français',
+    'game.summary': 'Résumé',
+    'game.matchDate': 'Date',
+    'game.groundedHomeTeam': 'Équipe à domicile (recherche web)',
+    'game.groundedAwayTeam': 'Équipe visiteuse (recherche web)',
+    'game.groundedCompetition': 'Compétition (recherche web)',
+    'game.groundedVenue': 'Salle (recherche web)',
+    'game.notIdentified': 'Rien à l’écran n’a permis d’identifier ce match',
     'moment.category': 'Catégorie',
     'moment.play': 'Lire cette action',
     'moment.details': 'Détails',
@@ -582,6 +610,13 @@ const STRINGS = {
 
   es: {
     'lang.name': 'Español',
+    'game.summary': 'Resumen',
+    'game.matchDate': 'Fecha',
+    'game.groundedHomeTeam': 'Equipo local (de búsqueda web)',
+    'game.groundedAwayTeam': 'Equipo visitante (de búsqueda web)',
+    'game.groundedCompetition': 'Competición (de búsqueda web)',
+    'game.groundedVenue': 'Recinto (de búsqueda web)',
+    'game.notIdentified': 'Nada en pantalla identificó este partido',
     'moment.category': 'Categoría',
     'moment.play': 'Reproducir esta jugada',
     'moment.details': 'Detalles',
