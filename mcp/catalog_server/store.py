@@ -656,17 +656,35 @@ def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> 
 
     Ordered by time rather than by score because this is a record of what
     happened, not a shortlist — `list_moments` is the ranked view.
+
+    The score threshold is applied here rather than in the query. Firestore
+    wants the first order_by to be the field an inequality filters on, so
+    "highlightScore >= x ordered by startSec" is not one query it will run
+    without a composite index — and it fails at read time with a link to create
+    one, which is a bad way to find out. Ordering by startSec alone needs only
+    the single-field index every collection already has.
     """
     from google.cloud import firestore
 
+    # Over-read when filtering: taking `limit` documents first and then dropping
+    # the low-scoring ones would return fewer than asked for, and on a match
+    # where the early moments score badly it would return almost nothing.
     query = (
         job_ref(job_id)
         .collection("moments")
-        .where(filter=firestore.FieldFilter("highlightScore", ">=", min_score))
         .order_by("startSec", direction=firestore.Query.ASCENDING)
-        .limit(limit)
+        .limit(limit * 4 if min_score > 0 else limit)
     )
-    return [as_action_play(d.to_dict()) for d in query.stream()]
+
+    plays: list[dict[str, Any]] = []
+    for snapshot in query.stream():
+        doc = snapshot.to_dict() or {}
+        if min_score > 0 and float(doc.get("highlightScore") or 0.0) < min_score:
+            continue
+        plays.append(as_action_play(doc))
+        if len(plays) >= limit:
+            break
+    return plays
 
 
 def list_moments(job_id: str, limit: int = 100, min_score: float = 0.0) -> list[dict[str, Any]]:

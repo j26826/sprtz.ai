@@ -91,6 +91,25 @@ identical confidence. `test_segment_prompt_stays_short` guards this. If you
 lengthen the segment prompt, re-check that timestamps still spread across the
 window.
 
+### Firestore query shapes
+
+An inequality filter forces the **first `order_by` to be that same field**.
+`list_action_plays` filtered `highlightScore >= x` and ordered by `startSec`,
+which Firestore will not run without a composite index — and it says so on a
+live read, against real data, with a link to go and create one. That is how "I
+cannot retrieve all the moments" reached an editor: nothing failed at import, at
+call time, or in any test that mocks the client.
+
+It now orders by `startSec` alone, which the automatic single-field index
+serves, and applies the threshold in Python — over-reading first, or a page of
+low-scoring early moments would return almost nothing. Same reasoning as the
+status filter in `list_jobs`.
+
+`test_query_shapes.py` reads the store's source and fails on this shape
+wherever it appears, and checks that every equality-plus-ordering pair still has
+an index declared in `firestore.tf`. It is a lint rather than a test, and it
+lives with the tests because that is when it needs to run.
+
 ### The ActionPlay record
 
 Every detected moment is also an **ActionPlay**: `actionCategory` (one of the
