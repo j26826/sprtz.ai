@@ -343,6 +343,22 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### Sessions and jobs are separate
+
+A session is a conversation; a job is a match. The session notes which job it is
+currently about so reopening it comes back to the same place, but that is a
+bookmark rather than ownership: several sessions may be about one match, a
+session may be about none, and **deleting a session never deletes a job**.
+
+A match is hours of analysis over a multi-gigabyte upload and a session is a few
+lines of localStorage. Tying the two together meant tidying the sidebar
+destroyed work — not a trade anyone would make deliberately, and far too easy to
+make by accident. Matches are deleted from the job card, where the confirmation
+names what actually goes.
+
+Nothing creates a session per job. Jobs are reached through the agent and the
+job cards, and exist perfectly well without anyone having talked about them.
+
 ### The media service needs delete on uploads, not just read
 
 It held `objectViewer` on the uploads bucket and `objectAdmin` on the HLS one,
