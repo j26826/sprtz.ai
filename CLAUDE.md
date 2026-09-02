@@ -187,6 +187,26 @@ cannot sign locally — it raises "you need a private key to sign credentials".
 route signing through IAM's signBlob, and the service account needs
 `roles/iam.serviceAccountTokenCreator` **on itself** (`api_self_sign` in iam.tf).
 
+**The media server runs one job per instance.** Its concurrency said 4 while the
+comment beside it said "one heavy job per instance". Four remuxes sharing 2 GiB
+went over the limit and Cloud Run took the container down mid-response, so the
+agent's call never returned and the job sat in `analysis` looking alive. The
+writable filesystem is memory, so every segment ffmpeg writes before the
+uploader drains it is RAM — a cost that multiplies by concurrency. Parallelism
+belongs in `max_instance_count`, where each job gets a whole container.
+
+This is the one memory finding here that is measured rather than inferred:
+`Memory limit of 2048 MiB exceeded with 2103 MiB used`, in the *platform* log.
+The variable's old "keep at or below 1GiB per CPU" description was the
+disproved ratio theory and has been removed — it would push the limit the wrong
+way.
+
+**A stage that dies must record it.** Cloud Run kills a container mid-response
+and progress reporting dies with it, so the job keeps its status and reads as
+working for ever. Every pipeline stage is wrapped in `@stage(...)`, which marks
+the job `failed` with the reason and returns rather than raises — an exception
+escaping ends the run before the later stages can report anything.
+
 **The MCP toolsets need `header_provider`, not headers.** The two servers are
 private Cloud Run services, so every call needs an OIDC token for that service's
 URL. `call_tool` mints one per call and always worked; the *toolsets* were built
