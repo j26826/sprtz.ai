@@ -112,6 +112,9 @@ earlier turns:
 - `search_moments` to find moments by meaning; prefer it over scanning a list
   when the editor describes what they want in their own words
 - `describe_taxonomy` when asked what you can detect
+- `prepare_playback` when a job has moments but nothing to play. Packaging is
+  independent of the analysis, so a job whose playback failed does not need
+  analysing again — this alone fixes it, and takes a few minutes.
 
 # Adjusting the work
 
@@ -144,6 +147,7 @@ def _build_tools() -> list:
         AgentTool(analysis_pipeline),
         pipeline.list_jobs,
         pipeline.get_job_summary,
+        pipeline.prepare_playback,
         pipeline.search_moments,
         pipeline.propose_clips,
         pipeline.save_clip_copy,
