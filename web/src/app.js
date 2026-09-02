@@ -710,6 +710,42 @@ function gameCard() {
 }
 
 
+/**
+ * The sessions list down the left.
+ *
+ * One entry per job, newest first, from the same Firestore listener the cards
+ * use — so it moves with an analysis rather than needing its own refresh. A
+ * session is a job here: the editor thinks in matches, and every conversation
+ * is about one.
+ */
+function renderSessions() {
+  const list = $('sessions-list');
+  if (!list) return;
+
+  if (!state.jobs.length) {
+    list.innerHTML = `<div class="sessions-empty">${esc(t('sessions.empty'))}</div>`;
+    return;
+  }
+
+  list.innerHTML = state.jobs.map((j) => {
+    const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
+    const failed = j.status === 'failed' || j.status === 'rejected';
+    const tone = failed ? 'failed' : running ? 'running' : 'idle';
+    const stamp = toDate(j.createdAt);
+    const meta = running && !isStalled(j)
+      ? `${esc(j.stage || j.status)} · ${Math.round(j.progress || 0)}%`
+      : esc(j.status || '');
+    return `
+      <button class="session" data-session="${esc(j.id)}" data-tone="${tone}"
+              aria-current="${j.id === state.jobId}">
+        <div class="session-name">${esc(j.title || j.source?.originalName || j.id)}</div>
+        <div class="session-meta">${meta}${
+          stamp ? ` · ${stamp.toLocaleDateString(getLocale())}` : ''}</div>
+      </button>`;
+  }).join('');
+}
+
+
 function jobsCard() {
   if (!state.jobs.length) {
     return `<div class="panel-light"><div class="job">
@@ -808,8 +844,9 @@ function actionsRow(msg) {
 /* ────────────────────────────────────────────────────────── render ── */
 
 function render() {
+  renderSessions();
   const job = state.job;
-  $('game-title').textContent = job ? (job.title || 'Untitled match') : 'No match loaded';
+  $('game-title').textContent = job ? (job.title || t('header.untitled')) : t('header.noMatch');
 
   const parts = [];
   if (job?.media?.durationSec) parts.push(dur(job.media.durationSec));
@@ -1197,15 +1234,14 @@ async function startUpload() {
 /* ──────────────────────────────────────────────────── interactions ── */
 
 document.addEventListener('click', (event) => {
-  const t = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
+  const hit = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
-    + '[data-reanalyse],[data-cancel-job],[data-delete-job],#sign-out,'
-    + '#open-settings,#close-settings');
-  if (!t) return;
+    + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session]');
+  if (!hit) return;
 
-  if (t.dataset.ask) {
-    const q = t.dataset.ask;
+  if (hit.dataset.ask) {
+    const q = hit.dataset.ask;
     if (q === 'Cut all of these') {
       ask('Cut all of these into clips.');
     } else {
@@ -1213,65 +1249,63 @@ document.addEventListener('click', (event) => {
     }
     return;
   }
-  if (t.dataset.play) { playMoment(t.dataset.play); return; }
-  if (t.dataset.closePlayer) { state.playing = null; destroyPlayer(); render(); return; }
-  if (t.dataset.add) {
-    const m = momentById(t.dataset.add);
+  if (hit.dataset.play) { playMoment(hit.dataset.play); return; }
+  if (hit.dataset.closePlayer) { state.playing = null; destroyPlayer(); render(); return; }
+  if (hit.dataset.add) {
+    const m = momentById(hit.dataset.add);
     ask(`Add the ${m?.label || 'moment'} at ${clock(m?.startSec || 0)} to the reel.`);
     return;
   }
-  if (t.dataset.clipPlay) {
-    const c = state.clips.find((x) => x.clipId === t.dataset.clipPlay);
+  if (hit.dataset.clipPlay) {
+    const c = state.clips.find((x) => x.clipId === hit.dataset.clipPlay);
     if (c) { state.playing = { momentId: c.momentId, start: c.startSec, end: c.endSec }; render(); }
     return;
   }
-  if (t.dataset.clipShorter || t.dataset.clipLonger) {
-    const id = t.dataset.clipShorter || t.dataset.clipLonger;
+  if (hit.dataset.clipShorter || hit.dataset.clipLonger) {
+    const id = hit.dataset.clipShorter || hit.dataset.clipLonger;
     const c = state.clips.find((x) => x.clipId === id);
-    const delta = t.dataset.clipShorter ? -1 : 1;
+    const delta = hit.dataset.clipShorter ? -1 : 1;
     ask(`Make the clip "${c?.title || id}" ${Math.abs(delta)} second ${delta < 0 ? 'shorter' : 'longer'}.`);
     return;
   }
-  if (t.dataset.platform) {
-    state.platforms[t.dataset.platform] = !state.platforms[t.dataset.platform];
+  if (hit.dataset.platform) {
+    state.platforms[hit.dataset.platform] = !state.platforms[hit.dataset.platform];
     render();
     return;
   }
-  if (t.id === 'open-settings') { openSettings(); return; }
-  if (t.id === 'close-settings') { closeSettings(); return; }
-  if (t.id === 'sign-out') {
-    signOutNow();
+  if (hit.dataset.session) {
+    if (hit.dataset.session !== state.jobId) selectJob(hit.dataset.session);
     return;
   }
-  if (t.dataset.reanalyse) {
-    selectJob(t.dataset.reanalyse);
+  if (hit.dataset.reanalyse) {
+    selectJob(hit.dataset.reanalyse);
     ask('Clear this job\'s previous results and analyse the match again.');
     return;
   }
-  if (t.dataset.cancelJob) {
-    selectJob(t.dataset.cancelJob);
+  if (hit.dataset.cancelJob) {
+    selectJob(hit.dataset.cancelJob);
     ask('Cancel the analysis running on this job.');
     return;
   }
-  if (t.dataset.deleteJob) {
+  if (hit.dataset.deleteJob) {
     // Deleting takes the uploaded match with it, so the confirmation names what
     // goes rather than asking a generic "are you sure?".
-    const name = t.dataset.title || 'this job';
+    const name = hit.dataset.title || 'this job';
     if (!window.confirm(`${t('jobs.delete')} "${name}"?\n\n${t('jobs.deleteConfirm')}`)) return;
-    selectJob(t.dataset.deleteJob);
+    selectJob(hit.dataset.deleteJob);
     ask('Delete this job, its video and everything found in it.');
     return;
   }
-  if (t.dataset.preparePlayback) {
+  if (hit.dataset.preparePlayback) {
     ask('Prepare playback for this match. The analysis is done; it just needs packaging.');
     return;
   }
-  if (t.dataset.retry) {
-    selectJob(t.dataset.retry);
+  if (hit.dataset.retry) {
+    selectJob(hit.dataset.retry);
     ask('The run on this job stopped without finishing. Start the analysis again.');
     return;
   }
-  if (t.dataset.sport) { state.upload.sport = t.dataset.sport; render(); }
+  if (hit.dataset.sport) { state.upload.sport = hit.dataset.sport; render(); }
 });
 
 document.addEventListener('change', (event) => {
@@ -1299,6 +1333,14 @@ $('composer').addEventListener('submit', (event) => {
   input.value = '';
   ask(text);
 });
+
+// The header chrome gets its own listeners rather than going through the
+// delegated handler. They are fixed elements that exist for the life of the
+// page, so delegation buys nothing, and it put them behind a selector and a
+// chain of early returns that had already broken them once.
+$('open-settings')?.addEventListener('click', openSettings);
+$('close-settings')?.addEventListener('click', closeSettings);
+$('sign-out')?.addEventListener('click', signOutNow);
 
 $('new-session').addEventListener('click', () => {
   state.msgs = [greeting()];
