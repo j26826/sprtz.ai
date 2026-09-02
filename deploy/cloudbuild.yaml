@@ -125,6 +125,22 @@ steps:
       - api/Dockerfile
       - api
 
+  - id: web-checks
+    name: node:22-alpine
+    waitFor: ["-"]
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -eu
+        node --check web/src/app.js
+        node --check web/src/i18n.js
+        node --check web/src/settings.js
+        node --check web/src/sessions.js
+        # Parsing is not enough: a missing translation key, a dead element id
+        # and an unbound button all parse and fail in a browser.
+        node web/check.mjs
+
   - id: build-web
     name: gcr.io/cloud-builders/docker
     waitFor: ["-"]

@@ -406,6 +406,19 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### web/check.mjs
+
+`node --check` only parses. Three classes of mistake parse perfectly and fail in
+a browser, where the symptom is a blank screen or a dead button rather than
+anything naming the cause: a `t()` key en-GB does not define, a `$('id')` the
+document does not have, and a `<button>` whose data attribute is in no handler's
+selector. All three have shipped. The script checks them exactly and runs in CI.
+
+It deliberately does **not** try to find calls to undefined functions by
+pattern — an earlier version could not tell a destructured parameter or the word
+"the" in a comment from a call, and a check that cries wolf trains you to skip
+its output.
+
 ### Sessions and jobs are separate
 
 A session is a conversation; a job is a match. The session notes which job it is
