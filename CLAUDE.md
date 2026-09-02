@@ -253,6 +253,13 @@ happened in instead of ending the batch.
 Segment completion is what moves the bar during analysis, counted rather than
 indexed because segments finish out of order.
 
+**Progress only goes forward.** Playback and analysis run concurrently and own
+different bands — 5-20 and 20-80 — so whichever finishes last writes last, and
+an encode ending after the analysis had reached 80% pulled the bar back to 20.
+`update_job_status` takes the higher of the stored and the new value. Zero is
+the exception, because that is how a re-run says it is starting over rather than
+how a stage reports being early.
+
 An empty `status` passed to `update_job_status` leaves the status alone.
 Progress updates arrive once per segment and have no opinion about status, so
 without that they would blank the field the whole UI reads.
