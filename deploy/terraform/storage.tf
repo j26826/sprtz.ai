@@ -12,10 +12,12 @@ resource "google_storage_bucket" "uploads" {
   force_destroy               = var.environment != "prod"
   labels                      = local.common_labels
 
+  # The browser PUTs a multi-gigabyte file straight here with a signed URL, so
+  # the app's origin has to be allowed explicitly.
   cors {
-    origin          = var.upload_cors_origins
-    method          = ["GET", "HEAD", "PUT", "OPTIONS"]
-    response_header = ["Content-Type", "Content-Range", "x-goog-resumable"]
+    origin          = local.browser_origins
+    method          = ["GET", "HEAD", "PUT", "POST", "OPTIONS"]
+    response_header = ["Content-Type", "Content-Range", "Content-Length", "x-goog-resumable"]
     max_age_seconds = 3600
   }
 
@@ -46,9 +48,9 @@ resource "google_storage_bucket" "media" {
   labels                      = local.common_labels
 
   cors {
-    origin          = var.upload_cors_origins
-    method          = ["GET", "HEAD"]
-    response_header = ["Content-Type", "Range"]
+    origin          = local.browser_origins
+    method          = ["GET", "HEAD", "OPTIONS"]
+    response_header = ["Content-Type", "Range", "Accept-Ranges", "Content-Length"]
     max_age_seconds = 3600
   }
 

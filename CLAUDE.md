@@ -155,6 +155,12 @@ startup probe failing with no application output, suspect time, not the image.
 > committed into comments before a plain control deploy disproved it. When a
 > platform behaviour looks arbitrary, run the boring control first.
 
+**Bucket CORS must list the app's own origin.** The browser PUTs the upload
+straight to GCS, so a valid signed URL still fails its preflight if the origin
+is not allowed — the error names CORS, not signing. `local.browser_origins`
+derives it from the load balancer host and is applied to the uploads, media and
+HLS buckets together.
+
 **Signed URLs on Cloud Run need an access token, not just a signer email.**
 Metadata credentials carry a token and no private key, so the storage library
 cannot sign locally — it raises "you need a private key to sign credentials".

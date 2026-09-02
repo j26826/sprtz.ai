@@ -19,7 +19,7 @@ resource "google_storage_bucket" "hls" {
   # cookies, does so with credentials — so the allowed origins must be listed
   # explicitly rather than wildcarded.
   cors {
-    origin          = var.upload_cors_origins
+    origin          = local.browser_origins
     method          = ["GET", "HEAD", "OPTIONS"]
     response_header = ["Content-Type", "Range", "Accept-Ranges", "Content-Length"]
     max_age_seconds = 3600

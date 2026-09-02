@@ -40,6 +40,11 @@ locals {
 
   web_service_name = var.web_service_name != "" ? var.web_service_name : "${local.prefix}-web"
 
+  # Origins allowed to talk to the buckets from a browser. The app's own origin
+  # must be here or the direct-to-GCS upload fails its CORS preflight — the
+  # signed URL is valid, the browser simply refuses to send it.
+  browser_origins = distinct(concat([local.app_url], var.upload_cors_origins))
+
   common_labels = {
     app         = var.app_name
     environment = var.environment
