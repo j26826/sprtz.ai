@@ -52,6 +52,20 @@ def parse_timecode(value: str) -> float | None:
     return None
 
 
+def format_timecode(seconds: float) -> str:
+    """Seconds to MM:SS, or H:MM:SS past the hour.
+
+    The inverse of :func:`parse_timecode`. A match runs past 60 minutes, so
+    minutes are not truncated into an hour field unless there is one.
+    """
+    total = max(0, round(seconds or 0))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 class DetectedMoment(BaseModel):
     """A single moment as Gemini reports it, timed relative to its segment.
 
@@ -92,6 +106,28 @@ class DetectedMoment(BaseModel):
     scoreboard: str | None = Field(
         default=None,
         description="Score bug text if legible, e.g. 'SWE 24-23 DEN 58:41'. Null if not readable.",
+    )
+    action_result: str = Field(
+        default="",
+        description=(
+            "How the action ends, in one or two words: Goal, Save, Miss, Block, Foul, "
+            "Turnover, Card, Timeout, Penalty. Empty if it does not resolve on camera."
+        ),
+    )
+    participant: str = Field(
+        default="",
+        description=(
+            "Who performs the action, and only if you can actually read it: a shirt "
+            "number, or a name shown on screen or said by the commentary. Write "
+            "'#7 red' or 'unknown' — never guess a name from context."
+        ),
+    )
+    participant_role: str = Field(
+        default="",
+        description=(
+            "That participant's role in this action: Attacker, Defender, Goalkeeper, "
+            "Pivot, Wing, Back, Referee or Coach."
+        ),
     )
     is_replay: bool = Field(
         default=False, description="True if this is a replay of an earlier live action."
@@ -175,6 +211,9 @@ class Moment(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     scoreboard: str | None = None
     is_goal: bool = False
+    action_result: str = ""
+    participant: str = ""
+    participant_role: str = ""
     segment_indexes: list[int] = Field(
         default_factory=list,
         description="Segments this moment was seen in. More than one means it was merged.",
@@ -183,6 +222,27 @@ class Moment(BaseModel):
     @property
     def duration_sec(self) -> float:
         return max(0.0, self.end_sec - self.start_sec)
+
+    def as_action_play(self) -> dict:
+        """The moment in ActionPlay form.
+
+        Timecodes are MM:SS into the match, not into the segment the moment was
+        found in — a consumer of this has no idea segments exist. Confidence is
+        0-100 here while it stays 0-1 everywhere inside, because this shape asks
+        for a score and the internal one is a probability.
+        """
+        return {
+            "type": "ActionPlay",
+            "timeOffsetStart": format_timecode(self.start_sec),
+            "timeOffsetEnd": format_timecode(self.end_sec),
+            "actionCategory": self.category,
+            "actionClass": self.label,
+            "actionResult": self.action_result,
+            "participant": self.participant,
+            "participantRole": self.participant_role,
+            "description": self.description,
+            "confidenceScore": round(self.confidence * 100),
+        }
 
 
 class ClipSuggestion(BaseModel):

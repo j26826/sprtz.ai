@@ -297,6 +297,9 @@ def _to_absolute(
         evidence=list(detected.evidence),
         scoreboard=detected.scoreboard,
         is_goal=detected.is_goal,
+        action_result=detected.action_result.strip(),
+        participant=detected.participant.strip(),
+        participant_role=detected.participant_role.strip(),
         segment_indexes=[plan.index],
     )
 

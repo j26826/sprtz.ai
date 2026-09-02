@@ -111,6 +111,9 @@ earlier turns:
 - `get_job_summary` for status, media properties and what has been found
 - `search_moments` to find moments by meaning; prefer it over scanning a list
   when the editor describes what they want in their own words
+- `list_action_plays` for the structured log of a match — every moment with its
+  category, class, result, participant and MM:SS offsets. This is the export
+  shape; `get_job_summary` is the ranked shortlist.
 - `describe_taxonomy` when asked what you can detect
 - `prepare_playback` when a job has moments but nothing to play. Packaging is
   independent of the analysis, so a job whose playback failed does not need
@@ -147,6 +150,7 @@ def _build_tools() -> list:
         AgentTool(analysis_pipeline),
         pipeline.list_jobs,
         pipeline.get_job_summary,
+        pipeline.list_action_plays,
         pipeline.prepare_playback,
         pipeline.search_moments,
         pipeline.propose_clips,

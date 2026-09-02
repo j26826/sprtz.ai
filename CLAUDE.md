@@ -91,11 +91,38 @@ identical confidence. `test_segment_prompt_stays_short` guards this. If you
 lengthen the segment prompt, re-check that timestamps still spread across the
 window.
 
+### The ActionPlay record
+
+Every detected moment is also an **ActionPlay**: `actionCategory` (one of the
+sport's five groupings), `actionClass`, `actionResult`, `participant`,
+`participantRole`, `description`, MM:SS `timeOffsetStart`/`End` **into the
+match**, and a 0-100 `confidenceScore`. `list_action_plays` returns them in
+match order — the structured log, where `list_moments` is the ranked shortlist.
+
+Confidence is a 0-1 probability everywhere inside and 0-100 only in this shape,
+scaled at the projection rather than stored twice and allowed to disagree.
+
+`participant` is **observed or empty**, never inferred. The model is told to
+write a shirt number or `unknown` rather than guess a name, because an invented
+name is worse than a blank field: an editor publishes it. Same rule as the
+scoreboard.
+
+The three new fields are described in the *system instruction*, not the segment
+prompt — they describe the response shape, which is identical for every segment,
+so they cache and cost the short prompt nothing. The segment prompt had 305
+characters of headroom against `test_segment_prompt_stays_short`.
+
 ### Search
 
 Retrieval and ranking answer different questions. `knn_search_moments`
 over-fetches 4x and has Gemini rerank for relevance. Reranker failure degrades
 to vector order — it must never empty the result set.
+
+**What is embedded is the whole ActionPlay**, not the description: class,
+category, result, participant role, participant, then the prose. "Double save by
+the keeper" and "who scored from the wing" are answerable only if the outcome
+and the role are in the vector, because they live in the structured fields
+rather than inside the sentence.
 
 ### Media
 
