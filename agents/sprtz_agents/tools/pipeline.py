@@ -407,10 +407,19 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
     await _progress(job_id, "analysis", 0.0, status="analyzing")
     # Fixed on the job at registration, not read from whoever is looking now.
     metadata_language = job.get("metadataLanguage", "en")
+
+    # Cut the match into real files first. Gemini fetches the whole object to
+    # serve a request whatever offsets it is given, so a source over about 2 GiB
+    # fails every window — slicing by time alone does not make the bytes
+    # smaller. An empty result falls back to offsets, which is right for a
+    # source small enough not to need this.
+    segment_uris = await _cut_segments(job_id, gcs_uri, duration)
+
     result = await analyse_segments(
         gcs_uri, duration, sport=sport,
         metadata_language=metadata_language,
         on_segment_done=segment_done,
+        segment_uris=segment_uris,
     )
     if result["status"] == "error":
         await mcp_client.call_tool(
@@ -465,6 +474,7 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
         return {"status": "cancelled", "job_id": job_id, "moments": len(moments)}
 
     persisted = await _persist_moments(job_id, moments)
+    await _drop_segments(job_id)
     await _progress(job_id, "analysis", 1.0)
 
     await _record_game_details(
@@ -850,6 +860,55 @@ async def delete_job(job_id: str) -> dict:
         "clips_removed": removed.get("clips", 0),
         "game_removed": bool(removed.get("game", 0)),
     }
+
+
+async def _cut_segments(job_id: str, gcs_uri: str, duration: float) -> dict[int, str]:
+    """Cut the source into one file per analysis window.
+
+    Returns index -> URI, empty when nothing could be cut. Empty is not a
+    failure: analysis then falls back to time offsets into the whole match,
+    which works for anything small enough that Gemini will fetch it.
+    """
+    windows = [
+        {"index": p.index, "start_sec": p.start_sec, "end_sec": p.end_sec}
+        for p in plan_segments(duration)
+    ]
+    if not windows:
+        return {}
+
+    await _emit(job_id, "analysis",
+                f"Cutting the match into {len(windows)} segments for analysis.",
+                segments=len(windows))
+    result = await mcp_client.call_tool(
+        "media", "split_for_analysis",
+        {"gcs_uri": gcs_uri, "job_id": job_id, "windows": windows},
+    )
+
+    segments = result.get("segments") or []
+    if result.get("status") != "success":
+        # Partial output is still worth having: the windows that were cut are
+        # analysed from their own files and the rest fall back to offsets.
+        await _emit(
+            job_id, "analysis",
+            f"Could not cut every segment ({len(segments)} of {len(windows)} done); "
+            "the rest will be read from the full file.",
+            level="warning", detail=result.get("error"),
+        )
+    return {int(seg["index"]): seg["gcs_uri"] for seg in segments if seg.get("gcs_uri")}
+
+
+async def _drop_segments(job_id: str) -> None:
+    """Remove the cut segments once the analysis has read them.
+
+    They are a derived copy of the whole match — as many gigabytes again — and
+    nothing needs them after the run. A re-analysis cuts them afresh, which
+    costs range reads rather than storage held for weeks.
+    """
+    try:
+        await mcp_client.call_tool(
+            "media", "delete_analysis_segments", {"job_id": job_id})
+    except Exception:
+        logger.warning("could not remove analysis segments for %s", job_id, exc_info=True)
 
 
 async def _cancelled(job_id: str) -> bool:

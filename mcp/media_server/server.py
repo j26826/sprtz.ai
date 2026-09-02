@@ -103,6 +103,9 @@ def delete_job_media(job_id: str, gcs_uri: str = "") -> dict:
     """
     removed = {"hls_objects": 0, "already_gone": 0, "failed": 0, "source_deleted": False}
     try:
+        if MEDIA_BUCKET:
+            # A run that died mid-analysis leaves these; nothing else clears them.
+            gcs.delete_prefix(MEDIA_BUCKET, f"jobs/{job_id}/")
         if HLS_BUCKET:
             counts = gcs.delete_prefix(HLS_BUCKET, f"jobs/{job_id}/")
             removed["hls_objects"] = counts["deleted"]
@@ -195,6 +198,97 @@ def transcode_hls(gcs_uri: str, job_id: str) -> dict:
         "segment_seconds": transcoder.SEGMENT_SECONDS,
         **started,
     }
+
+
+@mcp.tool
+def split_for_analysis(gcs_uri: str, job_id: str, windows: list[dict]) -> dict:
+    """Cut a source into physical segment files for analysis.
+
+    Gemini fetches the *whole* object to serve a request, whatever time offsets
+    are asked for: a 3.22 GiB match fails every segment with "File content
+    exceeded the size limit. max_bytes_fetched: 2146971648". Slicing by time
+    alone therefore does not help — the bytes have to be smaller, so the source
+    is cut into real files, one per window.
+
+    Stream copy, so this is a remux rather than an encode: `-ss` on an HTTPS
+    source is a range read, so each cut pulls roughly its own share of the file
+    and nothing decodes. Segments are written, uploaded and deleted one at a
+    time, because the writable filesystem here is memory and holding thirteen
+    of them at once is how this container died before.
+
+    Args:
+        gcs_uri: gs:// URI of the source video.
+        job_id: Job the segments belong to.
+        windows: [{"index": 0, "start_sec": 0.0, "end_sec": 900.0}, ...].
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+
+    work = _scratch()
+    segments: list[dict] = []
+    try:
+        token = gcs.bearer_token()
+        source_url = gcs.https_url(gcs_uri)
+
+        for window in windows:
+            index = int(window["index"])
+            start = float(window["start_sec"])
+            end = float(window["end_sec"])
+            local = work / f"segment_{index:03d}.mp4"
+
+            # Copy, not re-encode. The in-point can drift to the nearest
+            # keyframe, which is exactly what the windows overlap to absorb —
+            # and re-encoding thirteen segments of a three-hour match is hours
+            # of CPU for a picture the model samples at 1 fps.
+            ffmpeg_ops.cut(source_url, local, start, end,
+                           reencode=False, bearer_token=token)
+
+            uri = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/segments/{local.name}"
+            size = local.stat().st_size
+            gcs.upload(local, uri, content_type="video/mp4")
+            local.unlink()
+
+            segments.append({
+                "index": index, "gcs_uri": uri,
+                "start_sec": start, "end_sec": end, "bytes": size,
+            })
+            logger.info("segment %d of %d written (%d bytes)",
+                        index + 1, len(windows), size)
+
+        return {"status": "success", "job_id": job_id, "segments": segments,
+                "count": len(segments)}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("split_for_analysis failed for %s", gcs_uri)
+        return {
+            "status": "error", "error": f"{type(exc).__name__}: {exc}",
+            "job_id": job_id,
+            # Whatever was written before the failure is still usable, and
+            # saying so stops a caller re-cutting the whole match to retry.
+            "segments": segments,
+        }
+    finally:
+        _cleanup(work)
+
+
+@mcp.tool
+def delete_analysis_segments(job_id: str) -> dict:
+    """Remove the per-window files cut for analysis.
+
+    They are a derived copy of the whole match and nothing needs them once it
+    has been read. Deleting them is separate from deleting the job because the
+    job keeps its source and its playback long after the analysis is done.
+
+    Args:
+        job_id: Job whose analysis segments to remove.
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+    try:
+        counts = gcs.delete_prefix(MEDIA_BUCKET, f"jobs/{job_id}/segments/")
+        return {"status": "success", "job_id": job_id, **counts}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not remove analysis segments for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
 
 
 @mcp.tool
