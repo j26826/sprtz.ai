@@ -155,6 +155,11 @@ startup probe failing with no application output, suspect time, not the image.
 > committed into comments before a plain control deploy disproved it. When a
 > platform behaviour looks arbitrary, run the boring control first.
 
+**Serverless NEG backends reject `timeout_sec`.** A backend service fronting
+Cloud Run cannot set a request deadline; the Cloud Run service's own `timeout`
+is what applies. The API's is 3600s because the agent's SSE stream stays open
+for a whole analysis.
+
 **Cloud Build.**
 - The `gcloud` builder image has **no `jq`** — use `python3`, which it does have.
   A `|| true` on the apt-get that installed it turned a missing binary into a

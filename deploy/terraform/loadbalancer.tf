@@ -45,9 +45,9 @@ resource "google_compute_backend_service" "api" {
   name                  = "${local.prefix}-api-backend"
   load_balancing_scheme = "EXTERNAL_MANAGED"
   protocol              = "HTTP"
-  # Long enough for the agent's SSE stream, which stays open while an analysis
-  # runs. The default 30s would cut every conversation short.
-  timeout_sec = 3600
+  # No timeout_sec: the API rejects it on a backend service fronting serverless
+  # NEGs. The request deadline that actually applies is the Cloud Run service's
+  # own timeout, which is set high enough for the agent's SSE stream.
 
   backend {
     group = google_compute_region_network_endpoint_group.api.id
