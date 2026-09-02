@@ -99,6 +99,19 @@ sport's five groupings), `actionClass`, `actionResult`, `participant`,
 match**, and a 0-100 `confidenceScore`. `list_action_plays` returns them in
 match order — the structured log, where `list_moments` is the ranked shortlist.
 
+Each record also carries a `summary`: one sentence naming who did what and how
+it ended, in the order a commentator would say it. It is **not** a shorter
+`description` — the description says what the picture shows, the summary says
+what happened, and it is the line an editor scans a list by. Two fields that
+read as the same request get the same answer twice, and one of them then costs
+tokens in every prompt and every vector for nothing.
+
+`GameDetails` carries a `title`, composed in code from the strongest facts
+available — `SWE v DEN — EHF Euro`, falling back to one legible team, then the
+competition, then whatever the editor called the upload. Not generated: a
+model-written title is a sentence that sounds like a fixture, and one naming the
+wrong competition is worse than no title.
+
 It also carries `team1`/`team2` (home and away as printed on the score bug),
 `scoreTeam1`/`scoreTeam2` at that moment, and `actionTeam` — the side the action
 belongs to, named to match `team1` or `team2` so the two join.

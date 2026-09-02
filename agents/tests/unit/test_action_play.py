@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from sprtz_agents.schemas import DetectedMoment, Moment, format_timecode, parse_timecode
+from sprtz_agents.schemas import (
+    DetectedMoment,
+    GameDetails,
+    Moment,
+    format_timecode,
+    parse_timecode,
+)
 
 
 def _moment(**kwargs) -> Moment:
@@ -27,6 +33,7 @@ def _moment(**kwargs) -> Moment:
         "confidence": 0.87,
         "excitement": 0.9,
         "highlight_score": 0.8,
+        "summary": "#12 blue saves the seven-metre and turns the rebound over the bar.",
         "description": "Keeper stops the seven-metre then turns the rebound over the bar.",
         "action_result": "Save",
         "participant": "#12 blue",
@@ -49,7 +56,7 @@ class TestShape:
             "type", "timeOffsetStart", "timeOffsetEnd", "actionCategory",
             "actionClass", "actionResult", "participant", "participantRole",
             "team1", "team2", "scoreTeam1", "scoreTeam2", "actionTeam",
-            "description", "confidenceScore",
+            "summary", "description", "confidenceScore",
         }
 
     def test_the_type_is_constant(self):
@@ -235,3 +242,57 @@ class TestTeamNameConsensus:
         applied = apply_team_names(moments, "SWE", "DEN")
 
         assert [m.score_team1 for m in applied] == [1, 24]
+
+
+class TestMomentSummary:
+    def test_the_summary_is_carried_into_the_record(self):
+        assert _moment().as_action_play()["summary"].startswith("#12 blue saves")
+
+    def test_it_is_asked_for_as_one_sentence_naming_who_and_what(self):
+        described = DetectedMoment.model_fields["summary"].description.lower()
+        assert "one sentence" in described
+        assert "who did what" in described
+
+    def test_it_is_not_billed_as_a_shorter_description(self):
+        # Two fields that read as the same request get the same answer twice,
+        # and then one of them is dead weight in every prompt and every vector.
+        described = DetectedMoment.model_fields["summary"].description.lower()
+        assert "not a shorter copy" in described
+
+    def test_it_defaults_to_empty_rather_than_being_required(self):
+        parsed = DetectedMoment(
+            moment_type="jump_shot", start_tc="00:10", peak_tc="00:12", end_tc="00:15",
+            confidence=0.8, excitement=0.5, description="A shot.",
+        )
+        assert parsed.summary == ""
+
+
+class TestGameTitle:
+    def _title(self, **kwargs):
+        from sprtz_agents.tools.game_summary import compose_title
+
+        base = {"home": "SWE", "away": "DEN", "competition": "EHF Euro", "fallback": "handball2"}
+        base.update(kwargs)
+        return compose_title(**base)
+
+    def test_it_names_the_fixture_and_the_competition(self):
+        assert self._title() == "SWE v DEN — EHF Euro"
+
+    def test_without_a_competition_it_is_just_the_pairing(self):
+        assert self._title(competition="") == "SWE v DEN"
+
+    def test_one_legible_team_beats_a_filename(self):
+        assert self._title(away="", competition="") == "SWE"
+
+    def test_nothing_legible_falls_back_to_what_the_editor_called_it(self):
+        # A generated title that sounds like a fixture but names the wrong one
+        # is worse than the name they chose themselves.
+        assert self._title(home="", away="", competition="") == "handball2"
+
+    def test_the_title_is_in_the_game_vector(self):
+        from sprtz_agents.tools.game_summary import embed_text
+
+        text = embed_text(GameDetails(
+            job_id="j1", sport="handball", title="SWE v DEN — EHF Euro",
+        ))
+        assert "SWE v DEN — EHF Euro" in text

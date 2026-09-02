@@ -474,6 +474,7 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
         segment_summaries=result.get("segment_summaries", []),
         competitions=result.get("competitions", []),
         venues=result.get("venues", []),
+        fallback_title=job.get("title", ""),
     )
 
     await mcp_client.call_tool(
@@ -518,6 +519,7 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
 async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
+    fallback_title: str = "",
 ) -> GameDetails | None:
     """Build and store the match-level record.
 
@@ -530,6 +532,7 @@ async def _record_game_details(
             job_id=job_id, sport=sport, moments=moments,
             segment_summaries=segment_summaries,
             competitions=competitions, venues=venues,
+            fallback_title=fallback_title,
         )
 
         judgement = await _judge_game(sport, moments, segment_summaries)
@@ -620,7 +623,8 @@ async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int =
                 "embed_text": ". ".join(
                     part for part in (
                         m.label, m.category, m.action_result,
-                        m.participant_role, m.participant, m.description,
+                        m.participant_role, m.participant, m.action_team,
+                        m.summary, m.description,
                     ) if part and part.strip()
                 ),
             }

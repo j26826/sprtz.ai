@@ -130,6 +130,25 @@ def judgement_prompt(sport: str, digest: str) -> str:
     return _JUDGEMENT_PROMPT.format(sport=sport, digest=digest)
 
 
+def compose_title(*, home: str, away: str, competition: str, fallback: str) -> str:
+    """Name the match from what was actually read.
+
+    Composed here rather than asked of a model, for the same reason the rest of
+    the factual half is: a generated title is a sentence that sounds like a
+    fixture, and one that names the wrong competition is worse than no title at
+    all. When nothing on screen identified the match this falls back to what the
+    editor called the upload, which is at least a name they chose themselves.
+    """
+    if home and away:
+        pairing = f"{home} v {away}"
+        return f"{pairing} — {competition}" if competition else pairing
+    # One team legible is still more use than a filename.
+    if home or away:
+        known = home or away
+        return f"{known} — {competition}" if competition else known
+    return competition or fallback
+
+
 def assemble(
     *,
     job_id: str,
@@ -139,6 +158,7 @@ def assemble(
     competitions: list[str],
     venues: list[str],
     judgement: dict | None = None,
+    fallback_title: str = "",
 ) -> GameDetails:
     """Put the record together: facts from the observations, judgements from the model."""
     home_team = most_common_reading([m.team1 for m in moments])
@@ -146,12 +166,18 @@ def assemble(
     final_score, home, away = final_score_from(moments)
     judgement = judgement or {}
 
+    competition = most_common_reading(competitions)
+
     return GameDetails(
         job_id=job_id,
         sport=sport,
+        title=compose_title(
+            home=home_team, away=away_team,
+            competition=competition, fallback=fallback_title,
+        ),
         home_team=home_team,
         away_team=away_team,
-        competition=most_common_reading(competitions),
+        competition=competition,
         venue=most_common_reading(venues),
         final_score=final_score,
         event_outcome=outcome_from(home_team, away_team, home, away),
@@ -172,6 +198,7 @@ def embed_text(game: GameDetails) -> str:
     whole match rather than a moment inside one.
     """
     parts = [
+        game.title,
         game.sport,
         game.home_team,
         game.away_team,

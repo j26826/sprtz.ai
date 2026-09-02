@@ -107,6 +107,15 @@ class DetectedMoment(BaseModel):
         default=None,
         description="Score bug text if legible, e.g. 'SWE 24-23 DEN 58:41'. Null if not readable.",
     )
+    summary: str = Field(
+        default="",
+        description=(
+            "One sentence naming who did what and how it ended, in the order a "
+            "commentator would say it: '#12 blue saves the seven-metre and turns "
+            "the rebound over the bar.' Not a shorter copy of the description — "
+            "that says what the picture shows, this says what happened."
+        ),
+    )
     action_result: str = Field(
         default="",
         description=(
@@ -255,6 +264,7 @@ class Moment(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     scoreboard: str | None = None
     is_goal: bool = False
+    summary: str = ""
     action_result: str = ""
     participant: str = ""
     participant_role: str = ""
@@ -294,6 +304,7 @@ class Moment(BaseModel):
             "scoreTeam1": self.score_team1,
             "scoreTeam2": self.score_team2,
             "actionTeam": self.action_team,
+            "summary": self.summary,
             "description": self.description,
             "confidenceScore": round(self.confidence * 100),
         }
@@ -312,6 +323,14 @@ class GameDetails(BaseModel):
 
     job_id: str
     sport: str
+    title: str = Field(
+        default="",
+        description=(
+            "How this match is named. Composed from what was read rather than "
+            "invented, and falls back to the uploaded file's title when nothing "
+            "on screen identified the fixture."
+        ),
+    )
     home_team: str = Field(default="", description="As printed on the score bug.")
     away_team: str = Field(default="", description="As printed on the score bug.")
     competition: str = Field(default="", description="League or competition, if named on screen.")
@@ -361,6 +380,7 @@ class GameDetails(BaseModel):
         return {
             "type": "GameDetails",
             "jobId": self.job_id,
+            "title": self.title,
             "sport": self.sport,
             "homeTeam": self.home_team,
             "awayTeam": self.away_team,

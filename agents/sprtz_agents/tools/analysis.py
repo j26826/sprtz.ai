@@ -325,6 +325,7 @@ def _to_absolute(
         evidence=list(detected.evidence),
         scoreboard=detected.scoreboard,
         is_goal=detected.is_goal,
+        summary=detected.summary.strip(),
         action_result=detected.action_result.strip(),
         participant=detected.participant.strip(),
         participant_role=detected.participant_role.strip(),

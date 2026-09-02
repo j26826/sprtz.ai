@@ -112,6 +112,8 @@ def action_play_text(moment: dict[str, Any]) -> str:
         # not embedded: "24-23" as text matches nothing anyone would type, and
         # a number in the vector dilutes the words that do.
         moment.get("action_team") or "",
+        # The sentence a person would actually type when looking for this.
+        moment.get("summary") or "",
         moment.get("description") or "",
     ]
     return ". ".join(p.strip() for p in parts if p and p.strip())
@@ -138,6 +140,7 @@ def as_action_play(doc: dict[str, Any]) -> dict[str, Any]:
         "scoreTeam1": doc.get("scoreTeam1"),
         "scoreTeam2": doc.get("scoreTeam2"),
         "actionTeam": doc.get("actionTeam", ""),
+        "summary": doc.get("summary", ""),
         "description": doc.get("description", ""),
         "confidenceScore": round(float(doc.get("confidence", 0.0)) * 100),
     }
@@ -263,13 +266,14 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict
 
     owner_uid = get_job(job_id).get("ownerUid", "")
     text = embed_text.strip() or " ".join(
-        str(game.get(k, "")) for k in ("sport", "home_team", "away_team", "summary")
+        str(game.get(k, "")) for k in ("title", "sport", "home_team", "away_team", "summary")
     )
     vector = embed([text], task_type="RETRIEVAL_DOCUMENT")[0]
 
     payload = {
         "jobId": job_id,
         "ownerUid": owner_uid,
+        "title": game.get("title", ""),
         "sport": game.get("sport", ""),
         "homeTeam": game.get("home_team", ""),
         "awayTeam": game.get("away_team", ""),
@@ -303,6 +307,7 @@ def _game_out(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "type": "GameDetails",
         "jobId": data.get("jobId", ""),
+        "title": data.get("title", ""),
         "sport": data.get("sport", ""),
         "homeTeam": data.get("homeTeam", ""),
         "awayTeam": data.get("awayTeam", ""),
@@ -590,6 +595,7 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
                 "evidence": moment.get("evidence", []),
                 "scoreboard": moment.get("scoreboard"),
                 "isGoal": moment.get("is_goal", False),
+                "summary": moment.get("summary", ""),
                 "actionResult": moment.get("action_result", ""),
                 "participant": moment.get("participant", ""),
                 "participantRole": moment.get("participant_role", ""),
@@ -632,6 +638,7 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "evidence": data.get("evidence", []),
         "scoreboard": data.get("scoreboard"),
         "is_goal": data.get("isGoal", False),
+        "summary": data.get("summary", ""),
         "action_result": data.get("actionResult", ""),
         "participant": data.get("participant", ""),
         "participant_role": data.get("participantRole", ""),
