@@ -407,14 +407,38 @@ function watchJobs() {
     query(collection(db, 'jobs'), orderBy('createdAt', 'desc'), limit(50)),
     (snap) => {
       state.jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // Deliberately does not create a session per job. The sidebar lists
-      // conversations; matches are reached through the agent and the job cards,
-      // and exist perfectly well without anyone having talked about them.
+      // No session is created per job — the sidebar lists conversations, and a
+      // match exists perfectly well without anyone having talked about it. But
+      // something has to be selected or the per-job listeners never start and
+      // every card that reads moments, clips or the game record is empty
+      // whatever Firestore holds.
+      ensureJobContext();
       render();
     },
     (err) => console.error('jobs listener', err),
   );
 }
+
+/**
+ * Make sure some match is in context.
+ *
+ * The moments, clips, events and game record are all read through listeners
+ * opened by selectJob, so with nothing selected the cards are empty however
+ * much has been analysed — which reads as "the analysis found nothing" rather
+ * than "no match is open". The most recent one is the useful default: it is
+ * what someone just uploaded, or what the desk is working on.
+ *
+ * A session that names its own match wins, and this never overrides it.
+ */
+function ensureJobContext() {
+  if (state.jobId || !state.jobs.length) return;
+  const session = state.sessionKey
+    ? listSessions().find((s) => s.id === state.sessionKey)
+    : null;
+  if (session?.jobId) return;
+  selectJob(state.jobs[0].id);
+}
+
 
 function selectJob(jobId) {
   state.unsubscribe.forEach((fn) => fn());
@@ -996,6 +1020,9 @@ function openSession(sessionId) {
     state.clips = [];
     state.events = [];
     state.game = null;
+    // A conversation about no particular match still shows the desk's most
+    // recent one, so "show me the best moments" has something to answer with.
+    ensureJobContext();
     render();
   }
 }

@@ -406,6 +406,17 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### Something must be selected
+
+Moments, clips, events and the game record are all read through listeners
+`selectJob` opens, so with no job selected every one of those cards is empty
+however much has been analysed — and an empty card reads as "the analysis found
+nothing" rather than "no match is open". Decoupling sessions from jobs removed
+the line that used to select the newest job, and took that context with it.
+
+`ensureJobContext` selects the most recent match when nothing else has, and
+never overrides a session that names its own.
+
 ### The cards
 
 Eight, each reachable from `attachCards` and each with an empty state:
