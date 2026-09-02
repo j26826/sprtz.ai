@@ -24,6 +24,9 @@ locals {
     { for r in [
       "roles/logging.logWriter",
       "roles/cloudtrace.agent",
+      # Packaging for playback is a Transcoder job now, so this service creates
+      # them and polls them. It never touches the video itself.
+      "roles/transcoder.admin",
       ] : "mcp_media:${r}" => { role = r, member = "serviceAccount:${google_service_account.mcp_media.email}" }
     },
     { for r in [
@@ -86,6 +89,21 @@ resource "google_storage_bucket_iam_member" "media_worker_uploads_read" {
   bucket = google_storage_bucket.uploads.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.mcp_media.email}"
+}
+
+# The Transcoder service agent, not the media service, is what actually opens
+# the source and writes the HLS package. Missing either of these fails minutes
+# into an encode rather than when the job is created.
+resource "google_storage_bucket_iam_member" "transcoder_uploads_read" {
+  bucket = google_storage_bucket.uploads.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_project_service_identity.transcoder.email}"
+}
+
+resource "google_storage_bucket_iam_member" "transcoder_hls_write" {
+  bucket = google_storage_bucket.hls.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_project_service_identity.transcoder.email}"
 }
 
 resource "google_storage_bucket_iam_member" "media_worker_media_write" {

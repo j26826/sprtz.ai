@@ -156,17 +156,21 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
 
 @stage("playback")
 async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
-    """Transcode the uploaded video to HLS and publish it behind the CDN.
+    """Encode the uploaded video to a 480p HLS preview behind the CDN.
 
     This is what the editor actually plays. Reviewing a key moment is a seek
     within this one stream, so no per-clip render is needed to watch a
-    suggestion. Independent of the analysis, so the two run concurrently.
+    suggestion — and 480p is enough to judge one. Independent of the analysis,
+    so the two run concurrently.
+
+    The encode runs on Transcoder API and takes minutes on a full match, so this
+    starts it and waits, reporting each state change into the job's feed.
 
     Args:
         job_id: Identifier of the job to prepare.
 
     Returns:
-        dict with the CDN playback URL and the rendition ladder.
+        dict with the CDN playback URL and the poster frame.
     """
     job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     gcs_uri = (job.get("source") or {}).get("gcsUri")
@@ -177,48 +181,103 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     if existing.get("hlsUrl"):
         return {"status": "success", "job_id": job_id, "already_prepared": True, **existing}
 
-    await _emit(job_id, "transcode", "Packaging the video for streaming playback.")
+    await _emit(job_id, "transcode", "Starting a 480p preview encode for playback.")
 
-    result = await mcp_client.call_tool(
+    started = await mcp_client.call_tool(
         "media", "transcode_hls", {"gcs_uri": gcs_uri, "job_id": job_id}
     )
-    if result.get("status") != "success":
+    if started.get("status") != "started":
         await _emit(
-            job_id, "transcode", "Could not package the video for playback.",
-            level="error", detail=result.get("error"),
+            job_id, "transcode", "Could not start the preview encode.",
+            level="error", detail=started.get("error"),
         )
         # Playback is how the editor reviews suggestions, but the analysis is
         # still worth having, so this failure does not fail the job.
-        return {"status": "error", "job_id": job_id, "error": result.get("error")}
+        return {"status": "error", "job_id": job_id, "error": started.get("error")}
+
+    # The poster comes from one range-read frame, so it is ready long before the
+    # encode and gives the editor something to look at meanwhile.
+    poster = await mcp_client.call_tool(
+        "media", "generate_poster", {"gcs_uri": gcs_uri, "job_id": job_id}
+    )
+
+    outcome = await _await_transcode(job_id, started["transcoder_job"])
+    if not outcome.get("succeeded"):
+        await _emit(
+            job_id, "transcode", "The preview encode did not finish.",
+            level="error", detail=outcome.get("error") or outcome.get("state"),
+        )
+        return {
+            "status": "error", "job_id": job_id,
+            "error": outcome.get("error") or f"encode ended in {outcome.get('state')}",
+        }
 
     await mcp_client.call_tool(
         "catalog",
         "record_playback",
         {
             "job_id": job_id,
-            "playback_url": result.get("playback_url", ""),
-            "poster_url": result.get("poster_url", ""),
-            "renditions": result.get("renditions", []),
-            "segment_seconds": result.get("segment_seconds", 2),
+            "playback_url": started.get("playback_url", ""),
+            "poster_url": poster.get("poster_url", ""),
+            "renditions": started.get("renditions", []),
+            "segment_seconds": started.get("segment_seconds", 6),
         },
     )
-    await _emit(
-        job_id,
-        "transcode",
-        f"Playback ready in {len(result.get('renditions', []))} renditions.",
-        renditions=result.get("renditions", []),
-    )
+    await _emit(job_id, "transcode", "Playback ready at 480p.",
+                renditions=started.get("renditions", []))
 
-    tool_context.state["playback_url"] = result.get("playback_url", "")
+    tool_context.state["playback_url"] = started.get("playback_url", "")
 
     return {
         "status": "success",
         "job_id": job_id,
-        "playback_url": result.get("playback_url"),
-        "poster_url": result.get("poster_url"),
-        "renditions": result.get("renditions", []),
-        "segment_seconds": result.get("segment_seconds"),
-        "files": result.get("files"),
+        "playback_url": started.get("playback_url"),
+        "poster_url": poster.get("poster_url"),
+        "renditions": started.get("renditions", []),
+        "segment_seconds": started.get("segment_seconds"),
+    }
+
+
+# Transcoder charges by encode, so polling is cheap next to the work it watches.
+# The interval opens out because a match-length encode takes minutes, and a
+# tight poll on it is just requests spent asking the same question.
+_POLL_FIRST_SECONDS = 10
+_POLL_MAX_SECONDS = 60
+_POLL_CEILING_SECONDS = 2 * 60 * 60
+
+
+async def _await_transcode(job_id: str, transcoder_job: str) -> dict:
+    """Wait for a Transcoder job, reporting progress into the job's feed."""
+    waited = 0.0
+    interval = float(_POLL_FIRST_SECONDS)
+    last_state = ""
+
+    while waited < _POLL_CEILING_SECONDS:
+        await asyncio.sleep(interval)
+        waited += interval
+        interval = min(interval * 1.5, _POLL_MAX_SECONDS)
+
+        status = await mcp_client.call_tool(
+            "media", "transcode_status", {"transcoder_job": transcoder_job}
+        )
+        if status.get("status") == "error":
+            # A failed poll is not a failed encode; the job may well still be
+            # running. Keep waiting rather than declaring it dead.
+            logger.warning("could not poll %s: %s", transcoder_job, status.get("error"))
+            continue
+
+        state = status.get("state", "")
+        if state != last_state:
+            last_state = state
+            await _emit(job_id, "transcode", f"Preview encode {state.lower()}.")
+        if status.get("done"):
+            return status
+
+    return {
+        "done": False,
+        "succeeded": False,
+        "state": last_state or "UNKNOWN",
+        "error": f"gave up watching the encode after {_POLL_CEILING_SECONDS // 3600}h",
     }
 
 

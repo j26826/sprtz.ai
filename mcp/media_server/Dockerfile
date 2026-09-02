@@ -4,7 +4,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
-# ffmpeg is the whole point of this image.
+# Still needed: probing uploads, poster frames and per-clip cuts are ffmpeg.
+# Packaging a match for playback is not — that runs on Transcoder API.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*

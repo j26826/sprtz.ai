@@ -181,15 +181,20 @@ package — bigger than any sensible instance. So:
 - **Sources are read over HTTPS**, straight from GCS with a bearer token;
   ffmpeg's `-ss` becomes a range seek, so cutting a 30-second clip out of a
   3 GB match reads megabytes.
-- **Playback packaging is a copy-remux, not a re-encode.** Uploads are already
-  H.264 at delivery-grade bitrates; segmentation is all review playback needs.
-  A remux is I/O-bound and takes minutes, where a rendition ladder for the same
-  source is hours of CPU that cannot finish inside Cloud Run's one-hour request
-  ceiling. If a ladder is ever wanted for public delivery, it belongs in a
-  batch job.
-- **Finished segments drain to GCS while ffmpeg is still writing** and are
-  deleted locally, so disk stays bounded to the last few segments whatever the
-  match length.
+- **Playback packaging runs on Transcoder API, off this service.** It reads the
+  source from GCS and writes the HLS package to GCS itself, so no video byte
+  passes through the container. Packaging in-process wrote as many gigabytes of
+  segments as the source was long, through a filesystem that is really RAM, and
+  the container was killed holding the backlog — at 2103 MiB with four
+  concurrent jobs and again at 2078 MiB with one.
+- **The preview is a single 480p rendition.** An editor is deciding whether a
+  moment is worth cutting, not watching the match, and one keyframe per segment
+  is what makes seeking to an in point land where it should. A ladder is what
+  public delivery needs; Transcoder can produce one by adding mux streams, and
+  the cost is now encode minutes rather than CPU that does not exist.
+- **The encode is asynchronous and the pipeline waits on it.** `transcode_hls`
+  starts a job, `transcode_status` polls, and `prepare_playback` widens its
+  interval while reporting each state change into the job's feed.
 
 ### Cold start, and why the probe budget is large
 

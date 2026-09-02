@@ -101,13 +101,10 @@ resource "google_cloud_run_v2_service" "mcp_media" {
 
   template {
     service_account = google_service_account.mcp_media.email
-    # One ffmpeg per instance. This said 4 while the comment said one, and four
-    # concurrent remuxes sharing 2 GiB went over the limit and took the
-    # container down mid-response — observed at 2103 MiB, not inferred. The
-    # writable filesystem here is memory, so every segment ffmpeg writes before
-    # the uploader drains it is RAM, and that cost multiplies by concurrency.
-    # Parallelism comes from max_instance_count instead, where each job gets a
-    # whole container's memory and CPU.
+    # One heavy job per instance. Packaging a match now runs on Transcoder API
+    # and no video passes through here, so this no longer guards against the
+    # OOM that set it — but probes, clip cuts and reframes are still ffmpeg,
+    # and their working set is a whole container's business.
     max_instance_request_concurrency = 1
     timeout                          = "3600s"
 
@@ -148,6 +145,13 @@ resource "google_cloud_run_v2_service" "mcp_media" {
       env {
         name  = "CDN_BASE_URL"
         value = local.cdn_base_url
+      }
+      env {
+        # Transcoder runs where the buckets and this service are, not where
+        # Vertex is: it reads the source and writes the package itself, and
+        # crossing regions to do that is egress for no benefit.
+        name  = "TRANSCODER_LOCATION"
+        value = var.region
       }
 
       startup_probe {
