@@ -45,6 +45,7 @@ class CreateJobRequest(BaseModel):
     sport: str = Field(default="handball")
     filename: str
     size_bytes: int = Field(gt=0)
+    content_type: str = ""
 
 
 def _storage_client() -> storage.Client:
@@ -147,6 +148,7 @@ async def create_job(
             "gcs_uri": gcs_uri,
             "original_name": body.filename,
             "size_bytes": body.size_bytes,
+            "content_type": body.content_type,
         },
     )
     if result.get("status") == "error":

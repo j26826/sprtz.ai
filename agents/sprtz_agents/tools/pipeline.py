@@ -62,12 +62,30 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
     if not gcs_uri:
         return {"status": "error", "error": f"Job {job_id} has no source video."}
 
-    await _emit(job_id, "ingest", "Probing the uploaded video.")
-    probe = await mcp_client.call_tool("media", "probe_media", {"gcs_uri": gcs_uri})
-    if probe.get("status") != "success":
-        await _emit(job_id, "ingest", "Could not read the video.", level="error", probe=probe)
-        return {"status": "error", "error": probe.get("error", "probe_media failed"), "job_id": job_id}
+    await _emit(job_id, "ingest", "Checking the upload is a video we can process.")
 
+    # Validated against the bytes, not the filename or the content type the
+    # browser sent — both of those are supplied by whoever uploaded the file.
+    check = await mcp_client.call_tool(
+        "media",
+        "validate_media",
+        {
+            "gcs_uri": gcs_uri,
+            "declared_content_type": (job.get("source") or {}).get("contentType", ""),
+        },
+    )
+    if check.get("status") != "accepted":
+        reasons = check.get("reasons") or ["the file could not be read as media"]
+        detail = "; ".join(reasons)
+        await _emit(job_id, "ingest", f"Rejected the upload: {detail}", level="error")
+        await mcp_client.call_tool(
+            "catalog",
+            "update_job_status",
+            {"job_id": job_id, "status": "rejected", "stage": "ingest", "error": detail},
+        )
+        return {"status": "rejected", "job_id": job_id, "reasons": reasons}
+
+    probe = check.get("media") or {}
     duration = float(probe.get("duration_sec") or 0.0)
     segments = plan_segments(duration)
 

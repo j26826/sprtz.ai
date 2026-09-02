@@ -82,6 +82,35 @@ def probe_media(gcs_uri: str) -> dict:
 
 
 @mcp.tool
+def validate_media(gcs_uri: str, declared_content_type: str = "") -> dict:
+    """Check that an upload is really a video this service can process.
+
+    Probes the actual bytes rather than trusting the filename or the
+    Content-Type the browser sent, both of which the uploader controls. Returns
+    every reason for rejection at once so the caller can report them together.
+
+    Args:
+        gcs_uri: gs:// URI of the uploaded file.
+        declared_content_type: Content type the client claimed, if known.
+    """
+    probe = probe_media(gcs_uri)
+    if probe.get("status") != "success":
+        return {
+            "status": "rejected",
+            "gcs_uri": gcs_uri,
+            "reasons": ["the file could not be read as media"],
+            "detail": probe.get("error", ""),
+        }
+
+    reasons = ffmpeg_ops.validate(probe, declared_content_type=declared_content_type)
+    if reasons:
+        logger.warning("rejected upload %s: %s", gcs_uri, "; ".join(reasons))
+        return {"status": "rejected", "gcs_uri": gcs_uri, "reasons": reasons, "media": probe}
+
+    return {"status": "accepted", "gcs_uri": gcs_uri, "media": probe}
+
+
+@mcp.tool
 def transcode_hls(gcs_uri: str, job_id: str) -> dict:
     """Transcode a source video into an HLS package for CDN playback.
 
