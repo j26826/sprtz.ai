@@ -136,6 +136,12 @@ def transcode_hls(gcs_uri: str, job_id: str) -> dict:
         return {"status": "error", "error": "HLS_BUCKET is not configured."}
 
     try:
+        # Anything already under this prefix is from an attempt that did not
+        # finish. Transcoder names its segments differently from the ffmpeg
+        # packager that came before it, so nothing here would ever be
+        # overwritten — and a stale playlist would be served as if it were this
+        # encode's.
+        gcs.delete_prefix(HLS_BUCKET, f"jobs/{job_id}/hls/")
         started = transcoder.create_preview_job(gcs_uri, HLS_BUCKET, job_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not start a transcoder job for %s", gcs_uri)

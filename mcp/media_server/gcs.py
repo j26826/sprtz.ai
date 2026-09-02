@@ -116,3 +116,22 @@ def _content_type(path: Path) -> str:
 
 # Playlists must be revalidated so a re-transcode is picked up; segments are
 # immutable once written, so they get a long CDN and browser TTL.
+
+
+def delete_prefix(bucket: str, prefix: str) -> int:
+    """Remove every object under a prefix. Returns how many went.
+
+    Re-packaging a job writes into a directory that may already hold the
+    remains of an earlier attempt. Those remains are not harmless: a playlist
+    left by a half-finished run is a playlist the CDN will happily serve, and
+    segments from a different packager are named differently so nothing ever
+    overwrites them — they just accumulate and are billed for.
+    """
+    target = client().bucket(bucket)
+    removed = 0
+    for blob in client().list_blobs(bucket, prefix=prefix):
+        blob.delete()
+        removed += 1
+    if removed:
+        logger.info("cleared %d objects under gs://%s/%s", removed, bucket, prefix)
+    return removed

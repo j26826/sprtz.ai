@@ -651,8 +651,20 @@ async function mountPlayer() {
   try {
     url = await ensurePlaybackUrl();
   } catch (err) {
-    playerEl.insertAdjacentHTML('beforeend',
-      `<div class="error-note">Playback is not ready yet: ${esc(err.message)}</div>`);
+    // Packaging is independent of the analysis, so a job can have moments and
+    // still have nothing to play — and re-running the whole analysis to fix
+    // that would be an hour spent on the wrong thing. Offer the packaging.
+    const notReady = /still being prepared/i.test(err.message);
+    playerEl.insertAdjacentHTML('beforeend', `
+      <div class="error-note">
+        <p>${notReady
+          ? 'This match has not been packaged for playback yet.'
+          : `Playback is not ready yet: ${esc(err.message)}`}</p>
+        ${notReady ? `
+          <button class="btn-outline" data-prepare-playback="1">
+            Prepare playback
+          </button>` : ''}
+      </div>`);
     return;
   }
 
@@ -916,7 +928,7 @@ async function startUpload() {
 document.addEventListener('click', (event) => {
   const t = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
-    + '[data-sport],[data-close-player]');
+    + '[data-sport],[data-close-player],[data-prepare-playback]');
   if (!t) return;
 
   if (t.dataset.ask) {
@@ -950,6 +962,10 @@ document.addEventListener('click', (event) => {
   if (t.dataset.platform) {
     state.platforms[t.dataset.platform] = !state.platforms[t.dataset.platform];
     render();
+    return;
+  }
+  if (t.dataset.preparePlayback) {
+    ask('Prepare playback for this match. The analysis is done; it just needs packaging.');
     return;
   }
   if (t.dataset.retry) {

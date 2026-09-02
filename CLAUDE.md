@@ -122,6 +122,15 @@ waits with a widening interval while reporting each state change. Blocking a
 request until a match-length encode finished would only move the one-hour
 ceiling onto an idle connection.
 
+Packaging is independent of the analysis, so a job can hold moments and have
+nothing to play. `prepare_playback` is a root-agent tool as well as a pipeline
+stage for that reason — re-running a whole analysis to fix playback would be an
+hour spent on the wrong thing — and the player offers it when `/playback`
+returns 409. Each encode clears the job's HLS prefix first: Transcoder names
+segments differently from the ffmpeg packager that preceded it, so nothing is
+ever overwritten, and a playlist left by a half-finished run is one the CDN will
+serve.
+
 Two grants decide whether an encode works, and both fail *minutes in* rather
 than at job creation: the **Transcoder service agent** — not the media service
 account — needs read on the uploads bucket and write on the HLS bucket.
