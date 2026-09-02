@@ -72,7 +72,7 @@ def list_jobs(owner_uid: str, limit: int = 20, status: str = "") -> dict:
     """List an owner's recent jobs, newest first.
 
     Args:
-        owner_uid: Identity Platform uid whose jobs to list.
+        owner_uid: Ignored. Jobs are shared across the desk.
         limit: Most jobs to return.
         status: Optional filter. "running" means anything the pipeline still
             owes an answer for; otherwise an exact status such as "ready".
@@ -315,12 +315,10 @@ def knn_search_games(query: str, owner_uid: str, limit: int = 5) -> dict:
 
     Args:
         query: Plain-language description of the match.
-        owner_uid: Owner whose games to search. Required.
+        owner_uid: Ignored. Games are shared across the desk.
         limit: Most games to return.
     """
     try:
-        if not owner_uid:
-            return {"status": "error", "error": "owner_uid is required to search games."}
         games = store.knn_search_games(query, owner_uid, limit)
         return {"status": "success", "games": games, "count": len(games)}
     except Exception as exc:  # noqa: BLE001

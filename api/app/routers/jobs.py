@@ -50,6 +50,10 @@ class CreateJobRequest(BaseModel):
     # the job at creation so a match's prose does not claim to change language
     # when a later reader changes theirs.
     metadata_language: str = Field(default="en", max_length=8)
+    # Whose upload prefix the object sits under. Defaults to the caller, and is
+    # only ever different when picking up an orphan somebody else left: the
+    # path was written with their uid and the bytes are still there under it.
+    uploaded_by: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
 
 
 def _storage_client() -> storage.Client:
@@ -138,7 +142,11 @@ async def create_job(
 ) -> dict:
     """Register an uploaded video as a job, ready to analyse."""
     safe_name = _SAFE_NAME.sub("_", body.filename)[:120]
-    blob_name = f"uploads/{user.uid}/{body.job_id}/{safe_name}"
+    # A uid in the path is a prefix, not a permission: the object must exist,
+    # and the pattern on the field keeps it to one path segment so nothing can
+    # be traversed out of the uploads prefix.
+    owner_prefix = body.uploaded_by or user.uid
+    blob_name = f"uploads/{owner_prefix}/{body.job_id}/{safe_name}"
     gcs_uri = f"gs://{settings.uploads_bucket}/{blob_name}"
 
     # The path is built from the verified uid, so a caller can only ever name an
@@ -184,10 +192,11 @@ async def list_pending_uploads(
     the two — the bytes are in the bucket and nothing points at them. This lets
     the editor pick one up rather than send a match-length file again.
 
-    Only the caller's own prefix is listed, so this cannot expose another
-    tenant's uploads regardless of what the caller asks for.
+    Every upload is listed, not just the caller's: matches are shared, and an
+    orphan is worth picking up whoever left it. The uid stays in the object path
+    as provenance — it is who uploaded the file, not who may see it.
     """
-    prefix = f"uploads/{user.uid}/"
+    prefix = "uploads/"
     try:
         blobs = list(
             _storage_client().list_blobs(settings.uploads_bucket, prefix=prefix, max_results=200)
@@ -202,18 +211,20 @@ async def list_pending_uploads(
     registered = {
         job.get("job_id")
         for job in (await clients.call_mcp(
-            "catalog", "list_jobs", {"owner_uid": user.uid, "limit": 200},
+            "catalog", "list_jobs", {"limit": 200},
         )).get("jobs", [])
     }
 
     pending = []
     for blob in blobs:
+        # uploads/<uid>/<job_id>/<filename>
         parts = blob.name[len(prefix):].split("/")
-        if len(parts) != 2 or parts[0] in registered:
+        if len(parts) != 3 or parts[1] in registered:
             continue
         pending.append({
-            "job_id": parts[0],
-            "filename": parts[1],
+            "uploaded_by": parts[0],
+            "job_id": parts[1],
+            "filename": parts[2],
             "size_bytes": blob.size or 0,
             "content_type": blob.content_type or "",
             "uploaded_at": blob.time_created,
@@ -224,13 +235,16 @@ async def list_pending_uploads(
     return {"uploads": pending}
 
 
-async def _load_owned_job(job_id: str, user: CallerIdentity) -> dict:
-    """Fetch a job and confirm the caller owns it."""
+async def _load_job(job_id: str, user: CallerIdentity) -> dict:
+    """Fetch a job. Any signed-in caller may reach any job.
+
+    Jobs are shared across the desk, so this checks that the job exists rather
+    than who uploaded it. Authentication still gates the route — `current_user`
+    rejects anyone not signed in — so the boundary moved from "owns it" to
+    "signed in", it did not disappear.
+    """
     job = await clients.call_mcp("catalog", "get_job", {"job_id": job_id})
     if job.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No job {job_id}.")
-    if job.get("ownerUid") != user.uid:
-        # Deliberately a 404: confirming existence would leak the id space.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No job {job_id}.")
     return job
 
@@ -238,7 +252,7 @@ async def _load_owned_job(job_id: str, user: CallerIdentity) -> dict:
 @router.get("/{job_id}")
 async def get_job(job_id: str, user: CallerIdentity = Depends(current_user)) -> dict:
     """Read one job."""
-    return await _load_owned_job(job_id, user)
+    return await _load_job(job_id, user)
 
 
 @router.get("/{job_id}/playback")
@@ -259,7 +273,7 @@ async def get_playback(
     load balancer. On separate hosts it could not be — the cookie would have to
     span two domains, which is impossible on *.run.app.
     """
-    job = await _load_owned_job(job_id, user)
+    job = await _load_job(job_id, user)
     playback = job.get("playback") or {}
     if not playback.get("hlsUrl"):
         raise HTTPException(
@@ -312,7 +326,7 @@ async def list_moments(
     user: CallerIdentity = Depends(current_user),
 ) -> dict:
     """List a job's key moments."""
-    await _load_owned_job(job_id, user)
+    await _load_job(job_id, user)
     return await clients.call_mcp(
         "catalog", "list_moments", {"job_id": job_id, "limit": limit, "min_score": min_score}
     )
@@ -323,7 +337,7 @@ async def list_clips(
     job_id: str, limit: int = 100, user: CallerIdentity = Depends(current_user)
 ) -> dict:
     """List a job's suggested clips."""
-    await _load_owned_job(job_id, user)
+    await _load_job(job_id, user)
     return await clients.call_mcp("catalog", "list_clips", {"job_id": job_id, "limit": limit})
 
 
@@ -338,7 +352,7 @@ async def search(
     job_id: str, body: SearchRequest, user: CallerIdentity = Depends(current_user)
 ) -> dict:
     """Semantic search over a job's moments, reranked by relevance."""
-    await _load_owned_job(job_id, user)
+    await _load_job(job_id, user)
     return await clients.call_mcp(
         "catalog",
         "knn_search_moments",

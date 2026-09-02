@@ -749,11 +749,12 @@ async def search_moments(job_id: str, query: str, limit: int) -> dict:
     )
 
 
-async def list_jobs(tool_context: ToolContext, status: str = "", limit: int = 20) -> dict:
-    """List the editor's own recent jobs, newest first.
+async def list_jobs(status: str = "", limit: int = 20) -> dict:
+    """List recent jobs, newest first.
 
-    Use this whenever they ask what exists, what is running, or what failed,
-    rather than asking them for a job_id they have no reason to know.
+    Every job on the desk, not one person's. Use this whenever the editor asks
+    what exists, what is running, or what failed, rather than asking them for a
+    job_id they have no reason to know.
 
     Args:
         status: Optional filter. "running" for anything still being worked on,
@@ -763,16 +764,8 @@ async def list_jobs(tool_context: ToolContext, status: str = "", limit: int = 20
     Returns:
         dict with the jobs, each carrying its job_id, title, status and stage.
     """
-    # The uid comes from the signed-in session ADK opened, never from the model:
-    # a job_id or uid the model can supply is a job_id it can guess at, and
-    # these documents belong to one tenant each.
-    owner_uid = tool_context.user_id
-    if not owner_uid:
-        return {"status": "error", "error": "No signed-in user on this session."}
-
     result = await mcp_client.call_tool(
-        "catalog", "list_jobs",
-        {"owner_uid": owner_uid, "limit": limit, "status": status},
+        "catalog", "list_jobs", {"limit": limit, "status": status},
     )
     if result.get("status") == "error":
         return result
@@ -941,7 +934,7 @@ async def get_game_details(job_id: str) -> dict:
     return {"status": "success", "game": result.get("game", {})}
 
 
-async def find_games(tool_context: ToolContext, query: str, limit: int = 5) -> dict:
+async def find_games(query: str, limit: int = 5) -> dict:
     """Find whole matches by description — teams, competition, venue, how it felt.
 
     This searches games, not the plays inside them. Use it for "the Sweden
@@ -952,15 +945,10 @@ async def find_games(tool_context: ToolContext, query: str, limit: int = 5) -> d
         limit: Most matches to return.
 
     Returns:
-        dict with the matching games, newest and most relevant first.
+        dict with the matching games, most relevant first.
     """
-    owner_uid = tool_context.user_id
-    if not owner_uid:
-        return {"status": "error", "error": "No signed-in user on this session."}
-
     result = await mcp_client.call_tool(
-        "catalog", "knn_search_games",
-        {"query": query, "owner_uid": owner_uid, "limit": limit},
+        "catalog", "knn_search_games", {"query": query, "limit": limit},
     )
     if result.get("status") == "error":
         return result

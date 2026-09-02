@@ -74,14 +74,28 @@ def query_with():
 
 
 class TestScoping:
-    def test_owner_and_order_go_to_firestore(self, query_with):
+    """Jobs are shared across the desk; nothing filters them by owner."""
+
+    def test_ordering_goes_to_firestore_and_nothing_is_filtered(self, query_with):
         query, patched = query_with([_snapshot("a", "ready")])
         with patched:
-            store.list_jobs("uid-1", limit=5)
+            store.list_jobs(limit=5)
 
         assert query.order_by_args == ("createdAt", "DESCENDING")
-        assert len(query.filters) == 1, "the owner filter must reach the query"
+        # Jobs are shared, so there is no owner filter — which is also why this
+        # needs only the single-field index on createdAt.
+        assert query.filters == []
         assert query.limit_value == 5
+
+    def test_an_owner_argument_is_ignored_rather_than_honoured(self, query_with):
+        # A caller still passing one must not be quietly answered with a
+        # filtered list it did not ask for.
+        query, patched = query_with([_snapshot("a", "ready"), _snapshot("b", "ready")])
+        with patched:
+            jobs = store.list_jobs("someone-else", limit=5)
+
+        assert query.filters == []
+        assert len(jobs) == 2
 
     def test_unfiltered_listing_returns_every_status(self, query_with):
         query, patched = query_with([

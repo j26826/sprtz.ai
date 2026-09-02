@@ -431,6 +431,38 @@ pattern — an earlier version could not tell a destructured parameter or the wo
 "the" in a comment from a call, and a check that cries wolf trains you to skip
 its output.
 
+### Jobs are shared, not owned
+
+Any signed-in user sees and can delete any job. That is a product decision:
+accounts are provisioned by hand in Identity Platform, everyone with one is on
+the same desk, and a match a colleague uploaded is a match this desk is working
+on.
+
+**The boundary moved, it did not go.** Every route is still behind
+`current_user`, the Firestore rules still require `request.auth`, and the
+services are still reachable only through the load balancer. What changed is
+that "may read this" is now "is signed in" rather than "uploaded it".
+
+`ownerUid` is still written on every job, moment, clip and game — as provenance
+rather than as a gate. It says who uploaded a match, which is worth knowing
+precisely because anyone can now act on it.
+
+`list_jobs`, `knn_search_moments` and `knn_search_games` keep an `owner_uid`
+parameter that is accepted and ignored, so an old caller is not silently
+answered with a filtered list it did not ask for, and the parameter can be given
+meaning again without a signature change.
+
+**The vector indexes needed new ones.** A vector index whose first field is an
+equality only serves queries carrying that equality, so dropping the owner
+filter needed `moments_knn_all` and `games_knn_all` — the embedding alone. The
+owner-prefixed indexes are left in place: they cost nothing idle, and deleting a
+vector index is the one operation this file warns about.
+
+Upload objects keep `uploads/<uid>/<job_id>/` paths, so registering an orphan
+somebody else left needs the uid the path was written with — `uploaded_by` on
+the create-job request, constrained to one path segment so nothing traverses out
+of the uploads prefix, and still checked against the object actually existing.
+
 ### Sessions and jobs are separate
 
 A session is a conversation; a job is a match. The session notes which job it is

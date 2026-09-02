@@ -23,7 +23,7 @@ import {
   signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
-  getFirestore, collection, doc, query, where, orderBy, limit, onSnapshot,
+  getFirestore, collection, doc, query, orderBy, limit, onSnapshot,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
@@ -357,7 +357,7 @@ onAuthStateChanged(auth, async (user) => {
 
   state.msgs = [greeting()];
   render();
-  watchJobs(user.uid);
+  watchJobs();
   try {
     const cfg = await api('/api/config');
     if (cfg.supported_sports?.length) {
@@ -383,10 +383,11 @@ async function refreshPendingUploads() {
 
 /* ────────────────────────────────────────────────────── realtime ── */
 
-function watchJobs(uid) {
+function watchJobs() {
+  // Every job, not just this user's. Matches are shared across the desk, and
+  // ordering by createdAt alone needs no composite index.
   onSnapshot(
-    query(collection(db, 'jobs'), where('ownerUid', '==', uid),
-          orderBy('createdAt', 'desc'), limit(50)),
+    query(collection(db, 'jobs'), orderBy('createdAt', 'desc'), limit(50)),
     (snap) => {
       state.jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       // Deliberately does not create a session per job. The sidebar lists
@@ -1248,7 +1249,7 @@ function attachCards(index, question) {
  * Shared by a fresh upload and by resuming one that never got registered — the
  * bytes are in the same place either way, so only this second half differs.
  */
-async function registerAndAnalyse({ job_id, filename, size_bytes, content_type }) {
+async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, uploaded_by }) {
   const u = state.upload;
   u.status = 'uploading';
   u.stage = 'Registering the job';
@@ -1267,6 +1268,9 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type }
       // descriptions are written in is a property of that match, not of
       // whoever opens it later.
       metadata_language: getSettings().metadataLanguage,
+      // Only set when picking up an orphan somebody else left: the bytes are
+      // under their prefix, not this caller's.
+      ...(uploaded_by ? { uploaded_by } : {}),
     }),
   });
 
