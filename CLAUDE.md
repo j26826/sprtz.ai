@@ -301,6 +301,48 @@ editor has already read would be worse than leaving it.
 `STAGES` in `app.js` mirrors `STAGE_SPANS` in the agent's pipeline. Change one
 and change both.
 
+### Settings
+
+Three options, and they are not the same kind of thing.
+
+**App language** and **theme** are per-device display preferences in
+localStorage. An empty locale means "follow the browser" and is stored as a real
+choice, so a later change of browser language still takes effect rather than
+being pinned to whatever it was the day the user first looked.
+
+**Metadata language belongs to the job, not the browser.** It is copied onto the
+job document at registration and read from there at analysis time. A match's
+descriptions were generated in one language and stay in it, so a reader
+switching their UI to German must not make stored English prose claim to be
+German. Changing the setting affects matches analysed from then on, and the UI
+says so.
+
+The metadata list is deliberately shorter than the UI's: en-GB and en-US are one
+"English" here, because asking a model for British rather than American prose
+about a handball match is a distinction it cannot hold reliably, while a button
+label plainly differs.
+
+**Themes are a token overlay, not a stylesheet.** `metro-light` is the Modernist
+palette exactly as shipped — an empty override — so adding a theme means listing
+the tokens that differ rather than copying a file that then drifts.
+`applyTheme` clears every known theme's tokens before applying, or switching
+from a theme that sets a token to one that does not would leave the old value
+behind.
+
+### The language rule in the prompt
+
+Prose is translated; observations are not. `description`, `evidence` and
+`segment_summary` are written in the chosen language, while team names,
+captions, the score bug and shirt numbers stay exactly as they appear — those
+are read, not written, and translating one invents a name nobody displayed.
+`action_result` and `participant_role` stay English because they are matched on
+as codes: a German "Tor" and an English "Goal" in one corpus is two categories
+for one thing.
+
+The rule lives in the system instruction, so the cache is now per sport *and*
+per language — the correct granularity, since two jobs in different languages
+are not running the same instruction.
+
 ### Brand
 
 The wordmark and app icon are real assets under `web/src/assets/`, served from

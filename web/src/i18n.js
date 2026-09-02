@@ -18,6 +18,20 @@ const STRINGS = {
   'en-GB': {
     'lang.name': 'English (UK)',
 
+    'header.settings': 'Settings',
+    'settings.title': 'Settings',
+    'settings.close': 'Close',
+    'settings.appLanguage': 'App language',
+    'settings.appLanguageHint': "The language of buttons, labels and the agent's own replies.",
+    'settings.followBrowser': 'Follow my browser',
+    'settings.metadataLanguage': 'Metadata language',
+    'settings.metadataLanguageHint':
+      'The language moment descriptions and game summaries are written in. Applies '
+      + 'to matches analysed from now on; those already analysed keep the language '
+      + 'they were written in.',
+    'settings.theme': 'Theme',
+    'settings.themeHint': 'How the editor looks.',
+
     'header.newSession': 'New session',
     'header.signOut': 'Sign out',
     'header.noMatch': 'No match loaded',
@@ -109,6 +123,11 @@ const STRINGS = {
 
   'en-US': {
     'lang.name': 'English (US)',
+
+    'settings.metadataLanguageHint':
+      'The language moment descriptions and game summaries are written in. Applies '
+      + 'to matches analyzed from now on; those already analyzed keep the language '
+      + 'they were written in.',
     // Only what actually differs. Everything else falls through to en-GB.
     'signin.blurb': 'Sign in to analyze a match and cut it into short-form clips.',
     'greeting':
@@ -124,6 +143,21 @@ const STRINGS = {
 
   de: {
     'lang.name': 'Deutsch',
+
+    'header.settings': 'Einstellungen',
+    'settings.title': 'Einstellungen',
+    'settings.close': 'Schließen',
+    'settings.appLanguage': 'Sprache der App',
+    'settings.appLanguageHint':
+      'Die Sprache von Schaltflächen, Beschriftungen und den Antworten des Agenten.',
+    'settings.followBrowser': 'Browsereinstellung folgen',
+    'settings.metadataLanguage': 'Sprache der Metadaten',
+    'settings.metadataLanguageHint':
+      'Die Sprache, in der Szenenbeschreibungen und Spielzusammenfassungen verfasst '
+      + 'werden. Gilt für künftige Analysen; bereits analysierte Spiele behalten ihre '
+      + 'bisherige Sprache.',
+    'settings.theme': 'Design',
+    'settings.themeHint': 'Das Erscheinungsbild des Editors.',
 
     'header.newSession': 'Neue Sitzung',
     'header.signOut': 'Abmelden',
@@ -219,6 +253,20 @@ const STRINGS = {
   it: {
     'lang.name': 'Italiano',
 
+    'header.settings': 'Impostazioni',
+    'settings.title': 'Impostazioni',
+    'settings.close': 'Chiudi',
+    'settings.appLanguage': "Lingua dell'app",
+    'settings.appLanguageHint': "La lingua di pulsanti, etichette e risposte dell'agente.",
+    'settings.followBrowser': 'Segui il browser',
+    'settings.metadataLanguage': 'Lingua dei metadati',
+    'settings.metadataLanguageHint':
+      'La lingua in cui vengono scritte le descrizioni delle azioni e i riepiloghi '
+      + 'della partita. Vale per le analisi future; le partite già analizzate '
+      + 'mantengono la lingua di allora.',
+    'settings.theme': 'Tema',
+    'settings.themeHint': "L'aspetto dell'editor.",
+
     'header.newSession': 'Nuova sessione',
     'header.signOut': 'Esci',
     'header.noMatch': 'Nessuna partita caricata',
@@ -311,6 +359,20 @@ const STRINGS = {
 
   fr: {
     'lang.name': 'Français',
+
+    'header.settings': 'Paramètres',
+    'settings.title': 'Paramètres',
+    'settings.close': 'Fermer',
+    'settings.appLanguage': "Langue de l'application",
+    'settings.appLanguageHint':
+      "La langue des boutons, des libellés et des réponses de l'agent.",
+    'settings.followBrowser': 'Suivre mon navigateur',
+    'settings.metadataLanguage': 'Langue des métadonnées',
+    'settings.metadataLanguageHint':
+      'La langue des descriptions d’actions et des résumés de match. Vaut pour les '
+      + 'analyses à venir ; les matchs déjà analysés gardent leur langue d’origine.',
+    'settings.theme': 'Thème',
+    'settings.themeHint': "L'apparence de l'éditeur.",
 
     'header.newSession': 'Nouvelle session',
     'header.signOut': 'Se déconnecter',
@@ -408,6 +470,20 @@ const STRINGS = {
 
   es: {
     'lang.name': 'Español',
+
+    'header.settings': 'Ajustes',
+    'settings.title': 'Ajustes',
+    'settings.close': 'Cerrar',
+    'settings.appLanguage': 'Idioma de la aplicación',
+    'settings.appLanguageHint': 'El idioma de botones, etiquetas y respuestas del agente.',
+    'settings.followBrowser': 'Seguir mi navegador',
+    'settings.metadataLanguage': 'Idioma de los metadatos',
+    'settings.metadataLanguageHint':
+      'El idioma en que se escriben las descripciones de jugadas y los resúmenes del '
+      + 'partido. Se aplica a los análisis futuros; los partidos ya analizados '
+      + 'conservan su idioma.',
+    'settings.theme': 'Tema',
+    'settings.themeHint': 'El aspecto del editor.',
 
     'header.newSession': 'Nueva sesión',
     'header.signOut': 'Cerrar sesión',

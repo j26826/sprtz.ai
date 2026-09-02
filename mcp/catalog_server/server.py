@@ -29,7 +29,8 @@ def _fail(exc: Exception, **context: Any) -> dict:
 
 @mcp.tool
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
-               original_name: str, size_bytes: int, content_type: str = "") -> dict:
+               original_name: str, size_bytes: int, content_type: str = "",
+               metadata_language: str = "en") -> dict:
     """Open a new analysis job for an uploaded video.
 
     Args:
@@ -41,10 +42,12 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         original_name: The file name the user uploaded.
         size_bytes: Size of the upload.
         content_type: Content type the client declared, checked at ingest.
+        metadata_language: ISO 639-1 code the analysis should write in.
     """
     try:
         return {"status": "success", **store.create_job(
-            job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes, content_type)}
+            job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
+            content_type, metadata_language)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 

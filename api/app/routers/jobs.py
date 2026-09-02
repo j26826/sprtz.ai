@@ -46,6 +46,10 @@ class CreateJobRequest(BaseModel):
     filename: str
     size_bytes: int = Field(gt=0)
     content_type: str = ""
+    # ISO 639-1. The language the analysis will be asked to write in, fixed on
+    # the job at creation so a match's prose does not claim to change language
+    # when a later reader changes theirs.
+    metadata_language: str = Field(default="en", max_length=8)
 
 
 def _storage_client() -> storage.Client:
@@ -160,6 +164,7 @@ async def create_job(
             "original_name": body.filename,
             "size_bytes": body.size_bytes,
             "content_type": body.content_type,
+            "metadata_language": body.metadata_language,
         },
     )
     if result.get("status") == "error":
