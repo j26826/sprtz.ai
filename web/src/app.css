@@ -39,11 +39,15 @@ input, button, textarea { font-family: var(--font-body); }
 }
 
 /* The wordmark carries its own weight and letterspacing, so it is sized by
-   height and left to keep its own proportions. The max-width caps it in a
-   narrow header; object-fit keeps the aspect ratio when that cap binds, since
-   a fixed height plus a clamped width would otherwise squash the letterforms. */
+   height and left to keep its own proportions.
+
+   These two constraints now fight, and the width wins. The lockup is 1006x300,
+   so at 3em (45px in a 15px context) it wants 151px of width and the 8em cap
+   gives it 120px. object-fit keeps the ratio rather than squashing, which means
+   the rendered height is about 36px, not 45px. Raise the cap past 10.1em if the
+   full 3em is wanted. */
 .brand-logo {
-  height: 16px;
+  height: 3em;
   width: auto;
   max-width: 8em;
   object-fit: contain;
