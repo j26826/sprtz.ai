@@ -48,6 +48,7 @@ const state = {
   msgs: [],
   jobs: [],
   game: null,          // the match-level record for the selected job
+  games: [],           // every match with a game record, for the games list
   sessions: [],
   sessionKey: null,    // the open session, which may not have a job yet
   jobId: null,
@@ -358,6 +359,7 @@ onAuthStateChanged(auth, async (user) => {
   state.msgs = [greeting()];
   render();
   watchJobs();
+  watchGames();
   try {
     const cfg = await api('/api/config');
     if (cfg.supported_sports?.length) {
@@ -382,6 +384,21 @@ async function refreshPendingUploads() {
 }
 
 /* ────────────────────────────────────────────────────── realtime ── */
+
+function watchGames() {
+  // Every game record on the desk. Separate from watchJobs because a job has a
+  // game record only once its analysis has finished, and the two lists answer
+  // different questions: what is being worked on, and what has been done.
+  onSnapshot(
+    query(collection(db, 'games'), limit(200)),
+    (snap) => {
+      state.games = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      render();
+    },
+    (err) => console.error('games listener', err),
+  );
+}
+
 
 function watchJobs() {
   // Every job, not just this user's. Matches are shared across the desk, and
@@ -461,13 +478,62 @@ function momentById(id) {
 
 /* ──────────────────────────────────────────────────── card markup ── */
 
-function momentsCard(msg) {
+/**
+ * A card that says why it is empty.
+ *
+ * Returning '' renders nothing, which is indistinguishable from a card that
+ * failed to render — and the two have very different answers. "No moments yet"
+ * is information; a blank space is a bug report.
+ */
+// Ten rows is about a screen. A match yields a couple of hundred moments, and
+// a card that showed all of them would bury the conversation it is part of —
+// while one that silently stopped at six looked like the analysis found six.
+// Paging is how both are avoided: everything is reachable, a screen at a time.
+const PAGE_SIZE = 10;
+
+
+function pageOf(items, page) {
+  const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const current = Math.min(Math.max(0, page || 0), pages - 1);
+  const from = current * PAGE_SIZE;
+  return {
+    slice: items.slice(from, from + PAGE_SIZE),
+    current,
+    pages,
+    from: from + 1,
+    to: Math.min(from + PAGE_SIZE, items.length),
+    total: items.length,
+  };
+}
+
+
+function pagerRow(view, index) {
+  if (view.total <= PAGE_SIZE) return '';
+  return `
+    <div class="pager">
+      <button class="link-btn" data-page="${index}:${view.current - 1}"
+              ${view.current === 0 ? 'disabled' : ''}>${esc(t('pager.previous'))}</button>
+      <div class="pager-count">${view.from}–${view.to} ${esc(t('pager.of'))} ${view.total}</div>
+      <button class="link-btn" data-page="${index}:${view.current + 1}"
+              ${view.current >= view.pages - 1 ? 'disabled' : ''}>${esc(t('pager.next'))}</button>
+    </div>`;
+}
+
+
+function emptyCard(message) {
+  return `<div class="panel-light"><div class="job">
+    <div class="job-stage">${esc(message)}</div></div></div>`;
+}
+
+
+function momentsCard(msg, index) {
   const list = (msg.momentIds || [])
     .map(momentById)
     .filter(Boolean);
-  if (!list.length) return '';
+  if (!list.length) return emptyCard(t('moments.none'));
 
-  return `<div class="panel-light">${list.map((m) => {
+  const view = pageOf(list, msg.page);
+  return `<div class="panel-light">${view.slice.map((m) => {
     const clip = state.clips.find((c) => c.momentId === m.momentId);
     const meta = [
       m.label || m.momentType,
@@ -503,7 +569,7 @@ function momentsCard(msg) {
         </div>
         ${open ? playerMarkup(m) : ''}
       </div>`;
-  }).join('')}</div>`;
+  }).join('')}${pagerRow(view, index)}</div>`;
 }
 
 
@@ -637,7 +703,7 @@ function ingestCard() {
 }
 
 function reelCard() {
-  if (!state.clips.length) return '';
+  if (!state.clips.length) return emptyCard(t('reel.none'));
   const total = state.clips.reduce((a, c) => a + (c.durationSec || 0), 0);
   const aspect = state.clips[0]?.aspect || '9:16';
   return `
@@ -768,12 +834,42 @@ function gameHeadline(g) {
 }
 
 
+function gamesCard(msg, index) {
+  if (!state.games.length) return emptyCard(t('games.none'));
+
+  const view = pageOf(state.games, msg.page);
+  return `
+    <div class="panel-light">
+      ${view.slice.map((g) => {
+        const meta = [
+          g.sport,
+          g.competition || g.groundedCompetition,
+          g.finalScore,
+          g.mood,
+        ].filter(Boolean).join(' · ');
+        return `
+          <div class="row">
+            <div class="game-row">
+              <div style="min-width:0">
+                <div class="moment-label">${esc(gameHeadline(g))}</div>
+                <div class="moment-meta">${esc(meta || t('game.notIdentified'))}</div>
+              </div>
+              <div class="moment-actions">
+                <button class="link-btn" data-open-game="${esc(g.jobId || g.id)}">
+                  ${esc(t('moment.details'))}
+                </button>
+              </div>
+            </div>
+          </div>`;
+      }).join('')}
+      ${pagerRow(view, index)}
+    </div>`;
+}
+
+
 function gameCard() {
   const g = state.game;
-  if (!g) {
-    return `<div class="panel-light"><div class="job">
-      <div class="job-stage">${esc(t('game.none'))}</div></div></div>`;
-  }
+  if (!g) return emptyCard(t('game.none'));
 
   // The same shape as a moment row: a headline worth reading, the facts that
   // qualify it underneath, and everything else a click away.
@@ -804,8 +900,8 @@ function gameCard() {
 }
 
 
-function openGameDetails() {
-  const g = state.game;
+function openGameDetails(game) {
+  const g = game || state.game;
   if (!g) return;
 
   const rows = GAME_DETAIL_ROWS
@@ -865,10 +961,7 @@ function deleteSession(sessionId) {
 }
 
 function jobsCard() {
-  if (!state.jobs.length) {
-    return `<div class="panel-light"><div class="job">
-      <div class="job-stage">${esc(t('jobs.none'))}</div></div></div>`;
-  }
+  if (!state.jobs.length) return emptyCard(t('jobs.none'));
   return `<div class="panel-light">${state.jobs.map((j) => {
     const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
     const failed = j.status === 'failed';
@@ -943,8 +1036,10 @@ function publishCard() {
 }
 
 function activityCard() {
-  if (!state.events.length) return '';
-  return `<div class="panel-light">${state.events.slice(0, 12).map((e) => `
+  if (!state.events.length) return emptyCard(t('activity.none'));
+  // Every event, newest first. The feed is how a long run is followed, so
+  // stopping at a dozen hides exactly the part someone scrolled back for.
+  return `<div class="panel-light">${state.events.map((e) => `
     <div class="job">
       <div class="job-top">
         <div class="job-name" style="font-weight:400;font-size:11.5px">${esc(e.message)}</div>
@@ -963,15 +1058,16 @@ function actionsRow(msg) {
 
 function render() {
   renderSessions();
-  $('transcript').innerHTML = state.msgs.map((m) => `
+  $('transcript').innerHTML = state.msgs.map((m, i) => `
     <div class="msg ${m.who === 'agent' ? 'msg-agent' : ''}">
       <div class="msg-label">${m.who === 'agent' ? 'Agent' : 'You'}</div>
       <div class="msg-text">${esc(m.text)}</div>
-      ${m.showMoments ? momentsCard(m) : ''}
+      ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showIngest ? ingestCard() : ''}
       ${m.showReel ? reelCard() : ''}
       ${m.showJobs ? jobsCard() : ''}
       ${m.showGame ? gameCard() : ''}
+      ${m.showGames ? gamesCard(m, i) : ''}
       ${m.showPublish ? publishCard() : ''}
       ${m.showActivity ? activityCard() : ''}
       ${actionsRow(m)}
@@ -1208,38 +1304,41 @@ function attachCards(index, question) {
   const msg = state.msgs[index];
   if (!msg) return;
 
-  if (/game detail|about (the|this) (game|match)|who played|final score|which game|find (the|a) (game|match)|what was the (game|match)/.test(q)) {
-    // A question about the match itself, not the plays inside it. The two are
-    // described in almost the same words, so the order of these branches is
-    // what decides which card appears.
+  // One branch wins, and the order is what decides which. A question about the
+  // match and a question about the plays inside it are asked in nearly the same
+  // words, so the more specific patterns have to come first.
+  if (/activity|event log|what happened|progress log|history/.test(q)) {
+    msg.showActivity = true;
+  } else if (/all games|list games|every game|show me the games|which games|browse games/.test(q)) {
+    msg.showGames = true;
+  } else if (/game detail|about (the|this) (game|match)|who played|final score|which game|find (the|a) (game|match)|what was the (game|match)|the game$|game info/.test(q)) {
     msg.showGame = true;
     msg.showActions = true;
-    msg.actions = ['Show me the best moments', "What's still processing?"];
+    msg.actions = [t('action.bestMoments'), t('action.processing')];
   } else if (/ingest|upload|new game|new match|import|analy[sz]e a/.test(q)) {
     msg.showIngest = true;
-  } else if (/process|job|status|fail|error|still running/.test(q)) {
+  } else if (/process|job|status|fail|error|still running|analys|analyz/.test(q)) {
     msg.showJobs = true;
     msg.showActions = true;
-    msg.actions = ['Show me the best moments', 'Ingest a new game'];
+    msg.actions = [t('action.bestMoments'), t('action.ingest')];
   } else if (/publish|post|schedule|package/.test(q)) {
     msg.showPublish = true;
   } else if (/cut|reel|montage|render|generate|reframe|vertical|shorter|tighten/.test(q)) {
-    if (state.clips.length) {
-      msg.showReel = true;
-      msg.showActions = true;
-      msg.actions = ['Generate video', 'Reframe 9:16', 'Prepare publish'];
-    }
-  } else if (state.moments.length) {
-    // A question about the match: show what it matched on.
+    msg.showReel = true;
+    msg.showActions = true;
+    msg.actions = [t('reel.generate'), t('reel.reframe'), t('reel.publish')];
+  } else {
+    // Every moment, highest scoring first — not a top handful. A list that
+    // silently stops at six looks like the analysis found six.
     msg.showMoments = true;
     msg.momentIds = [...state.moments]
       .sort((a, b) => (b.highlightScore ?? 0) - (a.highlightScore ?? 0))
-      .slice(0, 6)
       .map((m) => m.momentId);
     msg.showActions = true;
     msg.actions = ['Cut all of these', 'Cut a 30-second short'];
   }
 }
+
 
 /* ─────────────────────────────────────────────────────────── upload ── */
 
@@ -1375,7 +1474,8 @@ document.addEventListener('click', (event) => {
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
-    + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details]');
+    + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
+    + '[data-open-game],[data-page]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -1390,7 +1490,19 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.play) { playMoment(hit.dataset.play); return; }
   if (hit.dataset.closePlayer) { state.playing = null; destroyPlayer(); render(); return; }
   if (hit.dataset.details) { openDetails(hit.dataset.details); return; }
-  if (hit.dataset.gameDetails) { openGameDetails(); return; }
+  if (hit.dataset.gameDetails) { openGameDetails(state.game); return; }
+  if (hit.dataset.openGame) {
+    openGameDetails(state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame));
+    return;
+  }
+  if (hit.dataset.page) {
+    const [index, page] = hit.dataset.page.split(':').map(Number);
+    // The page lives on the message, so scrolling back to an earlier answer
+    // finds it where it was left rather than reset to the first page.
+    if (state.msgs[index]) state.msgs[index].page = page;
+    render();
+    return;
+  }
   if (hit.dataset.removeClip) {
     const m = momentById(hit.dataset.removeClip);
     const clip = state.clips.find((c) => c.momentId === hit.dataset.removeClip);

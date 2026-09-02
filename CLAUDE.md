@@ -406,6 +406,25 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### The cards
+
+Eight, each reachable from `attachCards` and each with an empty state:
+`ingestCard`, `jobsCard` (the stage strip), `gameCard`, `gamesCard`,
+`momentsCard`, `reelCard`, `publishCard`, `activityCard`. `showActivity` was
+never set by anything, so that card could not appear at all until this was
+audited — a renderer nobody routes to is dead code that looks alive.
+
+**No card returns an empty string.** Rendering nothing is indistinguishable from
+a card that failed to render, and the two have very different answers: "No
+moments yet" is information, a blank space is a bug report. `emptyCard` says
+which.
+
+**Lists page rather than truncate.** The moments list used to stop at six, which
+looks like an analysis that found six; showing all two hundred would bury the
+conversation. Ten a page, with the page held on the message so scrolling back to
+an earlier answer finds it where it was left. `pageOf` clamps out-of-range pages
+rather than rendering blank.
+
 ### The two detail widgets
 
 A moment row and a game row are the same shape on purpose: a headline worth

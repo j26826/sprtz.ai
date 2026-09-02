@@ -17,6 +17,13 @@ const BASE = 'en-GB';
 const STRINGS = {
   'en-GB': {
     'lang.name': 'English (UK)',
+    'pager.previous': 'Previous',
+    'pager.next': 'Next',
+    'pager.of': 'of',
+    'games.none': 'No games yet. They are written when an analysis finishes.',
+    'moments.none': 'No moments yet. They appear as the analysis finds them.',
+    'reel.none': 'Nothing in the reel yet. Add a moment to start one.',
+    'activity.none': 'No activity yet for this match.',
     'game.summary': 'Summary',
     'game.matchDate': 'Date',
     'game.groundedHomeTeam': 'Home team (from search)',
@@ -178,6 +185,13 @@ const STRINGS = {
 
   de: {
     'lang.name': 'Deutsch',
+    'pager.previous': 'Zurück',
+    'pager.next': 'Weiter',
+    'pager.of': 'von',
+    'games.none': 'Noch keine Spiele. Sie entstehen, wenn eine Analyse fertig ist.',
+    'moments.none': 'Noch keine Szenen. Sie erscheinen, sobald die Analyse sie findet.',
+    'reel.none': 'Noch nichts im Zusammenschnitt. Fügen Sie eine Szene hinzu.',
+    'activity.none': 'Noch keine Aktivität für dieses Spiel.',
     'game.summary': 'Zusammenfassung',
     'game.matchDate': 'Datum',
     'game.groundedHomeTeam': 'Heimmannschaft (aus Websuche)',
@@ -322,6 +336,13 @@ const STRINGS = {
 
   it: {
     'lang.name': 'Italiano',
+    'pager.previous': 'Precedente',
+    'pager.next': 'Successivo',
+    'pager.of': 'di',
+    'games.none': 'Ancora nessuna partita. Vengono scritte al termine di un’analisi.',
+    'moments.none': 'Ancora nessuna azione. Compaiono man mano che l’analisi le trova.',
+    'reel.none': 'Il montaggio è vuoto. Aggiungi un’azione per iniziare.',
+    'activity.none': 'Ancora nessuna attività per questa partita.',
     'game.summary': 'Sintesi',
     'game.matchDate': 'Data',
     'game.groundedHomeTeam': 'Squadra di casa (da ricerca web)',
@@ -464,6 +485,13 @@ const STRINGS = {
 
   fr: {
     'lang.name': 'Français',
+    'pager.previous': 'Précédent',
+    'pager.next': 'Suivant',
+    'pager.of': 'sur',
+    'games.none': 'Aucun match pour le moment. Ils sont écrits à la fin d’une analyse.',
+    'moments.none': 'Aucune action pour le moment. Elles apparaissent au fil de l’analyse.',
+    'reel.none': 'Le montage est vide. Ajoutez une action pour commencer.',
+    'activity.none': 'Aucune activité pour ce match.',
     'game.summary': 'Résumé',
     'game.matchDate': 'Date',
     'game.groundedHomeTeam': 'Équipe à domicile (recherche web)',
@@ -610,6 +638,13 @@ const STRINGS = {
 
   es: {
     'lang.name': 'Español',
+    'pager.previous': 'Anterior',
+    'pager.next': 'Siguiente',
+    'pager.of': 'de',
+    'games.none': 'Aún no hay partidos. Se escriben al terminar un análisis.',
+    'moments.none': 'Aún no hay jugadas. Aparecen a medida que el análisis las encuentra.',
+    'reel.none': 'El montaje está vacío. Añade una jugada para empezar.',
+    'activity.none': 'Aún no hay actividad para este partido.',
     'game.summary': 'Resumen',
     'game.matchDate': 'Fecha',
     'game.groundedHomeTeam': 'Equipo local (de búsqueda web)',
