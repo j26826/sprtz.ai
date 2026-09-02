@@ -145,24 +145,41 @@ def upload_directory(local_dir: Path, bucket: str, prefix: str, workers: int = 1
     return {"files": len(files), "bytes": total, "prefix": prefix.rstrip("/")}
 
 
+# A copy-remux writes segments as fast as it can read the source, and the
+# source is GCS. One upload at a time cannot keep up: each segment is a
+# separate round trip, so a serial drain is latency-bound at roughly a tenth of
+# what ffmpeg produces. The backlog it leaves behind is not disk — Cloud Run's
+# writable filesystem is memory — so falling behind is what killed the
+# container 33 seconds into a 3.4 GB match, with 1.9 GB of undrained segments
+# resident. Uploading in parallel is what makes the drain outrun the writer.
+_SEGMENT_WORKERS = 16
+_SEGMENT_POLL_SECONDS = 0.5
+
+
 class SegmentUploader:
     """Drains finished HLS segments to GCS while ffmpeg is still writing.
 
-    A three-hour remux emits several gigabytes of segments, and Cloud Run's
-    writable filesystem is memory. Uploading each segment as it completes and
-    deleting it locally keeps disk usage bounded to the last few segments,
-    whatever the length of the match. Only .ts files are drained mid-run: the
-    playlists are rewritten until ffmpeg exits and are uploaded by finish().
+    A three-hour remux emits as many gigabytes of segments as the source is
+    long, and Cloud Run's writable filesystem is memory. Uploading each segment
+    as it completes and deleting it locally keeps residency bounded to whatever
+    is in flight rather than to the size of the match. Only .ts files are
+    drained mid-run: the playlists are rewritten until ffmpeg exits and are
+    uploaded by finish().
     """
 
-    def __init__(self, local_dir: Path, bucket: str, prefix: str, poll_seconds: float = 2.0):
+    def __init__(self, local_dir: Path, bucket: str, prefix: str,
+                 poll_seconds: float = _SEGMENT_POLL_SECONDS,
+                 workers: int = _SEGMENT_WORKERS):
         self._dir = local_dir
         self._bucket = client().bucket(bucket)
         self._prefix = prefix.rstrip("/")
         self._poll = poll_seconds
+        self._workers = workers
         self._stop = threading.Event()
+        self._counters = threading.Lock()
         self._uploaded = 0
         self._bytes = 0
+        self._peak_backlog = 0
         self._errors: list[str] = []
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
@@ -183,29 +200,50 @@ class SegmentUploader:
     def _upload_one(self, path: Path) -> None:
         blob = self._bucket.blob(f"{self._prefix}/{path.name}")
         blob.cache_control = _SEGMENT_CACHE
-        blob.upload_from_filename(str(path), content_type=_content_type(path))
         size = path.stat().st_size
+        blob.upload_from_filename(str(path), content_type=_content_type(path))
+        # Only after the bytes are safely in GCS, and only then, is the local
+        # copy free to go: an unlink before a failed upload loses the segment.
         path.unlink()
-        self._uploaded += 1
-        self._bytes += size
+        with self._counters:
+            self._uploaded += 1
+            self._bytes += size
+
+    def _drain(self, segments: list[Path]) -> None:
+        """Upload a batch in parallel, keeping any failure for the next tick."""
+        if not segments:
+            return
+        with self._counters:
+            self._peak_backlog = max(self._peak_backlog, len(segments))
+
+        workers = min(self._workers, len(segments))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(self._upload_one, path) for path in segments]
+            for future in concurrent.futures.as_completed(futures):
+                exc = future.exception()
+                if exc is None:
+                    continue
+                # The file is still on disk, so the next tick retries it. One
+                # segment failing must not stop the others from draining.
+                logger.warning("segment upload failed; will retry: %s", exc)
+                with self._counters:
+                    self._errors.append(str(exc))
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            try:
-                for segment in self._ready_segments():
-                    self._upload_one(segment)
-            except Exception as exc:  # noqa: BLE001
-                # Remember and retry next tick; the file is still on disk.
-                logger.warning("segment upload failed; will retry", exc_info=True)
-                self._errors.append(str(exc))
+            self._drain(self._ready_segments())
             self._stop.wait(self._poll)
 
     def finish(self) -> dict:
         """Drain everything left — the last segment and the playlists."""
         self._stop.set()
-        self._thread.join(timeout=120)
-        for path in sorted(self._dir.glob("*.ts")):
-            self._upload_one(path)
+        # Tolerate a finish() on an uploader that was never entered: the drain
+        # below is what matters, and refusing to run it because no background
+        # thread exists would strand the segments.
+        if self._thread.ident is not None:
+            self._thread.join(timeout=120)
+        # Everything now, including the segment ffmpeg had open while running.
+        self._drain(sorted(self._dir.glob("*.ts")))
         for path in sorted(self._dir.glob("*.m3u8")):
             blob = self._bucket.blob(f"{self._prefix}/{path.name}")
             blob.cache_control = _PLAYLIST_CACHE
@@ -218,4 +256,7 @@ class SegmentUploader:
             "bytes": self._bytes,
             "prefix": self._prefix,
             "upload_retries": len(self._errors),
+            # How far the drain ever fell behind. This is the number that goes
+            # up before the container dies, so it is worth reporting.
+            "peak_backlog_segments": self._peak_backlog,
         }

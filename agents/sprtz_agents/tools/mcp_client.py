@@ -203,4 +203,17 @@ def _decode(text: str) -> dict[str, Any]:
             candidate = line[len("data:") :].strip()
             if candidate:
                 return json.loads(candidate)
+
+    # Keep-alive comments and nothing else means the server was alive, working,
+    # and then stopped before it answered — a container killed mid-response
+    # rather than anything wrong with the encoding. Saying "could not decode"
+    # and quoting the pings sends the reader after the wrong thing.
+    if stripped.startswith(":"):
+        pings = sum(1 for line in stripped.splitlines() if line.startswith(":"))
+        raise RuntimeError(
+            f"The MCP server closed the stream after {pings} keep-alive(s) "
+            "without returning a result. It was still working when it stopped, "
+            "so suspect the container going down mid-request — on Cloud Run, "
+            "check the platform log for a memory limit."
+        )
     raise ValueError(f"Could not decode MCP response: {text[:200]!r}")

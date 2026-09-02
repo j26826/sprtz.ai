@@ -150,7 +150,12 @@ variable "media_worker_memory" {
   # process, plus whatever segments are waiting to drain to GCS out of a
   # filesystem that is really RAM.
   description = "Memory allocation for the ffmpeg-backed MCP server, sized for one concurrent job."
-  default     = "2Gi"
+  # 2Gi was not enough for one job, let alone four: a copy-remux of a 3.4 GB
+  # match reached 2078 MiB with concurrency already down to 1, because the
+  # segments waiting to drain live in a filesystem that is really RAM. The
+  # parallel drain is what fixes the race; this is the headroom for whatever
+  # is still in flight while it runs.
+  default     = "4Gi"
 }
 
 variable "video_retention_days" {
