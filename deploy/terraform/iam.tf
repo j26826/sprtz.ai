@@ -85,9 +85,17 @@ resource "google_storage_bucket_iam_member" "api_media_read" {
   member = "serviceAccount:${google_service_account.api.email}"
 }
 
-resource "google_storage_bucket_iam_member" "media_worker_uploads_read" {
+# Read to probe and encode, delete to remove a job's source when the job is
+# deleted. objectViewer alone meant delete_job_media could clear the HLS
+# package — it holds objectAdmin on that bucket — and then fail on the upload,
+# so deleting a job always ended half done.
+#
+# objectUser rather than objectAdmin: this service has no business changing
+# object ACLs on the bucket users upload into, and the narrower role is the
+# same thing minus that.
+resource "google_storage_bucket_iam_member" "media_worker_uploads_rw" {
   bucket = google_storage_bucket.uploads.name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.mcp_media.email}"
 }
 
