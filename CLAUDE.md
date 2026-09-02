@@ -187,19 +187,32 @@ cannot sign locally — it raises "you need a private key to sign credentials".
 route signing through IAM's signBlob, and the service account needs
 `roles/iam.serviceAccountTokenCreator` **on itself** (`api_self_sign` in iam.tf).
 
-**The media server runs one job per instance.** Its concurrency said 4 while the
-comment beside it said "one heavy job per instance". Four remuxes sharing 2 GiB
-went over the limit and Cloud Run took the container down mid-response, so the
-agent's call never returned and the job sat in `analysis` looking alive. The
-writable filesystem is memory, so every segment ffmpeg writes before the
-uploader drains it is RAM — a cost that multiplies by concurrency. Parallelism
-belongs in `max_instance_count`, where each job gets a whole container.
+**The segment drain has to outrun ffmpeg, and one upload at a time does not.**
+A copy-remux writes segments as fast as it can read the source, and the backlog
+waiting to be uploaded sits in a filesystem that is really RAM. Serial uploads
+are latency-bound — a round trip per 500 KB segment — so on a 3.4 GB match the
+drain managed 183 MiB while ffmpeg produced nearly 2 GB, and the container died
+33 seconds in. `SegmentUploader` uploads batches through a thread pool and polls
+twice a second; `peak_backlog_segments` in its result is how far behind it ever
+fell.
 
-This is the one memory finding here that is measured rather than inferred:
-`Memory limit of 2048 MiB exceeded with 2103 MiB used`, in the *platform* log.
-The variable's old "keep at or below 1GiB per CPU" description was the
-disproved ratio theory and has been removed — it would push the limit the wrong
-way.
+Concurrency is 1 for the same reason: the file said 4 while the comment beside
+it said "one heavy job per instance", and that cost multiplies by concurrency.
+Parallelism belongs in `max_instance_count`, where each job gets a whole
+container.
+
+Both memory numbers here are measured, not inferred — `Memory limit of 2048 MiB
+exceeded with 2103 MiB used`, then 2078 MiB with concurrency already down to 1,
+both from the *platform* log rather than the application's. That second reading
+is what proved concurrency alone was not the fix. The variable's old "keep at or
+below 1GiB per CPU" description was the disproved ratio theory and is gone; it
+would have pushed the limit the wrong way.
+
+**A stream of only keep-alives is a dead server, not a decoding problem.** When
+a container is killed mid-response the SSE body arrives as `: ping` comments and
+nothing else. `_decode` used to report "Could not decode MCP response" and quote
+the pings, which reads as a protocol bug and sends you to the wrong file; it now
+says the stream closed without a result and points at the platform log.
 
 **A stage that dies must record it.** Cloud Run kills a container mid-response
 and progress reporting dies with it, so the job keeps its status and reads as
