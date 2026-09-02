@@ -122,18 +122,37 @@ async def _analyse_one(
     sport: str,
     semaphore: asyncio.Semaphore,
     metadata_language: str = "en",
+    segment_uri: str = "",
 ) -> tuple[SegmentPlan, SegmentAnalysis | None, str | None]:
+    """Analyse one window.
+
+    ``segment_uri`` points at a file that *is* this window, cut beforehand. It
+    is preferred over offsets into the whole match because Gemini fetches the
+    entire object to serve a request whatever offsets are given — a 3.22 GiB
+    source fails every window with "File content exceeded the size limit.
+    max_bytes_fetched: 2146971648". A pre-cut file is also a clip that genuinely
+    starts at 00:00, which is what the prompt tells the model its timecodes are
+    relative to.
+    """
     settings = get_settings()
     profile = get_profile(sport)
 
-    video_part = types.Part(
-        file_data=types.FileData(file_uri=gcs_uri, mime_type=_guess_mime(gcs_uri)),
-        video_metadata=types.VideoMetadata(
-            start_offset=f"{plan.start_sec:.3f}s",
-            end_offset=f"{plan.end_sec:.3f}s",
-            fps=settings.analysis_fps,
-        ),
-    )
+    if segment_uri:
+        video_part = types.Part(
+            file_data=types.FileData(
+                file_uri=segment_uri, mime_type=_guess_mime(segment_uri)),
+            # No offsets: the file is the window.
+            video_metadata=types.VideoMetadata(fps=settings.analysis_fps),
+        )
+    else:
+        video_part = types.Part(
+            file_data=types.FileData(file_uri=gcs_uri, mime_type=_guess_mime(gcs_uri)),
+            video_metadata=types.VideoMetadata(
+                start_offset=f"{plan.start_sec:.3f}s",
+                end_offset=f"{plan.end_sec:.3f}s",
+                fps=settings.analysis_fps,
+            ),
+        )
 
     prompt = build_segment_prompt(
         profile,
@@ -188,6 +207,7 @@ async def analyse_segments(
     sport: str = "handball",
     metadata_language: str = "en",
     on_segment_done: Callable[[int, int], Awaitable[None]] | None = None,
+    segment_uris: dict[int, str] | None = None,
 ) -> dict:
     """Analyse every segment of a video concurrently and merge the results.
 
@@ -212,7 +232,8 @@ async def analyse_segments(
     async def run(plan: SegmentPlan):
         nonlocal done
         outcome = await _analyse_one(
-            gcs_uri, plan, len(plans), sport, semaphore, metadata_language
+            gcs_uri, plan, len(plans), sport, semaphore, metadata_language,
+            (segment_uris or {}).get(plan.index, ""),
         )
         done += 1
         if on_segment_done is not None:

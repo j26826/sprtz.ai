@@ -71,8 +71,24 @@ against the live project. Treat a merge as a deploy.
   for semantic search. The embedding width must equal the Firestore vector
   index dimension exactly or queries fail at read time, not write time.
 - A match is split into **15-minute segments overlapping by 20s**, analysed
-  concurrently via `video_metadata` offsets straight off GCS, then merged with
-  temporal IoU per moment type. A 3-hour recording is 13 segments.
+  concurrently, then merged with temporal IoU per moment type. A 3-hour
+  recording is 13 segments.
+- **The segments are real files, not offsets.** Gemini fetches the *whole*
+  object to serve a request whatever `video_metadata` offsets it is given, so a
+  3.22 GiB source failed every window with `File content exceeded the size
+  limit. max_bytes_fetched: 2146971648` — 2.0 GiB. Slicing by time never made
+  the bytes smaller. `split_for_analysis` stream-copies one file per window into
+  the media bucket, and the request points at that instead. Offsets remain the
+  fallback for a source small enough to fetch.
+- The cut is a copy, not an encode: `-ss` on an HTTPS source is a range read, so
+  each window pulls roughly its own share. Segments are written, uploaded and
+  deleted one at a time — the writable filesystem is memory, and holding
+  thirteen at once is how this container died before. They are removed once the
+  analysis has read them, and a job delete clears any a dead run left behind.
+- A pre-cut file is also a clip that genuinely starts at 00:00, which is what
+  the prompt claims its timecodes are relative to. Reading offsets into a long
+  file, the model has been seen reporting match-absolute times instead — 54
+  detections in one run, every one dropped as out of window.
 - **1 fps, not 2.** Doubling the sample rate doubled cost *and* made timestamps
   worse.
 - The model reports **`MM:SS` timecodes within the clip**, not float seconds.
