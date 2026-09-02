@@ -35,6 +35,11 @@ def _moment(**kwargs) -> dict:
         "action_result": "Save",
         "participant": "#12 blue",
         "participant_role": "Goalkeeper",
+        "team1": "SWE",
+        "team2": "DEN",
+        "score_team1": 24,
+        "score_team2": 23,
+        "action_team": "SWE",
     }
     base.update(kwargs)
     return base
@@ -54,7 +59,7 @@ class TestEmbeddedText:
         # ". . ." in an embedded string is noise the model has to look past.
         # The description keeps its own full stop; only the joins are at issue.
         text = store.action_play_text(_moment(participant="", participant_role="",
-                                              action_result=""))
+                                              action_result="", action_team=""))
         assert ".." not in text
         assert ". ." not in text
         assert text == ("Double Save. defense. "
@@ -127,3 +132,71 @@ class TestReadBack:
 
         assert play["confidenceScore"] == 87
         assert play["type"] == "ActionPlay"
+
+
+class TestTeamsAreStoredAndSearchable:
+    def test_the_team_and_score_fields_are_persisted(self):
+        from unittest.mock import MagicMock, patch
+
+        captured = []
+        batch = MagicMock()
+        batch.set.side_effect = lambda ref, doc: captured.append(doc)
+        fake_db = MagicMock()
+        fake_db.batch.return_value = batch
+
+        with patch.object(store, "embed", lambda t, task_type=None: [[0.0] * 768 for _ in t]), \
+             patch.object(store, "db", return_value=fake_db), \
+             patch.object(store, "get_job", return_value={"ownerUid": "u"}), \
+             patch("google.cloud.firestore_v1.vector.Vector", lambda v: v):
+            store.upsert_moments("j1", [_moment()])
+
+        doc = captured[0]
+        assert doc["team1"] == "SWE"
+        assert doc["scoreTeam1"] == 24
+        assert doc["actionTeam"] == "SWE"
+
+    def test_an_unreadable_score_is_stored_as_null(self):
+        from unittest.mock import MagicMock, patch
+
+        captured = []
+        batch = MagicMock()
+        batch.set.side_effect = lambda ref, doc: captured.append(doc)
+        fake_db = MagicMock()
+        fake_db.batch.return_value = batch
+
+        with patch.object(store, "embed", lambda t, task_type=None: [[0.0] * 768 for _ in t]), \
+             patch.object(store, "db", return_value=fake_db), \
+             patch.object(store, "get_job", return_value={"ownerUid": "u"}), \
+             patch("google.cloud.firestore_v1.vector.Vector", lambda v: v):
+            store.upsert_moments("j1", [_moment(score_team1=None, score_team2=None)])
+
+        # 0 would be a scoreline nobody displayed.
+        assert captured[0]["scoreTeam1"] is None
+
+    def test_the_acting_team_is_in_the_vector(self):
+        # "Denmark's goals" is a query someone types.
+        assert "SWE" in store.action_play_text(_moment())
+
+    def test_the_scoreline_is_not_in_the_vector(self):
+        # "24" as text matches nothing anyone would search for, and a bare
+        # number dilutes the words that do.
+        text = store.action_play_text(_moment())
+        assert "24" not in text
+        assert "23" not in text
+
+    def test_the_projection_carries_the_teams(self):
+        play = store.as_action_play({
+            "startSec": 0, "endSec": 1, "confidence": 0.5,
+            "team1": "SWE", "team2": "DEN", "scoreTeam1": 24, "scoreTeam2": 23,
+            "actionTeam": "SWE",
+        })
+
+        assert play["team1"] == "SWE"
+        assert play["scoreTeam2"] == 23
+        assert play["actionTeam"] == "SWE"
+
+    def test_older_documents_read_back_without_teams(self):
+        play = store.as_action_play({"startSec": 0, "endSec": 1, "confidence": 0.5})
+
+        assert play["team1"] == ""
+        assert play["scoreTeam1"] is None

@@ -129,6 +129,36 @@ class DetectedMoment(BaseModel):
             "Pivot, Wing, Back, Referee or Coach."
         ),
     )
+    team1: str = Field(
+        default="",
+        description=(
+            "Home team, as printed on the score bug — the first or left-hand side. "
+            "Copy what is shown, abbreviation and all. Empty if no bug is legible; "
+            "never infer it from the competition or the kit."
+        ),
+    )
+    team2: str = Field(
+        default="",
+        description="Away team, the second or right-hand side of the score bug. Same rule.",
+    )
+    score_team1: int | None = Field(
+        default=None,
+        description=(
+            "Home team's score at this moment, as shown on the bug. Null if not "
+            "readable — 0 is a real score and means nil, not unknown."
+        ),
+    )
+    score_team2: int | None = Field(
+        default=None, description="Away team's score at this moment. Null if not readable."
+    )
+    action_team: str = Field(
+        default="",
+        description=(
+            "Which side this action belongs to, named as on the bug so it matches "
+            "team1 or team2. Use the shirt colour if the bug is not legible, and "
+            "leave empty for a neutral action such as a referee decision."
+        ),
+    )
     is_replay: bool = Field(
         default=False, description="True if this is a replay of an earlier live action."
     )
@@ -214,6 +244,11 @@ class Moment(BaseModel):
     action_result: str = ""
     participant: str = ""
     participant_role: str = ""
+    team1: str = ""
+    team2: str = ""
+    score_team1: int | None = None
+    score_team2: int | None = None
+    action_team: str = ""
     segment_indexes: list[int] = Field(
         default_factory=list,
         description="Segments this moment was seen in. More than one means it was merged.",
@@ -240,6 +275,11 @@ class Moment(BaseModel):
             "actionResult": self.action_result,
             "participant": self.participant,
             "participantRole": self.participant_role,
+            "team1": self.team1,
+            "team2": self.team2,
+            "scoreTeam1": self.score_team1,
+            "scoreTeam2": self.score_team2,
+            "actionTeam": self.action_team,
             "description": self.description,
             "confidenceScore": round(self.confidence * 100),
         }

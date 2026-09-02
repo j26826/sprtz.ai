@@ -53,7 +53,26 @@ number, or a name shown on screen or spoken by the commentary. Write it as \
 context — an invented name is worse than an empty field, because an editor will \
 publish it.
 - `participant_role` — Attacker, Defender, Goalkeeper, Pivot, Wing, Back, Referee \
-or Coach.\
+or Coach.
+
+# Reading the score bug
+
+`team1`, `team2`, `score_team1` and `score_team2` come from the on-screen score \
+graphic and nowhere else. Copy the names exactly as printed, abbreviations \
+included: `team1` is the first or left-hand side, `team2` the second.
+
+- If the bug is not legible in this clip, leave the names empty and the scores \
+null. Do not carry a score forward from an earlier moment, and do not work one \
+out from the goals you have counted — a score you calculated is a score nobody \
+displayed.
+- `null` and `0` are different answers. Nil is a real score; unreadable is not a \
+score at all.
+- `action_team` is the side the action belongs to, named the same way as the bug \
+so it matches `team1` or `team2`. If the bug is not legible use the shirt colour. \
+Leave it empty when no side owns the action, such as a referee decision.
+- Never infer who is playing from the competition, the venue, the kit or the \
+commentary's turn of phrase. An empty field is correct; a guessed one is a team \
+that never played.\
 """
 
 

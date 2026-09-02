@@ -99,8 +99,26 @@ sport's five groupings), `actionClass`, `actionResult`, `participant`,
 match**, and a 0-100 `confidenceScore`. `list_action_plays` returns them in
 match order — the structured log, where `list_moments` is the ranked shortlist.
 
+It also carries `team1`/`team2` (home and away as printed on the score bug),
+`scoreTeam1`/`scoreTeam2` at that moment, and `actionTeam` — the side the action
+belongs to, named to match `team1` or `team2` so the two join.
+
 Confidence is a 0-1 probability everywhere inside and 0-100 only in this shape,
 scaled at the projection rather than stored twice and allowed to disagree.
+
+**An unreadable score is `null`, never `0`.** Nil-nil is a real scoreline; not
+being able to read the bug is not a scoreline at all, and 0 invents one that was
+never displayed. The model is also told not to carry a score forward or to
+derive one from goals it has counted — a calculated score is one nobody showed.
+
+**Team names are consensused across the match, scores are not.** Who is playing
+does not change, but reading it off a score bug once per segment does not give
+one answer — the graphic is occluded, abbreviated differently, or absent for a
+whole segment. `resolve_team_names` takes the most frequent non-empty reading and
+`apply_team_names` gives it to every moment, so records cannot disagree about who
+is playing; the result is also stored on the job by `record_teams`. Scores are
+left per-moment on purpose: the scoreline changes through the match, so a
+moment's own reading is the one that belongs beside its timestamp.
 
 `participant` is **observed or empty**, never inferred. The model is told to
 write a shirt number or `unknown` rather than guess a name, because an invented
@@ -119,7 +137,9 @@ over-fetches 4x and has Gemini rerank for relevance. Reranker failure degrades
 to vector order — it must never empty the result set.
 
 **What is embedded is the whole ActionPlay**, not the description: class,
-category, result, participant role, participant, then the prose. "Double save by
+category, result, participant role, participant, acting team, then the prose.
+The scoreline is deliberately left out — "24-23" as text matches nothing anyone
+would type, and a bare number dilutes the words that do. "Double save by
 the keeper" and "who scored from the wing" are answerable only if the outcome
 and the role are in the vector, because they live in the structured fields
 rather than inside the sentence.

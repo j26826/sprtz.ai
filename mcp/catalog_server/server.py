@@ -139,6 +139,21 @@ def record_playback(job_id: str, playback_url: str, poster_url: str,
 
 
 @mcp.tool
+def record_teams(job_id: str, home: str, away: str) -> dict:
+    """Save the two teams as read from the score bug.
+
+    Args:
+        job_id: Identifier of the job.
+        home: Home team, the first side on the bug.
+        away: Away team, the second side on the bug.
+    """
+    try:
+        return {"status": "success", **store.record_teams(job_id, home, away)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def emit_event(job_id: str, stage: str, level: str, message: str, data: dict) -> dict:
     """Append a line to the job's live activity feed.
 
