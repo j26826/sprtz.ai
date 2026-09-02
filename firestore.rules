@@ -1,9 +1,19 @@
 rules_version = '2';
 
 // The SPA talks to Firestore directly for realtime sync, so these rules are the
-// only tenant boundary. Everything is owner-scoped and read-only from the
-// client — all writes go through the agents via the mcp-catalog server, which
-// uses Admin credentials and bypasses these rules.
+// only client-side boundary. Everything is read-only from the client — all
+// writes go through the agents via the mcp-catalog server, which uses Admin
+// credentials and bypasses these rules.
+//
+// Reads are shared: any signed-in user sees every job. This is a deliberate
+// product decision, not an oversight. Accounts are provisioned by hand in
+// Identity Platform and everyone with one is on the same desk, so a match
+// uploaded by a colleague is a match this desk is working on. Authentication
+// still gates everything — the boundary is "signed in", not "owns it".
+//
+// ownerUid is still written on every job, as provenance rather than as a gate:
+// it says who uploaded a match, which is worth knowing precisely because
+// anyone can now act on it.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -11,10 +21,8 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid != null;
     }
 
-    function ownsJob(jobId) {
-      return isSignedIn()
-        && exists(/databases/$(database)/documents/jobs/$(jobId))
-        && get(/databases/$(database)/documents/jobs/$(jobId)).data.ownerUid == request.auth.uid;
+    function jobExists(jobId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/jobs/$(jobId));
     }
 
     match /users/{uid} {
@@ -28,27 +36,27 @@ service cloud.firestore {
     }
 
     match /jobs/{jobId} {
-      allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow read: if isSignedIn();
       // Creation and status transitions are the API's and the agents' job.
       allow write: if false;
 
       match /events/{eventId} {
-        allow read: if ownsJob(jobId);
+        allow read: if jobExists(jobId);
         allow write: if false;
       }
 
       match /moments/{momentId} {
-        allow read: if ownsJob(jobId);
+        allow read: if jobExists(jobId);
         allow write: if false;
       }
 
       match /clips/{clipId} {
-        allow read: if ownsJob(jobId);
+        allow read: if jobExists(jobId);
         allow write: if false;
       }
 
       match /segments/{segmentId} {
-        allow read: if ownsJob(jobId);
+        allow read: if jobExists(jobId);
         allow write: if false;
       }
     }
@@ -59,7 +67,7 @@ service cloud.firestore {
     // game details. Owner-scoped on the document's own field, since there is no
     // parent job path to inherit from.
     match /games/{jobId} {
-      allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow read: if isSignedIn();
       allow write: if false;
     }
 

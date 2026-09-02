@@ -336,21 +336,23 @@ def get_game(job_id: str) -> dict[str, Any]:
     return _game_out(snapshot.to_dict())
 
 
-def knn_search_games(query: str, owner_uid: str, limit: int = 5) -> list[dict[str, Any]]:
-    """Find whole matches by meaning, scoped to one owner.
+def knn_search_games(query: str, owner_uid: str = "", limit: int = 5) -> list[dict[str, Any]]:
+    """Find whole matches by meaning, across every game.
 
-    The owner filter is not optional here: unlike moments, which are reached
-    through a job the caller already owns, this searches across every game in
-    the collection.
+    Unfiltered, which is also what makes the index simple: a vector index with
+    an equality prefix only serves queries carrying that equality, so dropping
+    the owner filter needs an index on the vector alone — `games_knn_all` in
+    firestore.tf.
+
+    ``owner_uid`` is accepted and ignored so an old caller is not silently
+    answered with a filtered list it did not ask for.
     """
-    from google.cloud.firestore_v1.base_query import FieldFilter
     from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
     from google.cloud.firestore_v1.vector import Vector
 
     vector = embed([query], task_type="RETRIEVAL_QUERY")[0]
     results = (
         db().collection("games")
-        .where(filter=FieldFilter("ownerUid", "==", owner_uid))
         .find_nearest(
             vector_field="embedding",
             query_vector=Vector(vector),
@@ -381,16 +383,21 @@ def get_job(job_id: str) -> dict[str, Any]:
 RUNNING_STATUSES = ("uploaded", "transcoding", "analyzing")
 
 
-def list_jobs(owner_uid: str, limit: int = 20, status: str = "") -> list[dict[str, Any]]:
-    """Recent jobs for one owner, newest first.
+def list_jobs(owner_uid: str = "", limit: int = 20, status: str = "") -> list[dict[str, Any]]:
+    """Recent jobs, newest first.
 
-    Ordering and the owner filter go to Firestore, which already has the
-    composite index the UI's listener needs. The status filter is applied here
-    instead: it would need an index of its own per status, and over a page of
-    jobs it costs nothing.
+    Every job, not one owner's. Matches are shared across the desk, so the
+    question "what is still processing?" is about the desk rather than about
+    whoever happens to be asking.
+
+    ``owner_uid`` is kept in the signature and ignored, so a caller that still
+    passes one is not silently answered with a filtered list it did not ask for
+    — and so the parameter can be given a meaning again without a signature
+    change if the product ever grows tenants.
+
+    The status filter is applied here rather than in the query: it would need an
+    index of its own per status, and over a page of jobs it costs nothing.
     """
-    from google.cloud.firestore_v1.base_query import FieldFilter
-
     wanted = (
         RUNNING_STATUSES if status == "running"
         else (status,) if status
@@ -398,7 +405,6 @@ def list_jobs(owner_uid: str, limit: int = 20, status: str = "") -> list[dict[st
     )
     query = (
         db().collection("jobs")
-        .where(filter=FieldFilter("ownerUid", "==", owner_uid))
         .order_by("createdAt", direction="DESCENDING")
         # Over-read when filtering so a page of finished jobs cannot hide the
         # running ones underneath it.
@@ -835,11 +841,10 @@ def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
     if job_id:
         base = job_ref(job_id).collection("moments")
     else:
-        if not owner_uid:
-            raise ValueError("A library-wide search needs owner_uid.")
-        base = db().collection_group("moments").where(
-            filter=firestore.FieldFilter("ownerUid", "==", owner_uid)
-        )
+        # Library-wide, across every job. A vector index with an equality
+        # prefix only serves queries carrying that equality, so this needs an
+        # index on the embedding alone — moments_knn_all in firestore.tf.
+        base = db().collection_group("moments")
 
     fetch = min(limit * RERANK_OVERFETCH, RERANK_MAX_CANDIDATES) if rerank else limit
 

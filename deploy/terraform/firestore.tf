@@ -49,6 +49,51 @@ resource "google_firestore_index" "moments_knn" {
   }
 }
 
+# Vector indexes for the unfiltered searches.
+#
+# A vector index whose first field is an equality only serves queries that carry
+# that equality. Jobs are shared across the desk now, so the searches no longer
+# filter by owner and need indexes on the embedding alone. The owner-prefixed
+# ones above are left in place: they cost nothing idle, and deleting a vector
+# index is the one operation this file warns about.
+resource "google_firestore_index" "moments_knn_all" {
+  project     = var.project_id
+  database    = google_firestore_database.default.name
+  collection  = "moments"
+  query_scope = "COLLECTION_GROUP"
+
+  fields {
+    field_path = "embedding"
+    vector_config {
+      dimension = var.embedding_dimensions
+      flat {}
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [fields]
+  }
+}
+
+resource "google_firestore_index" "games_knn_all" {
+  project     = var.project_id
+  database    = google_firestore_database.default.name
+  collection  = "games"
+  query_scope = "COLLECTION"
+
+  fields {
+    field_path = "embedding"
+    vector_config {
+      dimension = var.embedding_dimensions
+      flat {}
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [fields]
+  }
+}
+
 # Games are indexed separately from the moments inside them. "Find the Sweden
 # Denmark match" and "find the double save" are different questions over
 # different units, and one index holding both would answer each with the other:

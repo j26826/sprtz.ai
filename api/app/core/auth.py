@@ -12,9 +12,10 @@ March 2026.
 So the SPA signs in with Identity Platform and sends that ID token, and this
 module verifies it. That is a better fit for the data model anyway: the uid in
 a Firebase token is the same uid Firestore's rules compare against
-(`ownerUid == request.auth.uid`), whereas an IAP assertion carries a Google
-subject that does not match it — jobs created under an IAP identity would have
-been invisible to the browser's own listeners.
+(`request.auth.uid`), whereas an IAP assertion carries a Google subject that
+does not. The rules no longer compare a uid to a job's owner — jobs are shared
+across the desk — but they still require `request.auth` to be a real Identity
+Platform token, so the mismatch would still have mattered.
 
 An IAP assertion is still honoured when present, so putting IAP back in front
 later needs no code change.
