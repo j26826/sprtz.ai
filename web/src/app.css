@@ -834,3 +834,23 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .detail-grid { grid-template-columns: 1fr; }
   .detail-key { border-right: 0; padding-bottom: 0; border-bottom: 0; }
 }
+
+/* Pager */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--color-neutral-300);
+}
+
+.pager-count {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-700);
+}
+
+.pager .link-btn[disabled] { opacity: 0.35; cursor: default; }
