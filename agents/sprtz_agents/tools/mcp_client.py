@@ -6,7 +6,9 @@ they are deliberately different:
 
 * :func:`build_media_toolset` / :func:`build_catalog_toolset` expose tools to the
   LLM, for the conversational work an editor drives ("re-cut this five seconds
-  earlier", "render a preview").
+  earlier", "render a preview"). These are built once, at import time, so their
+  credentials cannot be baked in — they come from ``header_provider``, which ADK
+  calls before every listing and every tool call.
 * :func:`call_tool` is a direct client used *inside* our own coarse-grained
   tools. Bulk data — a few hundred moments with 768-dimension embeddings — must
   never round-trip through the model's context just to reach Firestore.
@@ -17,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from collections.abc import Callable
 from typing import Any
 
 import google.auth.transport.requests
@@ -32,55 +36,96 @@ _MCP_PATH = "/mcp"
 
 
 def _identity_token(audience: str) -> str:
-    """Mint an OIDC token for a private Cloud Run service.
-
-    Runs in a thread because the underlying transport is blocking and this is
-    called from async tool code.
-    """
+    """Mint an OIDC token for a private Cloud Run service."""
     request = google.auth.transport.requests.Request()
     return google.oauth2.id_token.fetch_id_token(request, audience)
 
 
-async def _auth_headers(base_url: str) -> dict[str, str]:
+# Tokens are good for an hour. Minting one per call would put a blocking
+# metadata round trip in front of every tool the model uses, so they are held
+# for well under their lifetime and re-minted on expiry.
+_TOKEN_TTL_SECONDS = 45 * 60
+_token_cache: dict[str, tuple[str, float]] = {}
+
+
+def _cached_identity_token(audience: str) -> str:
+    cached = _token_cache.get(audience)
+    now = time.monotonic()
+    if cached and cached[1] > now:
+        return cached[0]
+    token = _identity_token(audience)
+    _token_cache[audience] = (token, now + _TOKEN_TTL_SECONDS)
+    return token
+
+
+def _bearer(base_url: str) -> dict[str, str]:
+    """Authorization header for a private service, or nothing outside GCP.
+
+    An empty result is a real, visible failure mode rather than a quiet
+    fallback: Cloud Run answers a request with no Authorization header with a
+    403 whose body never reaches the caller, so an unauthenticated call looks
+    from here like a server that has stopped responding.
+    """
     if not base_url:
         return {}
     try:
-        token = await asyncio.to_thread(_identity_token, base_url)
-    except Exception:  # noqa: BLE001 - local dev has no metadata server
-        logger.debug("no OIDC token available for %s; calling unauthenticated", base_url)
+        return {"Authorization": f"Bearer {_cached_identity_token(base_url)}"}
+    except Exception:  # a developer machine has no metadata server
+        logger.warning(
+            "no OIDC token for %s; calling it unauthenticated, which a private "
+            "Cloud Run service will reject with 403", base_url, exc_info=True,
+        )
         return {}
-    return {"Authorization": f"Bearer {token}"}
 
 
-def _connection(base_url: str, headers: dict[str, str]) -> StreamableHTTPConnectionParams:
+async def _auth_headers(base_url: str) -> dict[str, str]:
+    return await asyncio.to_thread(_bearer, base_url)
+
+
+def _header_provider(base_url: str) -> Callable[[Any], dict[str, str]]:
+    """Per-request headers for a toolset.
+
+    The toolsets are built once at import time, so a token baked in here would
+    be a token that expires an hour into the deployment. ADK calls this before
+    each listing and each tool call instead, which is also what lets the token
+    be refreshed at all.
+    """
+    def provide(_readonly_context: Any) -> dict[str, str]:
+        return _bearer(base_url)
+
+    return provide
+
+
+def _connection(base_url: str) -> StreamableHTTPConnectionParams:
     return StreamableHTTPConnectionParams(
         url=f"{base_url.rstrip('/')}{_MCP_PATH}",
-        headers=headers,
         timeout=60,
         sse_read_timeout=15 * 60,
     )
 
 
-def build_media_toolset(headers: dict[str, str] | None = None) -> McpToolset | None:
+def build_media_toolset() -> McpToolset | None:
     """Media tools the editor can drive conversationally."""
     settings = get_settings()
     if not settings.mcp_media_url:
         logger.warning("MCP_MEDIA_URL unset; media tools unavailable")
         return None
     return McpToolset(
-        connection_params=_connection(settings.mcp_media_url, headers or {}),
+        connection_params=_connection(settings.mcp_media_url),
+        header_provider=_header_provider(settings.mcp_media_url),
         tool_filter=["cut_clip", "reframe_vertical", "burn_captions", "render_preview"],
     )
 
 
-def build_catalog_toolset(headers: dict[str, str] | None = None) -> McpToolset | None:
+def build_catalog_toolset() -> McpToolset | None:
     """Catalog tools for reading and lightly editing the job's data."""
     settings = get_settings()
     if not settings.mcp_catalog_url:
         logger.warning("MCP_CATALOG_URL unset; catalog tools unavailable")
         return None
     return McpToolset(
-        connection_params=_connection(settings.mcp_catalog_url, headers or {}),
+        connection_params=_connection(settings.mcp_catalog_url),
+        header_provider=_header_provider(settings.mcp_catalog_url),
         tool_filter=[
             "get_job",
             "list_moments",
