@@ -239,6 +239,17 @@ jobs card so the stage strip is on screen from the moment the run starts. The
 Firestore listener re-renders on every job write, so it follows by itself
 afterwards.
 
+Cutting gets the first quarter of the analysis band. Thirteen windows take a
+minute or two and the first Gemini call several more, so with the whole band
+given to segment completions the bar sat at the stage's start for five minutes
+with nothing to say — which reads as a dead run, and was reported as one. The
+cut is a countable operation, so it reports as it goes.
+
+Windows are cut one request at a time rather than all in one call: it is what
+lets progress be reported between them, keeps any single request well short of
+the client's timeout on a long match, and makes a failure name the window it
+happened in instead of ending the batch.
+
 Segment completion is what moves the bar during analysis, counted rather than
 indexed because segments finish out of order.
 
