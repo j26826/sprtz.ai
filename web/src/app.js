@@ -485,6 +485,55 @@ function momentById(id) {
  * failed to render — and the two have very different answers. "No moments yet"
  * is information; a blank space is a bug report.
  */
+/**
+ * The sessions list down the left.
+ *
+ * One entry per conversation, newest first. A session notes which job it is
+ * about, so the row shows that job's live status through the same Firestore
+ * listener the cards use — it follows an analysis rather than needing a
+ * refresh of its own.
+ */
+function renderSessions() {
+  const list = $('sessions-list');
+  if (!list) return;
+
+  if (!state.sessions.length) {
+    list.innerHTML = `<div class="sessions-empty">${esc(t('sessions.empty'))}</div>`;
+    return;
+  }
+
+  const jobsById = new Map(state.jobs.map((j) => [j.id, j]));
+
+  list.innerHTML = state.sessions.map((session) => {
+    const job = session.jobId ? jobsById.get(session.jobId) : null;
+    const running = job && ['analyzing', 'transcoding', 'uploaded'].includes(job.status);
+    const failed = job && (job.status === 'failed' || job.status === 'rejected');
+    const tone = failed ? 'failed' : running ? 'running' : 'idle';
+
+    // A session with no job yet is a conversation waiting for a match. Saying
+    // so is better than showing it blank, which reads as a broken row.
+    const meta = !job ? esc(t('sessions.noMatch'))
+      : running && !isStalled(job)
+        ? `${esc(job.stage || job.status)} · ${Math.round(job.progress || 0)}%`
+        : esc(job.status || '');
+    const stamp = new Date(session.createdAt || Date.now());
+
+    return `
+      <div class="session-row">
+        <button class="session" data-session="${esc(session.id)}" data-tone="${tone}"
+                aria-current="${session.id === state.sessionKey}">
+          <div class="session-name">${esc(
+            session.title || job?.title || t('sessions.untitled'))}</div>
+          <div class="session-meta">${meta} · ${
+            stamp.toLocaleDateString(getLocale())}</div>
+        </button>
+        <button class="session-delete" data-delete-session="${esc(session.id)}"
+                title="${esc(t('jobs.delete'))}" aria-label="${esc(t('jobs.delete'))}">&times;</button>
+      </div>`;
+  }).join('');
+}
+
+
 // Ten rows is about a screen. A match yields a couple of hundred moments, and
 // a card that showed all of them would bury the conversation it is part of —
 // while one that silently stopped at six looked like the analysis found six.
@@ -922,6 +971,33 @@ function openGameDetails(game) {
     <div class="detail-key">${esc(label)}</div>
     <div class="detail-value">${esc(String(value))}</div>`).join('') + sources;
   $('details').classList.remove('hidden');
+}
+
+
+/** Open a session: its match if it has one, otherwise a clean conversation. */
+function openSession(sessionId) {
+  const session = listSessions().find((s) => s.id === sessionId);
+  if (!session) return;
+
+  state.sessionKey = sessionId;
+  state.sessionId = null;          // a new agent session per conversation
+  state.msgs = [greeting()];
+  state.playing = null;
+  destroyPlayer();
+
+  if (session.jobId) {
+    selectJob(session.jobId);
+  } else {
+    state.unsubscribe.forEach((off) => off());
+    state.unsubscribe = [];
+    state.jobId = null;
+    state.job = null;
+    state.moments = [];
+    state.clips = [];
+    state.events = [];
+    state.game = null;
+    render();
+  }
 }
 
 

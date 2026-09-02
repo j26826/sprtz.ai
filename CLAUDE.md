@@ -445,10 +445,18 @@ anything naming the cause: a `t()` key en-GB does not define, a `$('id')` the
 document does not have, and a `<button>` whose data attribute is in no handler's
 selector. All three have shipped. The script checks them exactly and runs in CI.
 
-It deliberately does **not** try to find calls to undefined functions by
-pattern — an earlier version could not tell a destructured parameter or the word
-"the" in a comment from a call, and a check that cries wolf trains you to skip
-its output.
+It also checks that **every function called exists**, which needed a real
+parser. Three hand-rolled attempts could not tell a call from the word "the" in
+a comment, a destructured parameter from an undeclared name, or where a template
+literal ends, and each produced more noise than signal. `acorn` does it exactly.
+If acorn is not installed the check says it is skipping rather than passing
+quietly; CI installs it.
+
+That check exists because this failure shipped three times — `playerMarkup`,
+`renderSessions` and `openSession` were each removed by an edit that sliced a
+region to the next function and took a neighbour with it. All three blank the
+whole screen, because the throw happens inside `render()`, and `node --check`
+passes on every one of them.
 
 ### Jobs are shared, not owned
 

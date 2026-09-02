@@ -1,0 +1,12 @@
+{
+  "name": "sportscut-web-checks",
+  "private": true,
+  "type": "module",
+  "description": "Tooling for web/check.mjs only. The app itself ships no bundler and no dependencies — it is ES modules served as written.",
+  "scripts": {
+    "check": "node check.mjs"
+  },
+  "devDependencies": {
+    "acorn": "^8.14.0"
+  }
+}
