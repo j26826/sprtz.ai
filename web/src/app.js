@@ -807,6 +807,7 @@ async function startUpload() {
         sport: u.sport,
         filename: u.file.name,
         size_bytes: u.file.size,
+        content_type: u.file.type || '',
       }),
     });
 

@@ -1,9 +1,15 @@
 # --- MCP: catalog (Firestore + embeddings) ------------------------------------
 resource "google_cloud_run_v2_service" "mcp_catalog" {
-  project             = var.project_id
-  name                = "${local.prefix}-mcp-catalog"
-  location            = var.region
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  project  = var.project_id
+  name     = "${local.prefix}-mcp-catalog"
+  location = var.region
+  # Not INTERNAL_ONLY: Cloud Run services calling each other without a VPC
+  # connector egress over the public internet, so internal-only rejects the very
+  # callers this exists for — the API and the agent both got 404s from it. The
+  # service stays private through IAM instead: only the agent and API service
+  # accounts hold run.invoker, and every call carries an OIDC identity token, so
+  # an unauthenticated request is refused with 403.
+  ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = var.environment == "prod"
   labels              = local.common_labels
 
@@ -80,10 +86,16 @@ resource "google_cloud_run_v2_service" "mcp_catalog" {
 
 # --- MCP: media (ffmpeg) ------------------------------------------------------
 resource "google_cloud_run_v2_service" "mcp_media" {
-  project             = var.project_id
-  name                = "${local.prefix}-mcp-media"
-  location            = var.region
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  project  = var.project_id
+  name     = "${local.prefix}-mcp-media"
+  location = var.region
+  # Not INTERNAL_ONLY: Cloud Run services calling each other without a VPC
+  # connector egress over the public internet, so internal-only rejects the very
+  # callers this exists for — the API and the agent both got 404s from it. The
+  # service stays private through IAM instead: only the agent and API service
+  # accounts hold run.invoker, and every call carries an OIDC identity token, so
+  # an unauthenticated request is refused with 403.
+  ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = var.environment == "prod"
   labels              = local.common_labels
 

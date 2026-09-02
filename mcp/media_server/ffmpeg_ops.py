@@ -11,6 +11,49 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# --- Hardening for untrusted input -------------------------------------------
+#
+# Everything below runs ffmpeg over a file a stranger uploaded, so the input is
+# treated as hostile.
+#
+# The protocol allowlist is the important one. ffmpeg can be steered by the
+# *contents* of a media file into opening other URLs — playlists, concat
+# scripts and some container metadata all reference external resources. On GCP
+# that is an SSRF straight at the metadata server (http://169.254.169.254),
+# which would hand out this service account's access token. Restricting
+# protocols to https/tls/crypto plus local file access closes that: plain http
+# is absent, so the metadata server is unreachable, and file: cannot be reached
+# from a remote input because ffmpeg refuses to cross protocol boundaries
+# without -safe 0, which is never passed.
+# https is layered on tcp, so tcp must be listed or every GCS read fails with
+# "Protocol 'tcp' not on whitelist". Plain http is deliberately absent, and that
+# is what closes the hole: GCP's metadata server is http://169.254.169.254, so
+# without it a crafted file cannot steer ffmpeg into fetching this service
+# account's access token. Verified against the built image — an http:// input is
+# refused with "Protocol 'http' not on whitelist" while https:// still works.
+_ALLOWED_PROTOCOLS = "file,https,tls,crypto,tcp"
+
+# ffprobe has no -nostdin; passing it there makes ffprobe consume the next
+# argument as its value and fail with "Option not found".
+_PROBE_HARDENING: list[str] = ["-protocol_whitelist", _ALLOWED_PROTOCOLS]
+_FFMPEG_HARDENING: list[str] = ["-nostdin", "-protocol_whitelist", _ALLOWED_PROTOCOLS]
+
+# Bounds a genuine match recording stays inside. Anything outside is either a
+# mistake or an attempt to exhaust the worker.
+MAX_DURATION_SEC = 6 * 60 * 60
+MAX_DIMENSION = 7680
+MAX_PIXELS = 7680 * 4320
+
+# Codecs the pipeline can actually copy-remux to HLS. An exotic codec is not
+# necessarily malicious, but it is not something this service can serve.
+ALLOWED_VIDEO_CODECS = frozenset({"h264", "hevc", "vp9", "av1", "mpeg4", "mpeg2video"})
+ALLOWED_AUDIO_CODECS = frozenset({"aac", "mp3", "opus", "vorbis", "ac3", "eac3", "flac", "pcm_s16le"})
+
+
+class MediaRejected(ValueError):
+    """The upload is not media this service will process."""
+
+
 
 class FfmpegError(RuntimeError):
     pass
@@ -72,7 +115,7 @@ def probe(path: str | Path, bearer_token: str | None = None) -> dict:
         header_args = ["-headers", f"Authorization: Bearer {bearer_token}\r\n"]
     out = _run(
         [
-            "ffprobe", "-v", "error",
+            "ffprobe", "-v", "error", *_PROBE_HARDENING,
             *header_args,
             "-show_entries",
             "format=duration,size,bit_rate,format_name",
@@ -125,7 +168,7 @@ def remux_hls(source_url: str, out_dir: Path, bearer_token: str | None = None) -
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg", "-hide_banner", "-y",
+        "ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
         *(http_input_args(source_url, bearer_token) if source_url.startswith("http") else []),
         "-i", source_url,
         "-map", "0:v:0", "-map", "0:a:0?",
@@ -163,7 +206,7 @@ def transcode_hls(source: Path, out_dir: Path, source_height: int = 0) -> dict:
         # Source is smaller than the lowest rung; encode one rendition at source height.
         ladder = [HLS_LADDER[0]]
 
-    cmd: list[str] = ["ffmpeg", "-hide_banner", "-y", "-i", str(source)]
+    cmd: list[str] = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source)]
 
     # Split the decoded video once and scale each branch, so the source is
     # decoded a single time regardless of ladder depth.
@@ -225,7 +268,7 @@ def cut(source: str | Path, dest: Path, start_sec: float, end_sec: float,
     duration = max(0.0, end_sec - start_sec)
     dest.parent.mkdir(parents=True, exist_ok=True)
     src = str(source)
-    cmd = ["ffmpeg", "-hide_banner", "-y",
+    cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
            *(http_input_args(src, bearer_token) if src.startswith("http") else []),
            "-ss", f"{start_sec:.3f}", "-i", src,
            "-t", f"{duration:.3f}"]
@@ -253,10 +296,10 @@ def reframe(source: Path, dest: Path, aspect: str = "9:16", blur_pad: bool = Tru
             f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
         )
-        cmd = ["ffmpeg", "-hide_banner", "-y", "-i", str(source), "-filter_complex", vf]
+        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source), "-filter_complex", vf]
     else:
         vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-        cmd = ["ffmpeg", "-hide_banner", "-y", "-i", str(source), "-vf", vf]
+        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source), "-vf", vf]
 
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(dest)]
@@ -268,7 +311,7 @@ def thumbnail(source: str | Path, dest: Path, at_sec: float, width: int = 640,
     dest.parent.mkdir(parents=True, exist_ok=True)
     src = str(source)
     _run([
-        "ffmpeg", "-hide_banner", "-y",
+        "ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
         *(http_input_args(src, bearer_token) if src.startswith("http") else []),
         "-ss", f"{at_sec:.3f}", "-i", src,
         "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "3", str(dest),
@@ -283,6 +326,60 @@ def burn_text(source: Path, dest: Path, text: str, duration_sec: float = 1.5) ->
         f"x=(w-text_w)/2:y=h*0.12:enable='lt(t,{duration_sec})'"
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _run(["ffmpeg", "-hide_banner", "-y", "-i", str(source), "-vf", vf,
+    _run(["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source), "-vf", vf,
           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
           "-c:a", "copy", "-movflags", "+faststart", str(dest)])
+
+
+def validate(info: dict, *, declared_content_type: str = "") -> list[str]:
+    """Check probe output against what this service will process.
+
+    Returns the reasons to reject, empty if the file is acceptable. Separated
+    from :func:`probe` so it can be unit-tested against fixture dictionaries
+    without invoking ffprobe, and so callers can log every reason at once
+    rather than surfacing them one failed upload at a time.
+
+    This runs on probe output rather than on the client's claims, because a
+    filename and a Content-Type are both attacker-controlled: the only evidence
+    that an upload is a video is that a decoder could read it as one.
+    """
+    reasons: list[str] = []
+
+    if not info.get("video_codec"):
+        reasons.append("no video stream found — the file is not a video")
+
+    duration = float(info.get("duration_sec") or 0.0)
+    if duration <= 0:
+        reasons.append("no readable duration; the file is truncated or not media")
+    elif duration > MAX_DURATION_SEC:
+        reasons.append(
+            f"duration {duration / 3600:.1f}h exceeds the {MAX_DURATION_SEC / 3600:.0f}h limit"
+        )
+
+    width = int(info.get("width") or 0)
+    height = int(info.get("height") or 0)
+    if width <= 0 or height <= 0:
+        reasons.append("no readable video dimensions")
+    else:
+        if width > MAX_DIMENSION or height > MAX_DIMENSION:
+            reasons.append(f"{width}x{height} exceeds the {MAX_DIMENSION}px limit on a side")
+        # Guards a decompression bomb: a small file can declare an enormous
+        # frame and exhaust memory on the first decode.
+        if width * height > MAX_PIXELS:
+            reasons.append(f"{width}x{height} exceeds the total pixel limit")
+
+    codec = (info.get("video_codec") or "").lower()
+    if codec and codec not in ALLOWED_VIDEO_CODECS:
+        reasons.append(f"video codec {codec!r} is not supported")
+
+    audio = (info.get("audio_codec") or "").lower()
+    if audio and audio not in ALLOWED_AUDIO_CODECS:
+        reasons.append(f"audio codec {audio!r} is not supported")
+
+    # A mismatch is not proof of an attack — browsers guess Content-Type from
+    # the extension — but a file claiming to be video that decodes as something
+    # else is worth refusing rather than feeding to the rest of the pipeline.
+    if declared_content_type and not declared_content_type.startswith("video/"):
+        reasons.append(f"declared content type {declared_content_type!r} is not a video type")
+
+    return reasons

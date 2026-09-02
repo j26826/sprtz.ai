@@ -155,6 +155,25 @@ startup probe failing with no application output, suspect time, not the image.
 > committed into comments before a plain control deploy disproved it. When a
 > platform behaviour looks arbitrary, run the boring control first.
 
+**Uploads are validated against the bytes, and ffmpeg is run as if the input is
+hostile.** A filename and a Content-Type are both chosen by the uploader, so the
+only evidence a file is a video is that a decoder read it as one — `validate_media`
+ffprobes it before analysis and rejects on stream, duration, dimension, pixel-count
+and codec grounds, reporting every reason at once.
+
+The protocol allowlist matters more than the format checks: ffmpeg can be steered
+by a file's *contents* into opening other URLs, and on GCP that is an SSRF at
+`http://169.254.169.254` handing out the worker's access token. `file,https,tls,
+crypto,tcp` blocks it — plain `http` is absent. `tcp` **must** be listed or every
+GCS read fails, and `-nostdin` must **not** be passed to ffprobe, which has no
+such option and swallows the next argument.
+
+**MCP servers use `INGRESS_TRAFFIC_ALL`, not internal-only.** Cloud Run services
+calling each other without a VPC connector egress over the public internet, so
+internal-only 404s the very callers they exist for. They stay private through
+IAM: only the agent and API service accounts hold `run.invoker`, and every call
+carries an OIDC token.
+
 **Bucket CORS must list the app's own origin.** The browser PUTs the upload
 straight to GCS, so a valid signed URL still fails its preflight if the origin
 is not allowed — the error names CORS, not signing. `local.browser_origins`

@@ -109,7 +109,7 @@ def get_job(job_id: str) -> dict[str, Any]:
 
 
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
-               original_name: str, size_bytes: int) -> dict[str, Any]:
+               original_name: str, size_bytes: int, content_type: str = "") -> dict[str, Any]:
     payload = {
         "ownerUid": owner_uid,
         "title": title,
@@ -117,7 +117,14 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         "status": "uploaded",
         "stage": "ingest",
         "progress": 0,
-        "source": {"gcsUri": gcs_uri, "originalName": original_name, "bytes": size_bytes},
+        "source": {
+            "gcsUri": gcs_uri,
+            "originalName": original_name,
+            "bytes": size_bytes,
+            # What the client claimed. Kept so ingest can compare it against
+            # what the file actually decodes as; never trusted on its own.
+            "contentType": content_type,
+        },
         "media": {},
         "playback": {},
         "counts": {"moments": 0, "clips": 0},
