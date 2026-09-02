@@ -20,6 +20,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import {
   getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, getIdToken,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
   getFirestore, collection, doc, query, where, orderBy, limit, onSnapshot,
@@ -118,15 +119,87 @@ const fb = initializeApp({
 const auth = getAuth(fb);
 const db = getFirestore(fb);
 
-$('signin-btn').addEventListener('click', async () => {
+/**
+ * Sign-in.
+ *
+ * Email/password is the primary path because it is what the Identity Platform
+ * tenant actually has enabled. A federated button is only shown when a provider
+ * is configured — offering one that is not enabled just yields
+ * auth/operation-not-allowed, which reads as a bug rather than a setting.
+ */
+function signinError(err) {
+  const box = $('signin-error');
+  const code = err?.code || '';
+  const message = {
+    'auth/invalid-credential': 'That email and password do not match an account.',
+    'auth/wrong-password': 'That email and password do not match an account.',
+    'auth/user-not-found': 'No account with that email. Create one below.',
+    'auth/email-already-in-use': 'That email already has an account. Sign in instead.',
+    'auth/weak-password': 'Password must be at least six characters.',
+    'auth/unauthorized-domain':
+      'This hostname is not in the Identity Platform authorised domains list.',
+    'auth/operation-not-allowed':
+      'That sign-in method is not enabled on this project.',
+  }[code] || err?.message || 'Sign-in failed.';
+  box.textContent = message;
+  box.classList.remove('hidden');
+}
+
+function busy(on) {
+  $('signin-submit').disabled = on;
+  $('signup-btn').disabled = on;
+}
+
+$('signin-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  $('signin-error').classList.add('hidden');
+  busy(true);
+  try {
+    await signInWithEmailAndPassword(
+      auth, $('signin-email').value.trim(), $('signin-password').value,
+    );
+  } catch (err) {
+    signinError(err);
+  } finally {
+    busy(false);
+  }
+});
+
+$('signup-btn').addEventListener('click', async () => {
+  $('signin-error').classList.add('hidden');
+  const email = $('signin-email').value.trim();
+  const password = $('signin-password').value;
+  if (!email || password.length < 6) {
+    signinError({ code: 'auth/weak-password' });
+    return;
+  }
+  busy(true);
+  try {
+    await createUserWithEmailAndPassword(auth, email, password);
+  } catch (err) {
+    signinError(err);
+  } finally {
+    busy(false);
+  }
+});
+
+$('google-btn').addEventListener('click', async () => {
+  $('signin-error').classList.add('hidden');
   try {
     await signInWithPopup(auth, new GoogleAuthProvider());
   } catch (err) {
-    const box = $('signin-error');
-    box.textContent = err.message || 'Sign-in failed.';
-    box.classList.remove('hidden');
+    signinError(err);
   }
 });
+
+// Reveal the federated button only if the project has a provider configured.
+(async () => {
+  try {
+    const cfg = await fetch(`${API}/api/config`, { credentials: 'include' });
+    const { federated_providers: providers = [] } = await cfg.json();
+    if (providers.length) $('google-btn').classList.remove('hidden');
+  } catch { /* leave it hidden */ }
+})();
 
 onAuthStateChanged(auth, async (user) => {
   state.user = user;

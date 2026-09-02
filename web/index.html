@@ -20,10 +20,41 @@
     <div class="brand-mark"></div>
     <h1>Sports Agent</h1>
     <p>Sign in to analyse a match and cut it into short-form clips.</p>
-    <button class="btn-solid" id="signin-btn" style="padding:11px 18px">Continue with Google</button>
+
+    <form id="signin-form" style="text-align:left">
+      <div class="field" style="margin-bottom:12px">
+        <label for="signin-email">Email</label>
+        <input class="input" id="signin-email" type="email" autocomplete="email" required />
+      </div>
+      <div class="field" style="margin-bottom:16px">
+        <label for="signin-password">Password</label>
+        <input class="input" id="signin-password" type="password"
+               autocomplete="current-password" minlength="6" required />
+      </div>
+      <button class="btn-solid" id="signin-submit" type="submit"
+              style="width:100%;padding:11px">Sign in</button>
+    </form>
+
+    <div style="display:flex;align-items:center;gap:10px;margin:16px 0 4px">
+      <span style="flex:1;height:1px;background:var(--color-neutral-300)"></span>
+      <span class="field-label">or</span>
+      <span style="flex:1;height:1px;background:var(--color-neutral-300)"></span>
+    </div>
+
+    <button class="btn-outline" id="signup-btn" style="width:100%;padding:10px">
+      Create an account
+    </button>
+    <!-- Hidden unless a federated provider is actually configured; showing it
+         otherwise only ever yields auth/operation-not-allowed. -->
+    <button class="btn-outline hidden" id="google-btn"
+            style="width:100%;padding:10px;margin-top:8px">
+      Continue with Google
+    </button>
+
     <div class="error-note hidden" id="signin-error"></div>
   </div>
 </div>
+
 
 <div class="shell hidden" id="app">
 
