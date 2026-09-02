@@ -1135,7 +1135,15 @@ async function ensureSession() {
   return state.sessionId;
 }
 
-async function ask(text) {
+/**
+ * Send a message and stream the reply.
+ *
+ * `cards` attaches a card to the agent's message the moment it exists, rather
+ * than when the turn ends. That matters for anything long: card selection
+ * normally runs on the finished reply, so an analysis would show its progress
+ * widget an hour after the progress was worth watching.
+ */
+async function ask(text, cards = null) {
   push({ who: 'you', text });
   state.thinking = true;
   render();
@@ -1157,7 +1165,7 @@ async function ask(text) {
     if (!res.ok || !res.body) throw new Error(`Agent returned ${res.status}`);
 
     state.thinking = false;
-    state.msgs.push({ who: 'agent', text: '' });
+    state.msgs.push({ who: 'agent', text: '', ...(cards || {}) });
     msgIndex = state.msgs.length - 1;
     render();
 
@@ -1190,7 +1198,9 @@ async function ask(text) {
       }
     }
     if (target.text) state.msgs[msgIndex].text = target.text;
-    attachCards(msgIndex, text);
+    // Cards chosen by the caller are deliberate; inferring more from the
+    // wording on top of them would only fight what was asked for.
+    if (!cards) attachCards(msgIndex, text);
   } catch (err) {
     state.thinking = false;
     if (msgIndex >= 0) state.msgs[msgIndex].text = `Could not reach the agent: ${err.message}`;
@@ -1294,7 +1304,11 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type }
   playbackUrl = null;
   render();
 
-  await ask('Analyse this match and suggest clips.');
+  await ask('Analyse this match and suggest clips.', {
+    showJobs: true,
+    showActions: true,
+    actions: [t('action.processing'), t('action.bestMoments')],
+  });
   u.status = 'idle';
   u.file = null;
   u.name = '';
@@ -1424,12 +1438,13 @@ document.addEventListener('click', (event) => {
   }
   if (hit.dataset.reanalyse) {
     selectJob(hit.dataset.reanalyse);
-    ask('Clear this job\'s previous results and analyse the match again.');
+    ask('Clear this job\'s previous results and analyse the match again.',
+      { showJobs: true });
     return;
   }
   if (hit.dataset.cancelJob) {
     selectJob(hit.dataset.cancelJob);
-    ask('Cancel the analysis running on this job.');
+    ask('Cancel the analysis running on this job.', { showJobs: true });
     return;
   }
   if (hit.dataset.deleteJob) {
@@ -1447,7 +1462,8 @@ document.addEventListener('click', (event) => {
   }
   if (hit.dataset.retry) {
     selectJob(hit.dataset.retry);
-    ask('The run on this job stopped without finishing. Start the analysis again.');
+    ask('The run on this job stopped without finishing. Start the analysis again.',
+      { showJobs: true });
     return;
   }
   if (hit.dataset.sport) { state.upload.sport = hit.dataset.sport; render(); }
