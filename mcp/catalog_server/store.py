@@ -94,6 +94,56 @@ def embed(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[
     return vectors
 
 
+def action_play_text(moment: dict[str, Any]) -> str:
+    """What gets embedded for a moment.
+
+    Semantic search has to answer "double save by the keeper" and "who scored
+    from the wing", so the vector has to carry the outcome, the participant and
+    their role — not just the type label and the prose. A description alone
+    matches on narration and misses the structured facts beside it.
+    """
+    parts = [
+        moment.get("label") or moment.get("action_class") or "",
+        moment.get("category") or "",
+        moment.get("action_result") or "",
+        moment.get("participant_role") or "",
+        moment.get("participant") or "",
+        moment.get("description") or "",
+    ]
+    return ". ".join(p.strip() for p in parts if p and p.strip())
+
+
+def as_action_play(doc: dict[str, Any]) -> dict[str, Any]:
+    """A stored moment in ActionPlay form.
+
+    Times are MM:SS into the match. The stored confidence is a 0-1 probability
+    and this shape wants a 0-100 score, so it is scaled here rather than stored
+    twice and allowed to disagree.
+    """
+    return {
+        "type": "ActionPlay",
+        "timeOffsetStart": format_timecode(doc.get("startSec", 0.0)),
+        "timeOffsetEnd": format_timecode(doc.get("endSec", 0.0)),
+        "actionCategory": doc.get("category", ""),
+        "actionClass": doc.get("label", ""),
+        "actionResult": doc.get("actionResult", ""),
+        "participant": doc.get("participant", ""),
+        "participantRole": doc.get("participantRole", ""),
+        "description": doc.get("description", ""),
+        "confidenceScore": round(float(doc.get("confidence", 0.0)) * 100),
+    }
+
+
+def format_timecode(seconds: float) -> str:
+    """Seconds to MM:SS, or H:MM:SS once a match runs past the hour."""
+    total = max(0, round(float(seconds or 0)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 # --- Jobs ---------------------------------------------------------------------
 
 
@@ -276,8 +326,7 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
     from google.cloud.firestore_v1.vector import Vector
 
     owner_uid = get_job(job_id).get("ownerUid", "")
-    texts = [m.pop("embed_text", None) or f"{m.get('label', '')}. {m.get('description', '')}"
-             for m in moments]
+    texts = [m.pop("embed_text", None) or action_play_text(m) for m in moments]
     vectors = embed(texts, task_type="RETRIEVAL_DOCUMENT")
 
     batch = db().batch()
@@ -303,6 +352,9 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
                 "evidence": moment.get("evidence", []),
                 "scoreboard": moment.get("scoreboard"),
                 "isGoal": moment.get("is_goal", False),
+                "actionResult": moment.get("action_result", ""),
+                "participant": moment.get("participant", ""),
+                "participantRole": moment.get("participant_role", ""),
                 "segmentIndexes": moment.get("segment_indexes", []),
                 "embedding": Vector(vector),
                 "createdAt": now(),
@@ -336,8 +388,29 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "evidence": data.get("evidence", []),
         "scoreboard": data.get("scoreboard"),
         "is_goal": data.get("isGoal", False),
+        "action_result": data.get("actionResult", ""),
+        "participant": data.get("participant", ""),
+        "participant_role": data.get("participantRole", ""),
         "segment_indexes": data.get("segmentIndexes", []),
     }
+
+
+def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> list[dict[str, Any]]:
+    """Every moment in the job as ActionPlay records, in match order.
+
+    Ordered by time rather than by score because this is a record of what
+    happened, not a shortlist — `list_moments` is the ranked view.
+    """
+    from google.cloud import firestore
+
+    query = (
+        job_ref(job_id)
+        .collection("moments")
+        .where(filter=firestore.FieldFilter("highlightScore", ">=", min_score))
+        .order_by("startSec", direction=firestore.Query.ASCENDING)
+        .limit(limit)
+    )
+    return [as_action_play(d.to_dict()) for d in query.stream()]
 
 
 def list_moments(job_id: str, limit: int = 100, min_score: float = 0.0) -> list[dict[str, Any]]:

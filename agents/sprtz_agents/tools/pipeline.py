@@ -402,8 +402,11 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
 async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int = 100) -> int:
     """Embed and store moments in batches.
 
-    Embeddings are generated from the moment's own description so semantic
-    search matches on what happened, not on the type label alone.
+    What goes into the vector is the whole ActionPlay: the class, the category,
+    the outcome, the participant and their role, then the description. Embedding
+    the description alone answers "a keeper diving left" but not "double save"
+    or "who scored from the wing", because those facts live in the structured
+    fields beside the prose rather than inside it.
     """
     if not moments:
         return 0
@@ -414,7 +417,12 @@ async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int =
         payload = [
             {
                 **m.model_dump(),
-                "embed_text": f"{m.label}. {m.description}",
+                "embed_text": ". ".join(
+                    part for part in (
+                        m.label, m.category, m.action_result,
+                        m.participant_role, m.participant, m.description,
+                    ) if part and part.strip()
+                ),
             }
             for m in chunk
         ]
@@ -554,6 +562,34 @@ async def list_jobs(tool_context: ToolContext, status: str = "", limit: int = 20
         return result
     return {"status": "success", "jobs": result.get("jobs", []),
             "count": result.get("count", 0)}
+
+
+async def list_action_plays(job_id: str, limit: int = 500) -> dict:
+    """Return every detected moment for a job as ActionPlay records, in match order.
+
+    Use this when the editor asks for the structured log of a match rather than
+    a shortlist — what happened, when, who did it and how it ended.
+
+    Args:
+        job_id: Identifier of the job.
+        limit: Most records to return.
+
+    Returns:
+        dict with `action_plays`, each carrying timeOffsetStart/End as MM:SS into
+        the match, actionCategory, actionClass, actionResult, participant,
+        participantRole, description and a 0-100 confidenceScore.
+    """
+    result = await mcp_client.call_tool(
+        "catalog", "list_action_plays", {"job_id": job_id, "limit": limit, "min_score": 0.0}
+    )
+    if result.get("status") == "error":
+        return result
+    return {
+        "status": "success",
+        "job_id": job_id,
+        "action_plays": result.get("action_plays", []),
+        "count": result.get("count", 0),
+    }
 
 
 async def get_job_summary(job_id: str) -> dict:

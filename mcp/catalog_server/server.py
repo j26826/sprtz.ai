@@ -186,6 +186,23 @@ def list_moments(job_id: str, limit: int, min_score: float) -> dict:
 
 
 @mcp.tool
+def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> dict:
+    """Every detected moment in a job as ActionPlay records, in match order.
+
+    Args:
+        job_id: Job whose moments to list.
+        limit: Most records to return.
+        min_score: Drop anything below this highlight score.
+    """
+    try:
+        plays = store.list_action_plays(job_id, limit=limit, min_score=min_score)
+        return {"status": "success", "job_id": job_id, "action_plays": plays,
+                "count": len(plays)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def knn_search_moments(query: str, job_id: str, limit: int, owner_uid: str = "",
                        rerank: bool = True) -> dict:
     """Find moments whose meaning matches a plain-language query.

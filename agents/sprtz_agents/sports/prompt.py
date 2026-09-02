@@ -38,7 +38,22 @@ Report only these. Use each code exactly as written.
 
 # Never report
 
-{exclusions}\
+{exclusions}
+
+# Describing an action
+
+Alongside the classification, report what the action *was*:
+
+- `action_result` — how it ends, in a word or two: Goal, Save, Miss, Block, Foul, \
+Turnover, Card, Timeout, Penalty. Leave it empty when the action does not resolve \
+on camera.
+- `participant` — who does it, **only when you can actually read it**: a shirt \
+number, or a name shown on screen or spoken by the commentary. Write it as \
+`#7 red`, or `unknown`. Never infer a name from the competition, the kit or the \
+context — an invented name is worse than an empty field, because an editor will \
+publish it.
+- `participant_role` — Attacker, Defender, Goalkeeper, Pivot, Wing, Back, Referee \
+or Coach.\
 """
 
 
