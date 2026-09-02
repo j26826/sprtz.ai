@@ -151,6 +151,9 @@ def list_jobs(owner_uid: str, limit: int = 20, status: str = "") -> list[dict[st
 def _job_summary(job_id: str, doc: dict[str, Any]) -> dict[str, Any]:
     """The fields worth spending tokens on. The full document is get_job's job."""
     created = doc.get("createdAt")
+    # The agent reads this to tell a live run from one that died with its
+    # process: a status alone cannot distinguish them.
+    updated = doc.get("updatedAt")
     return {
         "job_id": job_id,
         "title": doc.get("title") or doc.get("source", {}).get("originalName") or job_id,
@@ -162,6 +165,7 @@ def _job_summary(job_id: str, doc: dict[str, Any]) -> dict[str, Any]:
         "duration_sec": doc.get("media", {}).get("durationSec"),
         "counts": doc.get("counts", {}),
         "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
+        "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else updated,
     }
 
 

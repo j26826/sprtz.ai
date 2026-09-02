@@ -431,6 +431,33 @@ function reelCard() {
     </div>`;
 }
 
+// A run that dies takes its progress reporting with it, so the job keeps the
+// status it had and looks alive for ever. Nothing retries on its own, so the
+// only honest reading of a long silence is that it needs starting again.
+const STALLED_AFTER_MS = 15 * 60 * 1000;
+
+function toDate(value) {
+  if (!value) return null;
+  if (typeof value.toDate === 'function') return value.toDate();  // Firestore Timestamp
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isStalled(job) {
+  const updated = toDate(job.updatedAt) || toDate(job.createdAt);
+  return !!updated && Date.now() - updated.getTime() > STALLED_AFTER_MS;
+}
+
+function sinceLabel(value) {
+  const then = toDate(value);
+  if (!then) return 'a while';
+  const minutes = Math.round((Date.now() - then.getTime()) / 60000);
+  if (minutes < 90) return `${minutes} minutes`;
+  const hours = Math.round(minutes / 60);
+  return hours < 36 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
+}
+
+
 function jobsCard() {
   if (!state.jobs.length) {
     return `<div class="panel-light"><div class="job">
@@ -439,19 +466,28 @@ function jobsCard() {
   return `<div class="panel-light">${state.jobs.map((j) => {
     const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
     const failed = j.status === 'failed';
-    const tone = failed ? 'failed' : running ? 'running' : 'idle';
+    const stalled = running && isStalled(j);
+    const tone = failed || stalled ? 'failed' : running ? 'running' : 'idle';
     return `
       <div class="job">
         <div class="job-top">
           <div class="job-name">${esc(j.title || j.source?.originalName || j.id)}</div>
-          <div class="job-status" data-tone="${tone}">${esc(j.status || 'unknown')}</div>
+          <div class="job-status" data-tone="${tone}">${
+            stalled ? 'stalled' : esc(j.status || 'unknown')}</div>
         </div>
         <div class="job-stage">${esc(j.stage || '')}${
           j.media?.segmentCount ? ` · ${j.media.segmentCount} segments` : ''}</div>
-        ${running ? `
+        ${running && !stalled ? `
           <div class="meter-row">
             <div class="meter meter-neutral"><i style="width:${j.progress || 0}%"></i></div>
             <div class="meter-pct">${Math.round(j.progress || 0)}%</div>
+          </div>` : ''}
+        ${stalled ? `
+          <div class="job-error">
+            <p>No progress for ${esc(sinceLabel(j.updatedAt))}. The run that owned this
+               job is gone — a deploy or a restart ends one mid-flight, and nothing
+               picks it up again. Retrying starts it over.</p>
+            <button class="btn-outline" data-retry="${esc(j.id)}">Retry</button>
           </div>` : ''}
         ${failed && j.error ? `
           <div class="job-error">
@@ -916,7 +952,11 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
-  if (t.dataset.retry) { selectJob(t.dataset.retry); ask('Retry this job.'); return; }
+  if (t.dataset.retry) {
+    selectJob(t.dataset.retry);
+    ask('The run on this job stopped without finishing. Start the analysis again.');
+    return;
+  }
   if (t.dataset.sport) { state.upload.sport = t.dataset.sport; render(); }
 });
 

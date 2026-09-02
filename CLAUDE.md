@@ -187,6 +187,35 @@ cannot sign locally — it raises "you need a private key to sign credentials".
 route signing through IAM's signBlob, and the service account needs
 `roles/iam.serviceAccountTokenCreator` **on itself** (`api_self_sign` in iam.tf).
 
+**The MCP toolsets need `header_provider`, not headers.** The two servers are
+private Cloud Run services, so every call needs an OIDC token for that service's
+URL. `call_tool` mints one per call and always worked; the *toolsets* were built
+with a static empty header dict, so all six model-facing tools were refused
+while the pipeline ran fine — the two paths fail independently and only one was
+covered.
+
+The failure is silent from the agent's side. Cloud Run rejects a request with no
+Authorization header before it reaches the container, and the body never gets
+back, so ADK reports "Failed to create MCP session" and the model behaves like
+its tools do not exist. The evidence is in the *server's* log — "Empty
+Authorization header value" — on a service whose own application log shows
+nothing.
+
+Toolsets are built at import time, so a token cannot be baked in: it would
+expire an hour into the deployment. `header_provider` is a synchronous callable
+ADK invokes before each listing and each call; tokens are cached per audience
+for 45 minutes so it is not a metadata round trip per tool call.
+
+**Nothing retries a run that dies.** A deploy replaces the Agent Runtime engine
+and kills whatever it was doing. Progress reporting dies with it, so the job
+keeps the status it had and reads as running for ever. The editor shows a
+running job with no movement for 15 minutes as `stalled` and offers Retry; the
+agent is told that a stale `updated_at` under a running status means a dead run,
+because otherwise it correctly refuses to start "a second run".
+
+Merging during an analysis therefore costs that analysis. It is not lost data —
+the upload is still in the bucket and the job can be re-run.
+
 **The agent scopes `list_jobs` from the session, not from a parameter.**
 Editors never see a job id, so the agent has to be able to list their jobs to
 answer "what's still processing?" — but an `owner_uid` argument would be an

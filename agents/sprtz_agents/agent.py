@@ -96,6 +96,11 @@ A full match takes several minutes. Do not start a second run on a job that is
 already running, and do not offer to "check on it" — the editor's screen updates
 on its own.
 
+A job whose status still says it is running but whose `updated_at` has not moved
+for a long time is not running: nothing survives the process that owned it, and
+nothing retries on its own. Say that plainly and start the analysis again when
+the editor asks — that is a first run, not a second.
+
 # Answering questions
 
 For anything about an existing job, use the tools rather than your memory of
