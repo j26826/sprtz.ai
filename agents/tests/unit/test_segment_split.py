@@ -54,9 +54,14 @@ class TestCutting:
     async def test_every_window_is_sent_to_be_cut(self, called):
         await pipeline._cut_segments("j", "gs://up/v.mp4", THREE_HOURS)
 
-        args = called.await_args_list[-1].args[2]
-        assert len(args["windows"]) == 13
-        assert args["windows"][0]["start_sec"] == 0.0
+        # One request per window, which is what lets progress be reported
+        # between them and keeps any single request short.
+        cuts = [c.args[2] for c in called.await_args_list
+                if c.args[1] == "split_for_analysis"]
+        assert len(cuts) == 13
+        assert all(len(c["windows"]) == 1 for c in cuts)
+        assert cuts[0]["windows"][0]["start_sec"] == 0.0
+        assert [c["windows"][0]["index"] for c in cuts] == list(range(13))
 
     @pytest.mark.asyncio
     async def test_the_result_maps_window_index_to_file(self, called):

@@ -503,8 +503,22 @@ def update_job_status(job_id: str, status: str, stage: str | None = None,
         patch["stage"] = stage
     if error is not None:
         patch["error"] = error
+
     if progress is not None:
-        patch["progress"] = progress
+        # Progress only ever goes forward. Playback and analysis run
+        # concurrently and occupy different bands of the bar — 5-20 and 20-80 —
+        # so whichever finishes last wrote its number last, and an encode that
+        # ended after the analysis had reached 80% pulled the bar back to 20.
+        #
+        # Zero is the exception, because it is how a run says it is starting
+        # over rather than how it reports being early.
+        if progress <= 0:
+            patch["progress"] = progress
+        else:
+            snapshot = job_ref(job_id).get()
+            current = (snapshot.to_dict() or {}).get("progress", 0) if snapshot.exists else 0
+            patch["progress"] = max(int(current or 0), progress)
+
     job_ref(job_id).update(patch)
     return {"job_id": job_id, **patch}
 

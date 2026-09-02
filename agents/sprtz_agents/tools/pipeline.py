@@ -392,7 +392,7 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
     )
 
     async def segment_done(done: int, total: int) -> None:
-        await _progress(job_id, "analysis", done / total)
+        await _progress(job_id, "analysis", CUT_SHARE + (1 - CUT_SHARE) * done / total)
         await _emit(job_id, "analysis", f"Analysed segment {done} of {total}.",
                     segments_done=done, segments_total=total)
 
@@ -855,12 +855,26 @@ async def delete_job(job_id: str) -> dict:
     }
 
 
+# How the analysis stage's share of the bar is split. Cutting thirteen windows
+# out of a three-hour match takes a minute or two, and the first segment
+# analysis takes several more — so with the whole band given to segment
+# completions the bar sat at the start of the stage for five minutes with
+# nothing to say. Cutting is a countable operation; giving it the first quarter
+# means the bar moves from the moment the run starts.
+CUT_SHARE = 0.25
+
+
 async def _cut_segments(job_id: str, gcs_uri: str, duration: float) -> dict[int, str]:
     """Cut the source into one file per analysis window.
 
     Returns index -> URI, empty when nothing could be cut. Empty is not a
     failure: analysis then falls back to time offsets into the whole match,
     which works for anything small enough that Gemini will fetch it.
+
+    One request per window rather than one for all of them. It reports progress
+    as each lands, keeps any single request short enough not to approach the
+    client's timeout on a long match, and makes a failure name the window it
+    happened in instead of ending the batch.
     """
     windows = [
         {"index": p.index, "start_sec": p.start_sec, "end_sec": p.end_sec}
@@ -872,22 +886,38 @@ async def _cut_segments(job_id: str, gcs_uri: str, duration: float) -> dict[int,
     await _emit(job_id, "analysis",
                 f"Cutting the match into {len(windows)} segments for analysis.",
                 segments=len(windows))
-    result = await mcp_client.call_tool(
-        "media", "split_for_analysis",
-        {"gcs_uri": gcs_uri, "job_id": job_id, "windows": windows},
-    )
 
-    segments = result.get("segments") or []
-    if result.get("status") != "success":
-        # Partial output is still worth having: the windows that were cut are
-        # analysed from their own files and the rest fall back to offsets.
+    uris: dict[int, str] = {}
+    failed = 0
+    for done, window in enumerate(windows, start=1):
+        result = await mcp_client.call_tool(
+            "media", "split_for_analysis",
+            {"gcs_uri": gcs_uri, "job_id": job_id, "windows": [window]},
+        )
+        for seg in result.get("segments") or []:
+            if seg.get("gcs_uri"):
+                uris[int(seg["index"])] = seg["gcs_uri"]
+
+        if result.get("status") != "success":
+            # A window that would not cut is analysed from the whole file
+            # instead, which is worse but not fatal. Ending the run over it
+            # would throw away the twelve that did cut.
+            failed += 1
+            logger.warning("could not cut window %s: %s",
+                           window["index"], result.get("error"))
+
+        await _progress(job_id, "analysis", CUT_SHARE * done / len(windows))
+        await _emit(job_id, "analysis", f"Cut segment {done} of {len(windows)}.",
+                    segments_cut=done, segments_total=len(windows))
+
+    if failed:
         await _emit(
             job_id, "analysis",
-            f"Could not cut every segment ({len(segments)} of {len(windows)} done); "
-            "the rest will be read from the full file.",
-            level="warning", detail=result.get("error"),
+            f"{failed} of {len(windows)} segments could not be cut; those windows "
+            "will be read from the full file.",
+            level="warning",
         )
-    return {int(seg["index"]): seg["gcs_uri"] for seg in segments if seg.get("gcs_uri")}
+    return uris
 
 
 async def _drop_segments(job_id: str) -> None:
