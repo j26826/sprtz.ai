@@ -155,6 +155,13 @@ startup probe failing with no application output, suspect time, not the image.
 > committed into comments before a plain control deploy disproved it. When a
 > platform behaviour looks arbitrary, run the boring control first.
 
+**Signed URLs on Cloud Run need an access token, not just a signer email.**
+Metadata credentials carry a token and no private key, so the storage library
+cannot sign locally — it raises "you need a private key to sign credentials".
+`generate_signed_url` needs *both* `service_account_email` and `access_token` to
+route signing through IAM's signBlob, and the service account needs
+`roles/iam.serviceAccountTokenCreator` **on itself** (`api_self_sign` in iam.tf).
+
 **The agent's tool list is bound at import time.** `sprtz_agents.agent` builds
 `tools=` when the module loads, so whatever is unset *while deploy.py imports it*
 is missing from the packaged agent permanently — setting `MCP_CATALOG_URL` on the
