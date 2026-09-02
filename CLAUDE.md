@@ -201,6 +201,12 @@ down in March 2026. The editor only renders a federated button when
 `/api/config` reports a provider, so it never offers a method that can only
 fail with `auth/operation-not-allowed`. Set `google_oauth_client_id` to enable it.
 
+**There is no self-service sign-up.** Accounts are provisioned in Identity
+Platform (console, or `gcloud identity-platform tenants`/Admin SDK); the login
+page only signs existing users in. An unknown email is told to ask an
+administrator rather than being offered an account, so a public URL does not
+hand anyone a tenant login.
+
 **Every hostname the app is served from must be in Identity Platform's
 `authorizedDomains`,** or the browser SDK fails sign-in with
 `auth/unauthorized-domain`. Terraform includes the load balancer host; add any

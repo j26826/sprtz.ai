@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SPRTZ AI</title>
   <meta name="description" content="Ask for a moment, an edit, a cut, or a post. The agent watches the match and cuts it." />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23f3f2f2'/><rect x='9' y='9' width='14' height='14' fill='%23ec3013'/></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23f3f2f2'/><text x='16' y='23' font-family='Archivo,Helvetica,Arial,sans-serif' font-size='22' font-weight='800' text-anchor='middle' fill='%23201e1d'>S</text></svg>" />
   <link rel="stylesheet" href="/ds/styles.css" />
   <link rel="stylesheet" href="/app.css" />
   <script src="/config.js"></script>
@@ -17,7 +17,6 @@
      Platform token so it can open Firestore listeners for realtime updates. -->
 <div class="signin" id="signin">
   <div class="signin-card">
-    <div class="brand-mark"></div>
     <h1>Sports Agent</h1>
     <p>Sign in to analyse a match and cut it into short-form clips.</p>
 
@@ -35,19 +34,15 @@
               style="width:100%;padding:11px">Sign in</button>
     </form>
 
-    <div style="display:flex;align-items:center;gap:10px;margin:16px 0 4px">
-      <span style="flex:1;height:1px;background:var(--color-neutral-300)"></span>
-      <span class="field-label">or</span>
-      <span style="flex:1;height:1px;background:var(--color-neutral-300)"></span>
+    <!-- Both the rule and the button stay hidden unless a federated provider is
+         actually configured; offering one that is not enabled only ever yields
+         auth/operation-not-allowed. Accounts are provisioned in Identity
+         Platform, so there is no self-service sign-up. -->
+    <div class="signin-alt hidden" id="signin-alt">
+      <span></span><span class="field-label">or</span><span></span>
     </div>
-
-    <button class="btn-outline" id="signup-btn" style="width:100%;padding:10px">
-      Create an account
-    </button>
-    <!-- Hidden unless a federated provider is actually configured; showing it
-         otherwise only ever yields auth/operation-not-allowed. -->
     <button class="btn-outline hidden" id="google-btn"
-            style="width:100%;padding:10px;margin-top:8px">
+            style="width:100%;padding:10px">
       Continue with Google
     </button>
 
@@ -60,7 +55,6 @@
 
   <header class="app-header">
     <div class="brand">
-      <div class="brand-mark"></div>
       <div class="brand-name">Sports Agent</div>
     </div>
     <div class="header-context">

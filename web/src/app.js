@@ -20,7 +20,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import {
   getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, getIdToken,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
   getFirestore, collection, doc, query, where, orderBy, limit, onSnapshot,
@@ -133,9 +133,7 @@ function signinError(err) {
   const message = {
     'auth/invalid-credential': 'That email and password do not match an account.',
     'auth/wrong-password': 'That email and password do not match an account.',
-    'auth/user-not-found': 'No account with that email. Create one below.',
-    'auth/email-already-in-use': 'That email already has an account. Sign in instead.',
-    'auth/weak-password': 'Password must be at least six characters.',
+    'auth/user-not-found': 'No account with that email. Ask an administrator for access.',
     'auth/unauthorized-domain':
       'This hostname is not in the Identity Platform authorised domains list.',
     'auth/operation-not-allowed':
@@ -147,7 +145,6 @@ function signinError(err) {
 
 function busy(on) {
   $('signin-submit').disabled = on;
-  $('signup-btn').disabled = on;
 }
 
 $('signin-form').addEventListener('submit', async (event) => {
@@ -158,24 +155,6 @@ $('signin-form').addEventListener('submit', async (event) => {
     await signInWithEmailAndPassword(
       auth, $('signin-email').value.trim(), $('signin-password').value,
     );
-  } catch (err) {
-    signinError(err);
-  } finally {
-    busy(false);
-  }
-});
-
-$('signup-btn').addEventListener('click', async () => {
-  $('signin-error').classList.add('hidden');
-  const email = $('signin-email').value.trim();
-  const password = $('signin-password').value;
-  if (!email || password.length < 6) {
-    signinError({ code: 'auth/weak-password' });
-    return;
-  }
-  busy(true);
-  try {
-    await createUserWithEmailAndPassword(auth, email, password);
   } catch (err) {
     signinError(err);
   } finally {
@@ -197,7 +176,10 @@ $('google-btn').addEventListener('click', async () => {
   try {
     const cfg = await fetch(`${API}/api/config`, { credentials: 'include' });
     const { federated_providers: providers = [] } = await cfg.json();
-    if (providers.length) $('google-btn').classList.remove('hidden');
+    if (providers.length) {
+      $('signin-alt').classList.remove('hidden');
+      $('google-btn').classList.remove('hidden');
+    }
   } catch { /* leave it hidden */ }
 })();
 
