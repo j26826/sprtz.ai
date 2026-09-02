@@ -167,7 +167,10 @@ resource "google_cloud_run_v2_service" "api" {
   template {
     service_account                  = google_service_account.api.email
     max_instance_request_concurrency = 80
-    timeout                          = "600s"
+    # The agent's SSE stream stays open for the whole of an analysis, which on a
+    # three-hour match runs well past ten minutes. This is the deadline that
+    # governs it — a backend service fronting a serverless NEG cannot set one.
+    timeout = "3600s"
 
     scaling {
       min_instance_count = var.environment == "prod" ? 1 : 0
