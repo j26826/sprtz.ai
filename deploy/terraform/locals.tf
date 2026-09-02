@@ -30,6 +30,7 @@ locals {
     "serviceusage.googleapis.com",
     "speech.googleapis.com",
     "storage.googleapis.com",
+    "transcoder.googleapis.com",
     "videointelligence.googleapis.com",
   ]
 

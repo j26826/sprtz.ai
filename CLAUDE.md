@@ -19,7 +19,7 @@ agents/      ADK agents on Vertex AI Agent Runtime (the product's brain)
   sprtz_agents/sports/           moment taxonomies + Gemini prompt  ← add sports here
   sprtz_agents/tools/            segmented analysis, clip planning, MCP access
 mcp/         MCP tool servers (private Cloud Run)
-  media_server/                  ffmpeg: probe, HLS remux, cut, reframe, burn-in
+  media_server/                  Transcoder API for HLS; ffmpeg: probe, cut, reframe, burn-in
   catalog_server/                Firestore, embeddings, KNN + Gemini rerank
 api/         FastAPI behind IAP: signed uploads, signed CDN URLs, agent SSE proxy
 web/         Sportscut editor SPA (chat-first, Modernist design system)
@@ -100,14 +100,31 @@ to vector order — it must never empty the result set.
 ### Media
 
 The worker never holds a match locally: **Cloud Run's writable filesystem is
-memory.** Sources stream over HTTPS with a bearer token (`-ss` becomes a range
-seek — a 60s cut reads 16 MB, not 3.2 GB), playback packaging is a
-**copy-remux, not a re-encode**, and segments drain to GCS while ffmpeg is
-still writing.
+memory.** Sources stream over HTTPS with a bearer token — `-ss` becomes a range
+seek, so a 60s cut reads 16 MB, not 3.2 GB.
 
-A rendition ladder would be hours of CPU and cannot finish inside Cloud Run's
-one-hour request ceiling. If one is ever wanted for public delivery, it belongs
-in a batch job.
+**Playback packaging runs on Transcoder API, not here.** It reads the source
+from GCS and writes the HLS package to GCS itself, so no video byte passes
+through this container. That is not a preference: in-process packaging wrote as
+many gigabytes of segments as the source was long, through a filesystem that is
+really RAM, and no amount of draining made it survivable — the container was
+killed at 2103 MiB with concurrency 4, then again at 2078 MiB with concurrency
+1. Moving the job out removed the ceiling rather than raising it.
+
+The preview is **one 480p rendition**, because an editor is judging whether a
+moment is worth cutting, not watching the match. A ladder is what public
+delivery needs, and Transcoder can produce one by adding mux streams — the
+reason not to is encode minutes, no longer CPU we do not have.
+
+Transcoder is asynchronous and the pipeline treats it that way: `transcode_hls`
+starts a job and returns, `transcode_status` polls it, and `prepare_playback`
+waits with a widening interval while reporting each state change. Blocking a
+request until a match-length encode finished would only move the one-hour
+ceiling onto an idle connection.
+
+Two grants decide whether an encode works, and both fail *minutes in* rather
+than at job creation: the **Transcoder service agent** — not the media service
+account — needs read on the uploads bucket and write on the HLS bucket.
 
 ### Playback
 
@@ -187,19 +204,18 @@ cannot sign locally — it raises "you need a private key to sign credentials".
 route signing through IAM's signBlob, and the service account needs
 `roles/iam.serviceAccountTokenCreator` **on itself** (`api_self_sign` in iam.tf).
 
-**The segment drain has to outrun ffmpeg, and one upload at a time does not.**
-A copy-remux writes segments as fast as it can read the source, and the backlog
-waiting to be uploaded sits in a filesystem that is really RAM. Serial uploads
-are latency-bound — a round trip per 500 KB segment — so on a 3.4 GB match the
-drain managed 183 MiB while ffmpeg produced nearly 2 GB, and the container died
-33 seconds in. `SegmentUploader` uploads batches through a thread pool and polls
-twice a second; `peak_backlog_segments` in its result is how far behind it ever
-fell.
+**Packaging in-process could not be made to survive, which is why it is gone.**
+Worth knowing before anyone proposes bringing it back: a copy-remux writes
+segments as fast as it reads the source, and the backlog waiting to upload sits
+in a filesystem that is really RAM. Serial uploads are latency-bound — a round
+trip per 500 KB segment — so on a 3.4 GB match the drain managed 183 MiB while
+ffmpeg produced nearly 2 GB. Dropping concurrency from 4 to 1 did not fix it;
+neither did parallelising the drain. Transcoder API did, by moving the bytes out
+of the container entirely.
 
-Concurrency is 1 for the same reason: the file said 4 while the comment beside
-it said "one heavy job per instance", and that cost multiplies by concurrency.
-Parallelism belongs in `max_instance_count`, where each job gets a whole
-container.
+Concurrency stays 1 regardless, for the ffmpeg work that remains — probes, cuts,
+reframes. Parallelism belongs in `max_instance_count`, where each job gets a
+whole container.
 
 Both memory numbers here are measured, not inferred — `Memory limit of 2048 MiB
 exceeded with 2103 MiB used`, then 2078 MiB with concurrency already down to 1,

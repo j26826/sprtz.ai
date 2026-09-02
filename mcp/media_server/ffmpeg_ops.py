@@ -1,4 +1,12 @@
-"""ffmpeg operations. Pure subprocess work, no MCP or GCS concerns."""
+"""ffmpeg operations. Pure subprocess work, no MCP or GCS concerns.
+
+Packaging a match for playback used to live here and now runs on Transcoder API
+instead — that job wrote gigabytes of segments through a filesystem that is
+really RAM, and it killed the container. What is left is the work ffmpeg is
+still the right tool for here: probing an upload to decide whether it is a video
+at all, one poster frame, and the short per-clip operations an editor drives,
+all of which read a few megabytes over a range request and finish in seconds.
+"""
 
 from __future__ import annotations
 
@@ -105,7 +113,6 @@ HLS_LADDER: tuple[Rendition, ...] = (
 )
 
 # Two seconds keeps seek latency low when the UI jumps to a moment's start time.
-HLS_SEGMENT_SECONDS = 2
 
 
 def probe(path: str | Path, bearer_token: str | None = None) -> dict:
@@ -154,105 +161,6 @@ def probe(path: str | Path, bearer_token: str | None = None) -> dict:
         "audio_channels": int(audio.get("channels") or 0),
         "audio_sample_rate": int(audio.get("sample_rate") or 0),
         "has_audio": bool(audio),
-    }
-
-
-def remux_hls(source_url: str, out_dir: Path, bearer_token: str | None = None) -> dict:
-    """Repackage a source into HLS without re-encoding.
-
-    The uploads Sprtz sees are already H.264 at delivery-grade bitrates, so
-    review playback needs segmentation, not a new encode. Copy-remuxing a
-    three-hour match is I/O-bound and takes minutes; a rendition ladder for the
-    same source is hours of CPU and cannot finish inside Cloud Run's one-hour
-    request ceiling. The ladder belongs in a batch job if it is ever needed.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
-        *(http_input_args(source_url, bearer_token) if source_url.startswith("http") else []),
-        "-i", source_url,
-        "-map", "0:v:0", "-map", "0:a:0?",
-        "-c", "copy",
-        "-f", "hls",
-        "-hls_time", str(HLS_SEGMENT_SECONDS),
-        "-hls_playlist_type", "vod",
-        "-hls_flags", "independent_segments",
-        "-hls_segment_type", "mpegts",
-        "-hls_segment_filename", str(out_dir / "v0_%05d.ts"),
-        "-master_pl_name", "master.m3u8",
-        str(out_dir / "v0.m3u8"),
-    ]
-    _run(cmd, timeout=45 * 60)
-
-    return {
-        "master_playlist": "master.m3u8",
-        "renditions": ["source"],
-        "segment_seconds": HLS_SEGMENT_SECONDS,
-        "reencoded": False,
-    }
-
-
-def transcode_hls(source: Path, out_dir: Path, source_height: int = 0) -> dict:
-    """Produce a multi-rendition HLS package with a master playlist.
-
-    Renditions above the source height are skipped — upscaling costs money and
-    delivers nothing. `-master_pl_name` writes the master alongside the variant
-    playlists so the whole directory can be copied to GCS as-is.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    ladder = [r for r in HLS_LADDER if not source_height or r.height <= source_height]
-    if not ladder:
-        # Source is smaller than the lowest rung; encode one rendition at source height.
-        ladder = [HLS_LADDER[0]]
-
-    cmd: list[str] = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source)]
-
-    # Split the decoded video once and scale each branch, so the source is
-    # decoded a single time regardless of ladder depth.
-    splits = "".join(f"[v{i}]" for i in range(len(ladder)))
-    filters = [f"[0:v]split={len(ladder)}{splits}"]
-    for i, r in enumerate(ladder):
-        filters.append(f"[v{i}]scale=-2:{r.height}[v{i}out]")
-    cmd += ["-filter_complex", ";".join(filters)]
-
-    var_parts: list[str] = []
-    for i, r in enumerate(ladder):
-        cmd += [
-            "-map", f"[v{i}out]",
-            f"-c:v:{i}", "libx264",
-            f"-b:v:{i}", r.video_bitrate,
-            f"-maxrate:v:{i}", r.maxrate,
-            f"-bufsize:v:{i}", r.bufsize,
-            "-preset", "veryfast",
-            "-profile:v", "main",
-            "-sc_threshold", "0",
-            # Keyframe cadence must divide the segment length or seeks land late.
-            "-g", str(HLS_SEGMENT_SECONDS * 50),
-            "-keyint_min", str(HLS_SEGMENT_SECONDS * 50),
-        ]
-        cmd += ["-map", "a:0?", f"-c:a:{i}", "aac", f"-b:a:{i}", r.audio_bitrate, "-ac", "2"]
-        var_parts.append(f"v:{i},a:{i},name:{r.name}")
-
-    cmd += [
-        "-f", "hls",
-        "-hls_time", str(HLS_SEGMENT_SECONDS),
-        "-hls_playlist_type", "vod",
-        "-hls_flags", "independent_segments",
-        "-hls_segment_type", "mpegts",
-        "-hls_segment_filename", str(out_dir / "%v_%05d.ts"),
-        "-master_pl_name", "master.m3u8",
-        "-var_stream_map", " ".join(var_parts),
-        str(out_dir / "%v.m3u8"),
-    ]
-
-    _run(cmd, timeout=6 * 3600)
-
-    return {
-        "master_playlist": "master.m3u8",
-        "renditions": [r.name for r in ladder],
-        "segment_seconds": HLS_SEGMENT_SECONDS,
-        "files": sorted(p.name for p in out_dir.iterdir() if p.is_file()),
     }
 
 

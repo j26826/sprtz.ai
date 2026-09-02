@@ -1,8 +1,16 @@
-"""mcp-media — the ffmpeg tool server.
+"""mcp-media — the media tool server.
 
 Runs as a private Cloud Run service. Every tool takes and returns GCS URIs;
 nothing is streamed through the MCP transport, because a match is gigabytes and
 a tool result is not.
+
+Two kinds of work live here and they run in different places. Packaging a match
+for playback is a Transcoder API job: it reads the source from GCS and writes
+the HLS package to GCS without a byte passing through this container, which is
+what makes a real 480p encode possible at all. Everything else — probing an
+upload to decide whether it is a video, one poster frame, the short per-clip
+cuts and reframes an editor drives — is still ffmpeg here, because each reads a
+few megabytes over a range request and finishes in seconds.
 """
 
 from __future__ import annotations
@@ -17,7 +25,7 @@ from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from media_server import ffmpeg_ops, gcs
+from media_server import ffmpeg_ops, gcs, transcoder
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("mcp-media")
@@ -112,16 +120,65 @@ def validate_media(gcs_uri: str, declared_content_type: str = "") -> dict:
 
 @mcp.tool
 def transcode_hls(gcs_uri: str, job_id: str) -> dict:
-    """Transcode a source video into an HLS package for CDN playback.
+    """Start a 480p HLS encode for review playback, and return immediately.
 
-    Produces a multi-rendition ladder with a master playlist and uploads it to
-    the HLS bucket under the job's prefix. The returned `playback_url` is the
-    Cloud CDN URL the editor plays; seeking to a moment is a seek within this one
-    stream, so no per-clip render is needed to review a suggestion.
+    Runs on Google Cloud Transcoder API rather than in this container: it reads
+    the source from GCS and writes the package to GCS itself, so a match-length
+    video never passes through here. The encode is asynchronous — poll it with
+    `transcode_status` — because waiting for a three-hour match to finish would
+    hold a request open for the whole encode.
 
     Args:
         gcs_uri: gs:// URI of the source video.
         job_id: Job the package belongs to; becomes the object prefix.
+    """
+    if not HLS_BUCKET:
+        return {"status": "error", "error": "HLS_BUCKET is not configured."}
+
+    try:
+        started = transcoder.create_preview_job(gcs_uri, HLS_BUCKET, job_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not start a transcoder job for %s", gcs_uri)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+
+    master_path = f"jobs/{job_id}/hls/{transcoder.MASTER_PLAYLIST}"
+    return {
+        "status": "started",
+        "job_id": job_id,
+        # Known up front: Transcoder writes to a path this service chose, so the
+        # playback URL does not have to wait for the encode to finish.
+        "playback_url": f"{CDN_BASE_URL}/{master_path}" if CDN_BASE_URL else "",
+        "renditions": [f"{transcoder.PREVIEW_HEIGHT}p"],
+        "segment_seconds": transcoder.SEGMENT_SECONDS,
+        **started,
+    }
+
+
+@mcp.tool
+def transcode_status(transcoder_job: str) -> dict:
+    """Ask whether an HLS encode has finished.
+
+    Args:
+        transcoder_job: Full resource name returned by `transcode_hls`.
+    """
+    try:
+        return {"status": "success", **transcoder.job_state(transcoder_job)}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not read transcoder job %s", transcoder_job)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+
+@mcp.tool
+def generate_poster(gcs_uri: str, job_id: str) -> dict:
+    """Write a poster frame for a job to the HLS bucket.
+
+    Still ffmpeg: one frame read over a range request costs a few megabytes and
+    finishes in seconds, which is not the workload that made packaging
+    untenable here.
+
+    Args:
+        gcs_uri: gs:// URI of the source video.
+        job_id: Job the poster belongs to.
     """
     if not HLS_BUCKET:
         return {"status": "error", "error": "HLS_BUCKET is not configured."}
@@ -132,42 +189,26 @@ def transcode_hls(gcs_uri: str, job_id: str) -> dict:
         source_url = gcs.https_url(gcs_uri)
         info = ffmpeg_ops.probe(source_url, bearer_token=token)
 
-        # Copy-remux streamed in over HTTPS and drained out segment by segment,
-        # so neither the source nor the package is ever held locally — local
-        # disk here is instance memory, and a full match is bigger than any
-        # instance this service runs on.
-        out_dir = work / "hls"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        prefix = f"jobs/{job_id}/hls"
-        with gcs.SegmentUploader(out_dir, HLS_BUCKET, prefix) as uploader:
-            package = ffmpeg_ops.remux_hls(source_url, out_dir, bearer_token=token)
-            uploaded = uploader.finish()
-
         poster_rel = f"jobs/{job_id}/poster.jpg"
         poster = work / "poster.jpg"
-        ffmpeg_ops.thumbnail(source_url, poster,
-                             at_sec=min(30.0, info["duration_sec"] / 2),
-                             bearer_token=token)
+        ffmpeg_ops.thumbnail(
+            source_url, poster,
+            at_sec=min(30.0, info["duration_sec"] / 2),
+            bearer_token=token,
+        )
         gcs.upload(
             poster,
             f"gs://{HLS_BUCKET}/{poster_rel}",
             cache_control="public, max-age=86400",
         )
-
-        master_path = f"{prefix}/{package['master_playlist']}"
         return {
             "status": "success",
             "job_id": job_id,
-            "playback_url": f"{CDN_BASE_URL}/{master_path}" if CDN_BASE_URL else "",
             "poster_url": f"{CDN_BASE_URL}/{poster_rel}" if CDN_BASE_URL else "",
-            "master_playlist_uri": f"gs://{HLS_BUCKET}/{master_path}",
-            "renditions": package["renditions"],
-            "segment_seconds": package["segment_seconds"],
             "duration_sec": info["duration_sec"],
-            **uploaded,
         }
     except Exception as exc:  # noqa: BLE001
-        logger.exception("transcode_hls failed for %s", gcs_uri)
+        logger.exception("generate_poster failed for %s", gcs_uri)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
     finally:
         _cleanup(work)
