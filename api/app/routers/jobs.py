@@ -7,7 +7,9 @@ import logging
 import re
 import uuid
 
+import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from google.auth.transport import requests as google_requests
 from google.cloud import storage
 from pydantic import BaseModel, Field
 
@@ -49,6 +51,23 @@ def _storage_client() -> storage.Client:
     return storage.Client()
 
 
+def _signing_token() -> str:
+    """Access token used to sign URLs through the IAM Credentials API.
+
+    Cloud Run's metadata credentials carry a token and no private key, so the
+    storage library cannot sign locally — it raises "you need a private key to
+    sign credentials". Passing an access token alongside the signer's email
+    routes signing through IAM's signBlob instead, which needs the service
+    account to hold roles/iam.serviceAccountTokenCreator on itself (granted in
+    deploy/terraform/iam.tf as api_self_sign).
+    """
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    credentials.refresh(google_requests.Request())
+    return credentials.token
+
+
 @router.post("/upload-url", response_model=UploadResponse)
 async def create_upload_url(
     body: UploadRequest,
@@ -86,9 +105,10 @@ async def create_upload_url(
             method="PUT",
             content_type=body.content_type,
             # Cloud Run has no private key, so signing is delegated to the IAM
-            # Credentials API using the service's own identity.
+            # Credentials API. Both arguments are required: the email says who
+            # signs, the token authorises the signBlob call.
             service_account_email=settings.signer_service_account or None,
-            access_token=None,
+            access_token=_signing_token(),
         )
     except Exception as exc:
         logger.exception("could not sign an upload URL")
