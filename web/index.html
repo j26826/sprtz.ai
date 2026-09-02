@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sportscut</title>
   <meta name="description" content="Ask for a moment, an edit, a cut, or a post. The agent watches the match and cuts it." />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23f3f2f2'/><text x='16' y='23' font-family='Archivo,Helvetica,Arial,sans-serif' font-size='22' font-weight='800' text-anchor='middle' fill='%23201e1d'>S</text></svg>" />
+  <link rel="icon" type="image/png" sizes="256x256" href="/assets/app-icon-256.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/app-icon-512.png" />
+  <link rel="apple-touch-icon" href="/assets/app-icon-256.png" />
   <link rel="stylesheet" href="/ds/styles.css" />
   <link rel="stylesheet" href="/app.css" />
   <script src="/config.js"></script>
@@ -17,21 +19,21 @@
      Platform token so it can open Firestore listeners for realtime updates. -->
 <div class="signin" id="signin">
   <div class="signin-card">
-    <h1>Sportscut</h1>
-    <p>Sign in to analyse a match and cut it into short-form clips.</p>
+    <img class="signin-logo" src="/assets/logo-full-black.png" alt="Sportscut" />
+    <p data-i18n="signin.blurb">Sign in to analyse a match and cut it into short-form clips.</p>
 
     <form id="signin-form" style="text-align:left">
       <div class="field" style="margin-bottom:12px">
-        <label for="signin-email">Email</label>
+        <label for="signin-email" data-i18n="signin.email">Email</label>
         <input class="input" id="signin-email" type="email" autocomplete="email" required />
       </div>
       <div class="field" style="margin-bottom:16px">
-        <label for="signin-password">Password</label>
+        <label for="signin-password" data-i18n="signin.password">Password</label>
         <input class="input" id="signin-password" type="password"
                autocomplete="current-password" minlength="6" required />
       </div>
       <button class="btn-solid" id="signin-submit" type="submit"
-              style="width:100%;padding:11px">Sign in</button>
+              style="width:100%;padding:11px" data-i18n="signin.submit">Sign in</button>
     </form>
 
     <!-- Both the rule and the button stay hidden unless a federated provider is
@@ -39,11 +41,11 @@
          auth/operation-not-allowed. Accounts are provisioned in Identity
          Platform, so there is no self-service sign-up. -->
     <div class="signin-alt hidden" id="signin-alt">
-      <span></span><span class="field-label">or</span><span></span>
+      <span></span><span class="field-label" data-i18n="signin.or">or</span><span></span>
     </div>
     <button class="btn-outline hidden" id="google-btn"
             style="width:100%;padding:10px">
-      Continue with Google
+      <span data-i18n="signin.google">Continue with Google</span>
     </button>
 
     <div class="error-note hidden" id="signin-error"></div>
@@ -55,13 +57,15 @@
 
   <header class="app-header">
     <div class="brand">
-      <div class="brand-name">Sportscut</div>
+      <img class="brand-logo" src="/assets/logo-full-black.png" alt="Sportscut" />
     </div>
     <div class="header-context">
-      <div class="game-title" id="game-title">No match loaded</div>
-      <div class="context-line" id="context-line">Upload a recording to begin</div>
+      <div class="game-title" id="game-title" data-i18n="header.noMatch">No match loaded</div>
+      <div class="context-line" id="context-line" data-i18n="header.uploadToBegin">Upload a recording to begin</div>
     </div>
-    <button class="header-btn" id="new-session">New session</button>
+    <select class="header-select" id="lang-select" aria-label="Language"></select>
+    <button class="header-btn" id="new-session" data-i18n="header.newSession">New session</button>
+    <button class="header-btn" id="sign-out" data-i18n="header.signOut">Sign out</button>
   </header>
 
   <div class="scroll" id="scroll">
@@ -74,7 +78,7 @@
       <form class="composer-box" id="composer">
         <input class="composer-input" id="draft" autocomplete="off"
                placeholder="Ask for a moment, an edit, a cut, or a post &mdash; e.g. &ldquo;every wing shot in the second half, 30 seconds, vertical&rdquo;" />
-        <button class="composer-send" type="submit" id="send">Send</button>
+        <button class="composer-send" type="submit" id="send" data-i18n="composer.send">Send</button>
       </form>
       <div class="footer-line" id="footer-line">Enter to send &middot; the agent edits the reel in place &mdash; no timeline required</div>
     </div>
