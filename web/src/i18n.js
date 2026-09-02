@@ -17,6 +17,9 @@ const BASE = 'en-GB';
 const STRINGS = {
   'en-GB': {
     'lang.name': 'English (UK)',
+    'sessions.noMatch': 'No match yet',
+    'sessions.untitled': 'New session',
+    'sessions.deleteConfirm': 'Delete the session',
     'header.untitled': 'Untitled match',
 
     'sessions.empty': 'No sessions yet. Upload a match to start one.',
@@ -146,6 +149,9 @@ const STRINGS = {
 
   de: {
     'lang.name': 'Deutsch',
+    'sessions.noMatch': 'Noch kein Spiel',
+    'sessions.untitled': 'Neue Sitzung',
+    'sessions.deleteConfirm': 'Sitzung löschen',
     'header.untitled': 'Unbenanntes Spiel',
 
     'sessions.empty': 'Noch keine Sitzungen. Laden Sie ein Spiel hoch, um zu beginnen.',
@@ -258,6 +264,9 @@ const STRINGS = {
 
   it: {
     'lang.name': 'Italiano',
+    'sessions.noMatch': 'Nessuna partita',
+    'sessions.untitled': 'Nuova sessione',
+    'sessions.deleteConfirm': 'Eliminare la sessione',
     'header.untitled': 'Partita senza titolo',
 
     'sessions.empty': 'Ancora nessuna sessione. Carica una partita per iniziarne una.',
@@ -368,6 +377,9 @@ const STRINGS = {
 
   fr: {
     'lang.name': 'Français',
+    'sessions.noMatch': 'Pas encore de match',
+    'sessions.untitled': 'Nouvelle session',
+    'sessions.deleteConfirm': 'Supprimer la session',
     'header.untitled': 'Match sans titre',
 
     'sessions.empty': 'Aucune session pour le moment. Importez un match pour en démarrer une.',
@@ -482,6 +494,9 @@ const STRINGS = {
 
   es: {
     'lang.name': 'Español',
+    'sessions.noMatch': 'Sin partido todavía',
+    'sessions.untitled': 'Nueva sesión',
+    'sessions.deleteConfirm': 'Eliminar la sesión',
     'header.untitled': 'Partido sin título',
 
     'sessions.empty': 'Aún no hay sesiones. Sube un partido para empezar una.',
