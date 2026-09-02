@@ -108,6 +108,10 @@ def action_play_text(moment: dict[str, Any]) -> str:
         moment.get("action_result") or "",
         moment.get("participant_role") or "",
         moment.get("participant") or "",
+        # Which side did it — "Denmark's goals" is a query. The scoreline is
+        # not embedded: "24-23" as text matches nothing anyone would type, and
+        # a number in the vector dilutes the words that do.
+        moment.get("action_team") or "",
         moment.get("description") or "",
     ]
     return ". ".join(p.strip() for p in parts if p and p.strip())
@@ -129,6 +133,11 @@ def as_action_play(doc: dict[str, Any]) -> dict[str, Any]:
         "actionResult": doc.get("actionResult", ""),
         "participant": doc.get("participant", ""),
         "participantRole": doc.get("participantRole", ""),
+        "team1": doc.get("team1", ""),
+        "team2": doc.get("team2", ""),
+        "scoreTeam1": doc.get("scoreTeam1"),
+        "scoreTeam2": doc.get("scoreTeam2"),
+        "actionTeam": doc.get("actionTeam", ""),
         "description": doc.get("description", ""),
         "confidenceScore": round(float(doc.get("confidence", 0.0)) * 100),
     }
@@ -247,6 +256,18 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
     return {"job_id": job_id, **payload}
 
 
+def record_teams(job_id: str, home: str, away: str) -> dict[str, Any]:
+    """Save who is playing, as read off the score bug.
+
+    A match-level fact rather than a per-moment one: it does not change, and
+    storing one agreed answer keeps the UI from showing a different pairing
+    depending on which moment it happens to read.
+    """
+    patch = {"teams": {"home": home, "away": away}, "updatedAt": now()}
+    job_ref(job_id).update(patch)
+    return {"job_id": job_id, **patch}
+
+
 def update_job_status(job_id: str, status: str, stage: str | None = None,
                       error: str | None = None, progress: int | None = None) -> dict[str, Any]:
     patch: dict[str, Any] = {"status": status, "updatedAt": now()}
@@ -355,6 +376,12 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
                 "actionResult": moment.get("action_result", ""),
                 "participant": moment.get("participant", ""),
                 "participantRole": moment.get("participant_role", ""),
+                "team1": moment.get("team1", ""),
+                "team2": moment.get("team2", ""),
+                # None, not 0: nil-nil is a real score and unknown is not.
+                "scoreTeam1": moment.get("score_team1"),
+                "scoreTeam2": moment.get("score_team2"),
+                "actionTeam": moment.get("action_team", ""),
                 "segmentIndexes": moment.get("segment_indexes", []),
                 "embedding": Vector(vector),
                 "createdAt": now(),
@@ -391,6 +418,11 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "action_result": data.get("actionResult", ""),
         "participant": data.get("participant", ""),
         "participant_role": data.get("participantRole", ""),
+        "team1": data.get("team1", ""),
+        "team2": data.get("team2", ""),
+        "score_team1": data.get("scoreTeam1"),
+        "score_team2": data.get("scoreTeam2"),
+        "action_team": data.get("actionTeam", ""),
         "segment_indexes": data.get("segmentIndexes", []),
     }
 

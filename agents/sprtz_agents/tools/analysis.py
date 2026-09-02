@@ -300,8 +300,45 @@ def _to_absolute(
         action_result=detected.action_result.strip(),
         participant=detected.participant.strip(),
         participant_role=detected.participant_role.strip(),
+        team1=detected.team1.strip(),
+        team2=detected.team2.strip(),
+        score_team1=detected.score_team1,
+        score_team2=detected.score_team2,
+        action_team=detected.action_team.strip(),
         segment_indexes=[plan.index],
     )
+
+
+
+def resolve_team_names(moments: list[Moment]) -> tuple[str, str]:
+    """The match's home and away names, agreed across every segment.
+
+    Team names do not change during a match, but reading them off a score bug
+    thirteen times does not give thirteen identical answers — the graphic is
+    occluded, abbreviated differently, or absent for a whole segment. Taking the
+    most frequent non-empty reading gives one answer for the match instead of
+    records that disagree with each other about who is playing.
+    """
+    from collections import Counter
+
+    home = Counter(m.team1.strip() for m in moments if m.team1.strip())
+    away = Counter(m.team2.strip() for m in moments if m.team2.strip())
+    return (
+        home.most_common(1)[0][0] if home else "",
+        away.most_common(1)[0][0] if away else "",
+    )
+
+
+def apply_team_names(moments: list[Moment], home: str, away: str) -> list[Moment]:
+    """Give every moment the agreed names, keeping per-moment scores untouched.
+
+    Scores are deliberately not consensused: they change through the match and a
+    moment's own reading is the one that belongs beside its timestamp.
+    """
+    if not home and not away:
+        return moments
+    return [m.model_copy(update={"team1": home or m.team1, "team2": away or m.team2})
+            for m in moments]
 
 
 def merge_segment_results(

@@ -31,6 +31,11 @@ def _moment(**kwargs) -> Moment:
         "action_result": "Save",
         "participant": "#12 blue",
         "participant_role": "Goalkeeper",
+        "team1": "SWE",
+        "team2": "DEN",
+        "score_team1": 24,
+        "score_team2": 23,
+        "action_team": "SWE",
     }
     base.update(kwargs)
     return Moment(**base)
@@ -43,6 +48,7 @@ class TestShape:
         assert set(play) == {
             "type", "timeOffsetStart", "timeOffsetEnd", "actionCategory",
             "actionClass", "actionResult", "participant", "participantRole",
+            "team1", "team2", "scoreTeam1", "scoreTeam2", "actionTeam",
             "description", "confidenceScore",
         }
 
@@ -131,3 +137,101 @@ class TestPromptCarriesTheFields:
         # when it grows; this guidance is identical every time, so it belongs in
         # the instruction that caches.
         assert len(segment) < 2000
+
+
+class TestTeamsAndScore:
+    def test_the_teams_and_scoreline_are_reported(self):
+        play = _moment().as_action_play()
+
+        assert play["team1"] == "SWE"
+        assert play["team2"] == "DEN"
+        assert play["scoreTeam1"] == 24
+        assert play["scoreTeam2"] == 23
+
+    def test_the_action_team_names_a_side(self):
+        # It has to match team1 or team2 to be joinable against them.
+        play = _moment().as_action_play()
+        assert play["actionTeam"] in (play["team1"], play["team2"])
+
+    def test_an_unreadable_score_is_null_not_zero(self):
+        play = _moment(score_team1=None, score_team2=None).as_action_play()
+
+        # Nil-nil is a real scoreline. Reporting 0 for "could not read the bug"
+        # invents a scoreline that was never on screen.
+        assert play["scoreTeam1"] is None
+        assert play["scoreTeam2"] is None
+
+    def test_nil_nil_survives_as_a_real_score(self):
+        play = _moment(score_team1=0, score_team2=0).as_action_play()
+
+        assert play["scoreTeam1"] == 0
+        assert play["scoreTeam2"] == 0
+
+    def test_a_neutral_action_has_no_team(self):
+        assert _moment(action_team="").as_action_play()["actionTeam"] == ""
+
+    def test_the_model_is_told_not_to_infer_the_teams(self):
+        described = DetectedMoment.model_fields["team1"].description
+        assert "never infer" in described.lower()
+
+    def test_the_score_fields_default_to_unknown(self):
+        parsed = DetectedMoment(
+            moment_type="jump_shot", start_tc="00:10", peak_tc="00:12", end_tc="00:15",
+            confidence=0.8, excitement=0.5, description="A shot.",
+        )
+        assert parsed.score_team1 is None
+        assert parsed.team1 == ""
+        assert parsed.action_team == ""
+
+
+class TestTeamNameConsensus:
+    """Team names do not change during a match; thirteen readings of a score bug do."""
+
+    def test_the_most_frequent_reading_wins(self):
+        from sprtz_agents.tools.analysis import resolve_team_names
+
+        moments = [
+            _moment(team1="SWE", team2="DEN"),
+            _moment(team1="SWE", team2="DEN"),
+            _moment(team1="SVE", team2="DEN"),   # one bad read
+        ]
+        assert resolve_team_names(moments) == ("SWE", "DEN")
+
+    def test_segments_that_read_nothing_do_not_win(self):
+        from sprtz_agents.tools.analysis import resolve_team_names
+
+        # Most segments have no legible bug. Empty is the majority answer and
+        # is exactly the answer that must not be chosen.
+        moments = [_moment(team1="", team2="") for _ in range(5)]
+        moments.append(_moment(team1="SWE", team2="DEN"))
+
+        assert resolve_team_names(moments) == ("SWE", "DEN")
+
+    def test_no_legible_bug_anywhere_stays_empty(self):
+        from sprtz_agents.tools.analysis import resolve_team_names
+
+        assert resolve_team_names([_moment(team1="", team2="")]) == ("", "")
+
+    def test_every_moment_ends_up_with_the_same_pairing(self):
+        from sprtz_agents.tools.analysis import apply_team_names, resolve_team_names
+
+        moments = [
+            _moment(team1="SWE", team2="DEN"),
+            _moment(team1="", team2=""),
+            _moment(team1="SVE", team2="DEM"),
+        ]
+        home, away = resolve_team_names(moments)
+        applied = apply_team_names(moments, home, away)
+
+        assert {(m.team1, m.team2) for m in applied} == {("SWE", "DEN")}
+
+    def test_per_moment_scores_are_left_alone(self):
+        from sprtz_agents.tools.analysis import apply_team_names
+
+        # The scoreline changes through the match, so consensus would be wrong:
+        # a moment's own reading is the one that belongs beside its timestamp.
+        moments = [_moment(score_team1=1, score_team2=0),
+                   _moment(score_team1=24, score_team2=23)]
+        applied = apply_team_names(moments, "SWE", "DEN")
+
+        assert [m.score_team1 for m in applied] == [1, 24]

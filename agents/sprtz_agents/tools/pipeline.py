@@ -19,7 +19,12 @@ from sprtz_agents.config import get_settings
 from sprtz_agents.schemas import Moment
 from sprtz_agents.sports import get_profile, list_sports
 from sprtz_agents.tools import mcp_client
-from sprtz_agents.tools.analysis import analyse_segments, plan_segments
+from sprtz_agents.tools.analysis import (
+    analyse_segments,
+    apply_team_names,
+    plan_segments,
+    resolve_team_names,
+)
 from sprtz_agents.tools.clips import build_clip_suggestions
 
 logger = logging.getLogger(__name__)
@@ -342,6 +347,20 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
         return result
 
     moments = [Moment.model_validate({**m, "job_id": job_id}) for m in result["moments"]]
+
+    # Who is playing does not change during a match, but reading it off a score
+    # bug once per segment does not give one answer. Settle it here so every
+    # record agrees, and record it on the job as the match's own fact.
+    home, away = resolve_team_names(moments)
+    moments = apply_team_names(moments, home, away)
+    if home or away:
+        await mcp_client.call_tool(
+            "catalog", "record_teams",
+            {"job_id": job_id, "home": home, "away": away},
+        )
+        await _emit(job_id, "analysis", f"Scoreboard reads {home or '?'} v {away or '?'}.",
+                    team1=home, team2=away)
+
     for failure in result.get("failures", []):
         await _emit(
             job_id,
