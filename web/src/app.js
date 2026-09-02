@@ -734,125 +734,97 @@ function stageStrip(job) {
 }
 
 
+// The whole match, in the order someone would read it: what it was, who played,
+// how it ended, then how it felt. Grounded values are listed beside the
+// observed ones rather than merged into them — a competition read off a caption
+// and one found by a web search are different kinds of claim.
+const GAME_DETAIL_ROWS = [
+  ['game.title', (g) => g.title],
+  ['game.sport', (g) => g.sport],
+  ['game.homeTeam', (g) => g.homeTeam],
+  ['game.awayTeam', (g) => g.awayTeam],
+  ['game.competition', (g) => g.competition],
+  ['game.venue', (g) => g.venue],
+  ['game.finalScore', (g) => g.finalScore],
+  ['game.outcome', (g) => g.eventOutcome],
+  ['game.sentiment', (g) => g.sentiment],
+  ['game.mood', (g) => g.mood],
+  ['game.summary', (g) => g.summary],
+  ['game.moments', (g) => (g.momentCount == null ? '' : String(g.momentCount))],
+  ['game.matchDate', (g) => g.matchDate],
+  ['game.groundedHomeTeam', (g) => g.groundedHomeTeam],
+  ['game.groundedAwayTeam', (g) => g.groundedAwayTeam],
+  ['game.groundedCompetition', (g) => g.groundedCompetition],
+  ['game.groundedVenue', (g) => g.groundedVenue],
+];
+
+
+function gameHeadline(g) {
+  return g.title
+    || [g.homeTeam || g.groundedHomeTeam, g.awayTeam || g.groundedAwayTeam]
+      .filter(Boolean).join(' v ')
+    || t('game.title');
+}
+
+
 function gameCard() {
   const g = state.game;
   if (!g) {
     return `<div class="panel-light"><div class="job">
       <div class="job-stage">${esc(t('game.none'))}</div></div></div>`;
   }
-  // Observed and grounded values are shown as what they are. A competition read
-  // off a caption and one found by a web search are different kinds of claim,
-  // and collapsing them would hide which is which.
-  const rows = [
-    [t('game.sport'), g.sport],
-    [t('game.homeTeam'), g.homeTeam || g.groundedHomeTeam],
-    [t('game.awayTeam'), g.awayTeam || g.groundedAwayTeam],
-    [t('game.competition'), g.competition || g.groundedCompetition],
-    [t('game.venue'), g.venue || g.groundedVenue],
-    [t('game.finalScore'), g.finalScore],
-    [t('game.outcome'), g.eventOutcome],
-    [t('game.sentiment'), g.sentiment],
-    [t('game.mood'), g.mood],
-  ].filter(([, value]) => value);
+
+  // The same shape as a moment row: a headline worth reading, the facts that
+  // qualify it underneath, and everything else a click away.
+  const meta = [
+    g.sport,
+    g.competition || g.groundedCompetition,
+    g.venue || g.groundedVenue,
+    g.finalScore,
+    g.mood,
+  ].filter(Boolean).join(' · ');
 
   return `
-    <div class="panel">
-      <div class="panel-head">
-        <div class="panel-head-title">${esc(t('game.title'))}</div>
-        <div class="panel-head-meta">${g.momentCount || 0} ${esc(t('game.moments'))}</div>
+    <div class="panel-light">
+      <div class="row">
+        <div class="game-row">
+          <div style="min-width:0">
+            <div class="moment-label">${esc(gameHeadline(g))}</div>
+            <div class="moment-meta">${esc(meta || t('game.notIdentified'))}</div>
+            ${g.eventOutcome ? `<div class="game-outcome">${esc(g.eventOutcome)}</div>` : ''}
+          </div>
+          <div class="moment-actions">
+            <button class="link-btn" data-game-details="1">${esc(t('moment.details'))}</button>
+          </div>
+        </div>
+        ${g.summary ? `<div class="game-summary">${esc(g.summary)}</div>` : ''}
       </div>
-      <div class="game-grid">
-        ${rows.map(([label, value]) => `
-          <div class="game-row">
-            <div class="field-label">${esc(label)}</div>
-            <div class="game-value">${esc(value)}</div>
-          </div>`).join('')}
-      </div>
-      ${g.summary ? `<div class="game-summary">${esc(g.summary)}</div>` : ''}
-      ${g.grounded && g.groundingSources?.length ? `
-        <div class="game-sources">
-          <div class="field-label">${esc(t('game.groundedBy'))}</div>
-          ${g.groundingSources.slice(0, 3).map((s) => `
-            <a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer"
-               class="link-btn">${esc(s.title || s.uri)}</a>`).join('')}
-        </div>` : ''}
     </div>`;
 }
 
 
-/**
- * The sessions list down the left.
- *
- * One entry per job, newest first, from the same Firestore listener the cards
- * use — so it moves with an analysis rather than needing its own refresh. A
- * session is a job here: the editor thinks in matches, and every conversation
- * is about one.
- */
-function renderSessions() {
-  const list = $('sessions-list');
-  if (!list) return;
+function openGameDetails() {
+  const g = state.game;
+  if (!g) return;
 
-  if (!state.sessions.length) {
-    list.innerHTML = `<div class="sessions-empty">${esc(t('sessions.empty'))}</div>`;
-    return;
-  }
+  const rows = GAME_DETAIL_ROWS
+    .map(([key, read]) => [t(key), read(g)])
+    .filter(([, value]) => value !== '' && value != null);
 
-  const jobsById = new Map(state.jobs.map((j) => [j.id, j]));
+  // The sources belong in the popup rather than the card: they qualify the
+  // grounded rows, and are meaningless next to a row nobody is looking at.
+  const sources = (g.grounded && g.groundingSources?.length)
+    ? `<div class="detail-key">${esc(t('game.groundedBy'))}</div>
+       <div class="detail-value">${g.groundingSources.slice(0, 5).map((src) => `
+         <a href="${esc(src.uri)}" target="_blank" rel="noopener noreferrer"
+            class="link-btn">${esc(src.title || src.uri)}</a>`).join('<br />')}</div>`
+    : '';
 
-  list.innerHTML = state.sessions.map((session) => {
-    const job = session.jobId ? jobsById.get(session.jobId) : null;
-    const running = job && ['analyzing', 'transcoding', 'uploaded'].includes(job.status);
-    const failed = job && (job.status === 'failed' || job.status === 'rejected');
-    const tone = failed ? 'failed' : running ? 'running' : 'idle';
-
-    // A session with no job yet is a conversation waiting for a match. Saying
-    // so is better than showing it blank, which reads as a broken row.
-    const meta = !job ? esc(t('sessions.noMatch'))
-      : running && !isStalled(job)
-        ? `${esc(job.stage || job.status)} · ${Math.round(job.progress || 0)}%`
-        : esc(job.status || '');
-    const stamp = new Date(session.createdAt || Date.now());
-
-    return `
-      <div class="session-row">
-        <button class="session" data-session="${esc(session.id)}" data-tone="${tone}"
-                aria-current="${session.id === state.sessionKey}">
-          <div class="session-name">${esc(
-            session.title || job?.title || t('sessions.untitled'))}</div>
-          <div class="session-meta">${meta} · ${
-            stamp.toLocaleDateString(getLocale())}</div>
-        </button>
-        <button class="session-delete" data-delete-session="${esc(session.id)}"
-                title="${esc(t('jobs.delete'))}" aria-label="${esc(t('jobs.delete'))}">&times;</button>
-      </div>`;
-  }).join('');
-}
-
-
-/** Open a session: its match if it has one, otherwise a clean conversation. */
-function openSession(sessionId) {
-  const session = listSessions().find((s) => s.id === sessionId);
-  if (!session) return;
-
-  state.sessionKey = sessionId;
-  state.sessionId = null;          // a new agent session per conversation
-  state.msgs = [greeting()];
-  state.playing = null;
-  destroyPlayer();
-
-  if (session.jobId) {
-    selectJob(session.jobId);
-  } else {
-    state.unsubscribe.forEach((off) => off());
-    state.unsubscribe = [];
-    state.jobId = null;
-    state.job = null;
-    state.moments = [];
-    state.clips = [];
-    state.events = [];
-    state.game = null;
-    render();
-  }
+  $('details-title').textContent = gameHeadline(g);
+  $('details-body').innerHTML = rows.map(([label, value]) => `
+    <div class="detail-key">${esc(label)}</div>
+    <div class="detail-value">${esc(String(value))}</div>`).join('') + sources;
+  $('details').classList.remove('hidden');
 }
 
 
@@ -1399,7 +1371,7 @@ document.addEventListener('click', (event) => {
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
-    + '[data-delete-session],[data-details],[data-remove-clip]');
+    + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -1414,6 +1386,7 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.play) { playMoment(hit.dataset.play); return; }
   if (hit.dataset.closePlayer) { state.playing = null; destroyPlayer(); render(); return; }
   if (hit.dataset.details) { openDetails(hit.dataset.details); return; }
+  if (hit.dataset.gameDetails) { openGameDetails(); return; }
   if (hit.dataset.removeClip) {
     const m = momentById(hit.dataset.removeClip);
     const clip = state.clips.find((c) => c.momentId === hit.dataset.removeClip);

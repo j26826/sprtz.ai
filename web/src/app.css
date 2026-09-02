@@ -607,23 +607,32 @@ input, button, textarea { font-family: var(--font-body); }
 .player-slot:empty { display: none; }
 
 /* Game details */
-.game-grid { display: grid; grid-template-columns: repeat(2, 1fr); }
+/* Two columns, not the moment row's three: a game has no thumbnail to play,
+   so borrowing that grid would squeeze the headline into the 72px thumb slot. */
 .game-row {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--color-neutral-300);
-  border-right: 1px solid var(--color-neutral-300);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
 }
-.game-value { font-size: 13px; font-weight: 700; margin-top: 3px; }
+
 .game-summary {
-  padding: 11px 12px;
+  padding: 0 12px 12px;
   font-size: 12.5px;
   line-height: 1.5;
-  border-bottom: 1px solid var(--color-neutral-300);
+  color: var(--color-neutral-800);
 }
-.game-sources { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
 
-@media (max-width: 560px) {
-  .game-grid { grid-template-columns: 1fr; }
+/* Aligned under the headline rather than the thumb column, so the outcome
+   reads as part of the same statement. */
+.game-outcome {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-accent);
 }
 
 .header-select {

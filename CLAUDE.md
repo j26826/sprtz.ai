@@ -406,6 +406,18 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### The two detail widgets
+
+A moment row and a game row are the same shape on purpose: a headline worth
+reading, the facts that qualify it underneath, and everything else behind one
+Details button into a shared two-column popup. What differs is that a moment has
+a thumbnail to play and a game does not, so they have separate grids — reusing
+`.moment-row` for a game squeezes the headline into the 72px thumb column.
+
+Grounded values get their own rows in the game popup, labelled "(from search)",
+and the sources sit at the bottom of it rather than on the card. They qualify
+the grounded rows and are meaningless beside a row nobody is looking at.
+
 ### web/check.mjs
 
 `node --check` only parses. Three classes of mistake parse perfectly and fail in
