@@ -90,6 +90,30 @@ def probe_media(gcs_uri: str) -> dict:
 
 
 @mcp.tool
+def delete_job_media(job_id: str, gcs_uri: str = "") -> dict:
+    """Delete a job's source upload and its HLS package.
+
+    Two buckets, and the source is addressed by URI because only the caller
+    knows it: the upload path carries the owner's uid, which this service never
+    sees.
+
+    Args:
+        job_id: Job whose media to remove.
+        gcs_uri: gs:// URI of the source upload. Skipped when empty.
+    """
+    removed = {"hls_objects": 0, "source_deleted": False}
+    try:
+        if HLS_BUCKET:
+            removed["hls_objects"] = gcs.delete_prefix(HLS_BUCKET, f"jobs/{job_id}/")
+        if gcs_uri:
+            removed["source_deleted"] = gcs.delete_object(gcs_uri)
+        return {"status": "success", "job_id": job_id, **removed}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not delete media for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+
+
+@mcp.tool
 def validate_media(gcs_uri: str, declared_content_type: str = "") -> dict:
     """Check that an upload is really a video this service can process.
 

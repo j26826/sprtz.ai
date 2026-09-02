@@ -49,6 +49,37 @@ resource "google_firestore_index" "moments_knn" {
   }
 }
 
+# Games are indexed separately from the moments inside them. "Find the Sweden
+# Denmark match" and "find the double save" are different questions over
+# different units, and one index holding both would answer each with the other:
+# a match summary and its moments share most of their vocabulary.
+resource "google_firestore_index" "games_knn" {
+  project     = var.project_id
+  database    = google_firestore_database.default.name
+  collection  = "games"
+  query_scope = "COLLECTION"
+
+  fields {
+    field_path = "ownerUid"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "embedding"
+    vector_config {
+      dimension = var.embedding_dimensions
+      flat {}
+    }
+  }
+
+  # Same normalisation trap as moments_knn above: Firestore appends __name__ to
+  # what it creates, the provider reads that as a change, and the forced
+  # replacement fails 409 for ever after.
+  lifecycle {
+    ignore_changes = [fields]
+  }
+}
+
 # "More clips like this" across a user's whole library.
 resource "google_firestore_index" "clips_knn" {
   project     = var.project_id

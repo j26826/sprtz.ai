@@ -105,6 +105,62 @@ def update_job_status(job_id: str, status: str, stage: str = "", error: str = ""
 
 
 @mcp.tool
+def delete_job(job_id: str) -> dict:
+    """Delete a job and every record hanging off it.
+
+    Removes the moments, clips, events and the game record as well as the job
+    itself. The source video is the media server's to delete.
+
+    Args:
+        job_id: Job to delete.
+    """
+    try:
+        return {"status": "success", **store.delete_job(job_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def clear_analysis(job_id: str) -> dict:
+    """Drop a job's moments, clips and game record so it can be analysed again.
+
+    Args:
+        job_id: Job to reset.
+    """
+    try:
+        return {"status": "success", **store.clear_analysis(job_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def request_cancel(job_id: str) -> dict:
+    """Ask a running job to stop at its next stage boundary.
+
+    Args:
+        job_id: Job to cancel.
+    """
+    try:
+        return {"status": "success", **store.request_cancel(job_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def cancel_requested(job_id: str) -> dict:
+    """Whether a stop has been asked for. Stages check this between steps.
+
+    Args:
+        job_id: Job to check.
+    """
+    try:
+        return {"status": "success", "job_id": job_id,
+                "cancelling": store.cancel_requested(job_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def record_media_info(job_id: str, media: dict, segment_count: int) -> dict:
     """Persist the probe results onto a job.
 
@@ -215,6 +271,57 @@ def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> 
                 "count": len(plays)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def upsert_game(job_id: str, game: dict, embed_text: str = "") -> dict:
+    """Save the match-level record and index it for game search.
+
+    Args:
+        job_id: Job the game belongs to.
+        game: GameDetails fields.
+        embed_text: What to embed. Falls back to the teams and summary.
+    """
+    try:
+        return {"status": "success", **store.upsert_game(job_id, game, embed_text)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def get_game(job_id: str) -> dict:
+    """Read the overall game details for a job.
+
+    Args:
+        job_id: Job whose game record to read.
+    """
+    try:
+        return {"status": "success", "game": store.get_game(job_id)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "job_id": job_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def knn_search_games(query: str, owner_uid: str, limit: int = 5) -> dict:
+    """Find whole matches by meaning — teams, competition, venue, how it felt.
+
+    This searches games, not the moments inside them. Use it for "the Sweden
+    Denmark match" or "that intense final"; use knn_search_moments for a play.
+
+    Args:
+        query: Plain-language description of the match.
+        owner_uid: Owner whose games to search. Required.
+        limit: Most games to return.
+    """
+    try:
+        if not owner_uid:
+            return {"status": "error", "error": "owner_uid is required to search games."}
+        games = store.knn_search_games(query, owner_uid, limit)
+        return {"status": "success", "games": games, "count": len(games)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, query=query)
 
 
 @mcp.tool

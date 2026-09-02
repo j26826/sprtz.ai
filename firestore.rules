@@ -53,6 +53,16 @@ service cloud.firestore {
       }
     }
 
+    // Game records are top-level rather than a subcollection of the job, so
+    // they need their own rule: the catch-all at the bottom denies anything not
+    // named here, and the editor reads this collection directly for realtime
+    // game details. Owner-scoped on the document's own field, since there is no
+    // parent job path to inherit from.
+    match /games/{jobId} {
+      allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow write: if false;
+    }
+
     match /renders/{renderId} {
       allow read: if isSignedIn() && resource.data.requestedBy == request.auth.uid;
       allow write: if false;

@@ -111,6 +111,9 @@ earlier turns:
 - `get_job_summary` for status, media properties and what has been found
 - `search_moments` to find moments by meaning; prefer it over scanning a list
   when the editor describes what they want in their own words
+- `get_game_details` when the question is about the **match itself** — who
+  played, the competition, the venue, the final score, how it felt. `find_games`
+  when they are looking for *which* match rather than something inside one.
 - `list_action_plays` for the structured log of a match — every moment with its
   category, class, result, participant and MM:SS offsets. This is the export
   shape; `get_job_summary` is the ranked shortlist.
@@ -118,6 +121,33 @@ earlier turns:
 - `prepare_playback` when a job has moments but nothing to play. Packaging is
   independent of the analysis, so a job whose playback failed does not need
   analysing again — this alone fixes it, and takes a few minutes.
+
+# Games and moments are different questions
+
+"What was the game?", "who played", "how did it end", "find the Denmark match" are
+about the **game**: use `get_game_details` or `find_games`.
+
+"Show me the moments", "any good scenes", "find the double save" are about the
+**plays inside** a game: use `list_action_plays`, `search_moments` or
+`get_job_summary`.
+
+Answering one with the other is the most common way to be unhelpful here, because
+a match summary and the moments inside it are described in the same words.
+
+Game details are read off the screen where possible and grounded against a web
+search where not. When you report a competition, a venue or a full team name that
+came from grounding rather than from the footage, say so — the record keeps the
+two apart precisely so you can.
+
+# Managing existing jobs
+
+- **Analyse again**: call `reanalyse_job` first, then `analysis_pipeline`. Skipping
+  the reset leaves the old moments in place and the new ones land beside them.
+- **Cancel**: `cancel_job`. It stops at the next stage boundary rather than
+  instantly, and whatever was found before that is kept — say both things.
+- **Delete**: `delete_job` removes the video, the moments, the clips and the game
+  record, and cannot be undone. Confirm with the editor before calling it unless
+  they have already said plainly that they want it gone.
 
 # Adjusting the work
 
@@ -151,6 +181,11 @@ def _build_tools() -> list:
         pipeline.list_jobs,
         pipeline.get_job_summary,
         pipeline.list_action_plays,
+        pipeline.get_game_details,
+        pipeline.find_games,
+        pipeline.reanalyse_job,
+        pipeline.cancel_job,
+        pipeline.delete_job,
         pipeline.prepare_playback,
         pipeline.search_moments,
         pipeline.propose_clips,

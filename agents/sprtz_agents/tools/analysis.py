@@ -16,6 +16,7 @@ import asyncio
 import logging
 import math
 import uuid
+from collections.abc import Awaitable, Callable
 
 from google import genai
 from google.genai import types
@@ -184,8 +185,14 @@ async def analyse_segments(
     gcs_uri: str,
     duration_sec: float,
     sport: str = "handball",
+    on_segment_done: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> dict:
     """Analyse every segment of a video concurrently and merge the results.
+
+    ``on_segment_done`` is awaited as each segment lands, with the number
+    finished and the total. Segments are the only part of the run long enough to
+    need reporting — a full match is an hour here and minutes everywhere else —
+    and they finish out of order, so the count is what moves, not the index.
 
     Returns a plain dict so this is directly usable as an ADK tool result.
     """
@@ -198,9 +205,21 @@ async def analyse_segments(
         }
 
     semaphore = asyncio.Semaphore(settings.max_concurrent_segments)
-    results = await asyncio.gather(
-        *(_analyse_one(gcs_uri, plan, len(plans), sport, semaphore) for plan in plans)
-    )
+    done = 0
+
+    async def run(plan: SegmentPlan):
+        nonlocal done
+        outcome = await _analyse_one(gcs_uri, plan, len(plans), sport, semaphore)
+        done += 1
+        if on_segment_done is not None:
+            try:
+                await on_segment_done(done, len(plans))
+            except Exception:
+                # Progress reporting must never take the analysis down with it.
+                logger.warning("progress callback failed", exc_info=True)
+        return outcome
+
+    results = await asyncio.gather(*(run(plan) for plan in plans))
 
     analyses: list[tuple[SegmentPlan, SegmentAnalysis]] = []
     failures: list[dict] = []
@@ -230,6 +249,11 @@ async def analyse_segments(
             {"index": plan.index, "summary": analysis.segment_summary}
             for plan, analysis in analyses
         ],
+        # Captions naming the competition or the venue appear in a handful of
+        # segments at most, so these come back as every reading rather than one:
+        # the caller settles them the same way it settles the team names.
+        "competitions": [a.competition for _, a in analyses if a.competition.strip()],
+        "venues": [a.venue for _, a in analyses if a.venue.strip()],
     }
 
 
