@@ -20,6 +20,28 @@ from __future__ import annotations
 
 from sprtz_agents.sports.registry import SportProfile
 
+# What the analysis can be asked to write in. The value is the language's own
+# name, because naming it in itself is what a model responds to most reliably.
+METADATA_LANGUAGES = {
+    "en": "English",
+    "de": "German (Deutsch)",
+    "it": "Italian (Italiano)",
+    "fr": "French (Français)",
+    "es": "Spanish (Español)",
+}
+
+_LANGUAGE_RULE = """\
+# Language
+
+Write `description`, `evidence` and `segment_summary` in {language}.
+
+Everything you copy off the screen stays exactly as it appears: team names, \
+competition and venue captions, the score bug, shirt numbers. Those are things \
+you read, not things you write, and translating them invents a name that was \
+never shown. `action_result` and `participant_role` stay in English too — they \
+are codes the software matches on, not prose for a reader.\
+"""
+
 _SYSTEM = """\
 You are a senior {display_name} video analyst working for a highlights desk. You \
 watch match footage and mark the moments an editor would cut into a vertical \
@@ -29,6 +51,8 @@ An editor cuts on your timestamps without re-watching the match, so a timestamp 
 that is two seconds late costs them the shot.
 
 {context}
+
+{language_rule}
 
 # Moment catalogue
 
@@ -158,11 +182,21 @@ def _format_exclusions(profile: SportProfile) -> str:
     return "\n".join(f"- {item}" for item in profile.exclusions)
 
 
-def build_system_instruction(profile: SportProfile) -> str:
-    """Stable across every segment, so it caches."""
+def build_system_instruction(profile: SportProfile, metadata_language: str = "en") -> str:
+    """Stable across every segment of a job, so it caches.
+
+    The language rule lives here rather than in the segment prompt for the same
+    reason everything else does: it is identical for every segment, so putting
+    it here costs the short per-request prompt nothing and caches after the
+    first call. It does mean the cache is per language as well as per sport,
+    which is the correct granularity — two jobs in different languages are not
+    running the same instruction.
+    """
+    language = METADATA_LANGUAGES.get(metadata_language, METADATA_LANGUAGES["en"])
     return _SYSTEM.format(
         display_name=profile.display_name,
         context=profile.context.strip(),
+        language_rule=_LANGUAGE_RULE.format(language=language),
         catalogue=_format_catalogue(profile),
         exclusions=_format_exclusions(profile),
     )

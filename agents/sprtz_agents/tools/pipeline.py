@@ -393,8 +393,12 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
         return {"status": "cancelled", "job_id": job_id}
 
     await _progress(job_id, "analysis", 0.0, status="analyzing")
+    # Fixed on the job at registration, not read from whoever is looking now.
+    metadata_language = job.get("metadataLanguage", "en")
     result = await analyse_segments(
-        gcs_uri, duration, sport=sport, on_segment_done=segment_done
+        gcs_uri, duration, sport=sport,
+        metadata_language=metadata_language,
+        on_segment_done=segment_done,
     )
     if result["status"] == "error":
         await mcp_client.call_tool(

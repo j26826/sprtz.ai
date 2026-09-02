@@ -27,6 +27,9 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
+import {
+  METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
+} from './settings.js';
 
 const CONFIG = window.SPRTZ_CONFIG || {};
 // Empty means same-origin, which is how the load balancer serves it: `/` is
@@ -153,19 +156,67 @@ function applyLocale() {
   if (state.msgs.length === 1 && state.msgs[0].who === 'agent') {
     state.msgs = [greeting()];
   }
+  if (!$('settings')?.classList.contains('hidden')) renderSettings();
   render();
 }
 
 
-function mountLanguagePicker() {
-  const select = $('lang-select');
-  if (!select) return;
-  select.innerHTML = LOCALES.map(
-    (l) => `<option value="${l}"${l === getLocale() ? ' selected' : ''}>${localeName(l)}</option>`,
+function fillSelect(id, options, selected) {
+  const el = $(id);
+  if (!el) return;
+  el.innerHTML = options.map(
+    (o) => `<option value="${esc(o.id)}"${o.id === selected ? ' selected' : ''}>${esc(o.name)}</option>`,
   ).join('');
-  select.addEventListener('change', () => {
-    setLocale(select.value);
+}
+
+/** Repaint the settings controls. Called on open and after a language change. */
+function renderSettings() {
+  const s = getSettings();
+  fillSelect('set-locale', [
+    { id: '', name: t('settings.followBrowser') },
+    ...LOCALES.map((id) => ({ id, name: localeName(id) })),
+  ], s.locale);
+  fillSelect('set-metadata-language',
+    METADATA_LANGUAGES.map((l) => ({ id: l.code, name: l.name })), s.metadataLanguage);
+  fillSelect('set-theme', themeOptions(), s.theme);
+}
+
+function openSettings() {
+  renderSettings();
+  $('settings').classList.remove('hidden');
+}
+
+function closeSettings() {
+  $('settings').classList.add('hidden');
+}
+
+function mountSettings() {
+  $('set-locale')?.addEventListener('change', (e) => {
+    // An empty value means "follow the browser", which is a real choice rather
+    // than an absent one — storing it lets a browser-language change take
+    // effect later instead of pinning whatever it happened to be today.
+    const chosen = e.target.value;
+    saveSettings({ locale: chosen });
+    setLocale(chosen || detectLocale());
     applyLocale();
+    renderSettings();
+  });
+
+  $('set-metadata-language')?.addEventListener('change', (e) => {
+    saveSettings({ metadataLanguage: e.target.value });
+  });
+
+  $('set-theme')?.addEventListener('change', (e) => {
+    saveSettings({ theme: e.target.value });
+    applyTheme(e.target.value);
+  });
+
+  // Clicking the backdrop closes; clicking the card must not.
+  $('settings')?.addEventListener('click', (e) => {
+    if (e.target.id === 'settings') closeSettings();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSettings();
   });
 }
 
@@ -273,8 +324,10 @@ $('google-btn').addEventListener('click', async () => {
 // makes it a decision rather than a default someone can change underneath us —
 // and a session that silently became in-memory would look exactly like the
 // expiry complaint this is meant to fix.
-setLocale(detectLocale());
-mountLanguagePicker();
+const initialSettings = loadSettings();
+applyTheme(initialSettings.theme);
+setLocale(initialSettings.locale || detectLocale());
+mountSettings();
 applyLocale();
 
 setPersistence(auth, browserLocalPersistence).catch((err) => {
@@ -1055,6 +1108,10 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type }
       filename,
       size_bytes,
       content_type,
+      // Copied onto the job rather than read at analysis time: what a match's
+      // descriptions are written in is a property of that match, not of
+      // whoever opens it later.
+      metadata_language: getSettings().metadataLanguage,
     }),
   });
 
@@ -1143,7 +1200,8 @@ document.addEventListener('click', (event) => {
   const t = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
-    + '[data-reanalyse],[data-cancel-job],[data-delete-job],#sign-out');
+    + '[data-reanalyse],[data-cancel-job],[data-delete-job],#sign-out,'
+    + '#open-settings,#close-settings');
   if (!t) return;
 
   if (t.dataset.ask) {
@@ -1179,6 +1237,8 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
+  if (t.id === 'open-settings') { openSettings(); return; }
+  if (t.id === 'close-settings') { closeSettings(); return; }
   if (t.id === 'sign-out') {
     signOutNow();
     return;

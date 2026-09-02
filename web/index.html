@@ -63,7 +63,7 @@
       <div class="game-title" id="game-title" data-i18n="header.noMatch">No match loaded</div>
       <div class="context-line" id="context-line" data-i18n="header.uploadToBegin">Upload a recording to begin</div>
     </div>
-    <select class="header-select" id="lang-select" aria-label="Language"></select>
+    <button class="header-btn" id="open-settings" data-i18n="header.settings">Settings</button>
     <button class="header-btn" id="new-session" data-i18n="header.newSession">New session</button>
     <button class="header-btn" id="sign-out" data-i18n="header.signOut">Sign out</button>
   </header>
@@ -81,6 +81,45 @@
         <button class="composer-send" type="submit" id="send" data-i18n="composer.send">Send</button>
       </form>
       <div class="footer-line" id="footer-line">Enter to send &middot; the agent edits the reel in place &mdash; no timeline required</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="settings">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-head">
+      <div class="modal-title" id="settings-title" data-i18n="settings.title">Settings</div>
+      <button class="link-btn" id="close-settings" data-i18n="settings.close">Close</button>
+    </div>
+
+    <div class="setting">
+      <label class="field-label" for="set-locale" data-i18n="settings.appLanguage">
+        App language
+      </label>
+      <div class="setting-hint" data-i18n="settings.appLanguageHint">
+        The language of buttons, labels and the agent's own replies.
+      </div>
+      <select class="input" id="set-locale"></select>
+    </div>
+
+    <div class="setting">
+      <label class="field-label" for="set-metadata-language" data-i18n="settings.metadataLanguage">
+        Metadata language
+      </label>
+      <div class="setting-hint" data-i18n="settings.metadataLanguageHint">
+        The language moment descriptions and game summaries are written in.
+        Applies to matches analysed from now on; those already analysed keep the
+        language they were written in.
+      </div>
+      <select class="input" id="set-metadata-language"></select>
+    </div>
+
+    <div class="setting">
+      <label class="field-label" for="set-theme" data-i18n="settings.theme">Theme</label>
+      <div class="setting-hint" data-i18n="settings.themeHint">
+        How the editor looks.
+      </div>
+      <select class="input" id="set-theme"></select>
     </div>
   </div>
 </div>

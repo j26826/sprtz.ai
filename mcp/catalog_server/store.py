@@ -433,11 +433,15 @@ def _job_summary(job_id: str, doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
-               original_name: str, size_bytes: int, content_type: str = "") -> dict[str, Any]:
+               original_name: str, size_bytes: int, content_type: str = "",
+               metadata_language: str = "en") -> dict[str, Any]:
     payload = {
         "ownerUid": owner_uid,
         "title": title,
         "sport": sport,
+        # What the analysis writes its prose in. Stored on the job so re-reading
+        # it years later still says which language its descriptions are in.
+        "metadataLanguage": metadata_language or "en",
         "status": "uploaded",
         "stage": "ingest",
         "progress": 0,

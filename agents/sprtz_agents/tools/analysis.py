@@ -121,6 +121,7 @@ async def _analyse_one(
     total: int,
     sport: str,
     semaphore: asyncio.Semaphore,
+    metadata_language: str = "en",
 ) -> tuple[SegmentPlan, SegmentAnalysis | None, str | None]:
     settings = get_settings()
     profile = get_profile(sport)
@@ -144,7 +145,7 @@ async def _analyse_one(
     )
 
     config = types.GenerateContentConfig(
-        system_instruction=build_system_instruction(profile),
+        system_instruction=build_system_instruction(profile, metadata_language),
         temperature=0.2,
         response_mime_type="application/json",
         response_schema=SegmentAnalysis,
@@ -185,6 +186,7 @@ async def analyse_segments(
     gcs_uri: str,
     duration_sec: float,
     sport: str = "handball",
+    metadata_language: str = "en",
     on_segment_done: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> dict:
     """Analyse every segment of a video concurrently and merge the results.
@@ -209,7 +211,9 @@ async def analyse_segments(
 
     async def run(plan: SegmentPlan):
         nonlocal done
-        outcome = await _analyse_one(gcs_uri, plan, len(plans), sport, semaphore)
+        outcome = await _analyse_one(
+            gcs_uri, plan, len(plans), sport, semaphore, metadata_language
+        )
         done += 1
         if on_segment_done is not None:
             try:
