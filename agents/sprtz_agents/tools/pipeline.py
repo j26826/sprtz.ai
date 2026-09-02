@@ -425,6 +425,37 @@ async def search_moments(job_id: str, query: str, limit: int) -> dict:
     )
 
 
+async def list_jobs(tool_context: ToolContext, status: str = "", limit: int = 20) -> dict:
+    """List the editor's own recent jobs, newest first.
+
+    Use this whenever they ask what exists, what is running, or what failed,
+    rather than asking them for a job_id they have no reason to know.
+
+    Args:
+        status: Optional filter. "running" for anything still being worked on,
+            or an exact status such as "ready" or "failed". Empty means all.
+        limit: Most jobs to return.
+
+    Returns:
+        dict with the jobs, each carrying its job_id, title, status and stage.
+    """
+    # The uid comes from the signed-in session ADK opened, never from the model:
+    # a job_id or uid the model can supply is a job_id it can guess at, and
+    # these documents belong to one tenant each.
+    owner_uid = tool_context.user_id
+    if not owner_uid:
+        return {"status": "error", "error": "No signed-in user on this session."}
+
+    result = await mcp_client.call_tool(
+        "catalog", "list_jobs",
+        {"owner_uid": owner_uid, "limit": limit, "status": status},
+    )
+    if result.get("status") == "error":
+        return result
+    return {"status": "success", "jobs": result.get("jobs", []),
+            "count": result.get("count", 0)}
+
+
 async def get_job_summary(job_id: str) -> dict:
     """Read a job's current state: status, media properties, and what has been found so far.
 

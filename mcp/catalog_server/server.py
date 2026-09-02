@@ -65,6 +65,23 @@ def get_job(job_id: str) -> dict:
 
 
 @mcp.tool
+def list_jobs(owner_uid: str, limit: int = 20, status: str = "") -> dict:
+    """List an owner's recent jobs, newest first.
+
+    Args:
+        owner_uid: Identity Platform uid whose jobs to list.
+        limit: Most jobs to return.
+        status: Optional filter. "running" means anything the pipeline still
+            owes an answer for; otherwise an exact status such as "ready".
+    """
+    try:
+        jobs = store.list_jobs(owner_uid, limit=limit, status=status)
+        return {"status": "success", "jobs": jobs, "count": len(jobs)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, owner_uid=owner_uid)
+
+
+@mcp.tool
 def update_job_status(job_id: str, status: str, stage: str = "", error: str = "",
                       progress: int = -1) -> dict:
     """Move a job to a new status, and optionally a new stage.

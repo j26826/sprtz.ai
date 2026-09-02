@@ -50,6 +50,7 @@ const state = {
   platforms: { tiktok: true, instagram: true, youtube: false },
   playing: null,          // { momentId, start, end }
   upload: { file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '' },
+  pendingUploads: [],     // uploaded to GCS but never registered as a job
   unsubscribe: [],
 };
 
@@ -199,7 +200,21 @@ onAuthStateChanged(auth, async (user) => {
       state.upload.sport = cfg.supported_sports[0];
     }
   } catch { /* the sport list falls back to the default */ }
+  refreshPendingUploads();
 });
+
+
+/**
+ * Look for uploads that reached the bucket but never became a job, so a match
+ * that failed to register can be picked up instead of sent again.
+ */
+async function refreshPendingUploads() {
+  try {
+    const { uploads = [] } = await api('/api/jobs/pending-uploads');
+    state.pendingUploads = uploads;
+    if (uploads.length) render();
+  } catch { /* the button simply does not appear */ }
+}
 
 /* ────────────────────────────────────────────────────── realtime ── */
 
@@ -320,6 +335,9 @@ function playerMarkup(m) {
 
 function ingestCard() {
   const u = state.upload;
+  // Offer the most recent one only. A list of near-identical filenames is a
+  // worse prompt than "the one you left behind", and the rest stay reachable.
+  const pending = state.pendingUploads[0];
   const sources = ['Upload', 'Dropbox', 'Drive', 'Camera roll'];
   return `
     <div class="panel">
@@ -363,7 +381,18 @@ function ingestCard() {
           <button class="btn-solid" id="start-analysis" ${u.file && u.status === 'idle' ? '' : 'disabled'}>
             ${u.status === 'uploading' ? 'Uploading…' : u.status === 'analyzing' ? 'Analysing…' : 'Start analysis'}
           </button>
+          ${pending ? `
+            <button class="btn-outline" data-resume="${esc(pending.job_id)}"
+                    ${u.status === 'idle' ? '' : 'disabled'}
+                    title="${esc(pending.filename)} — ${bytes(pending.size_bytes)}">
+              Use last night's upload
+            </button>` : ''}
         </div>
+        ${pending ? `
+          <div class="dz-meta" style="margin-top:8px">
+            ${esc(pending.filename)} · ${bytes(pending.size_bytes)} reached storage but was
+            never analysed. Pick it up instead of uploading again.
+          </div>` : ''}
       </div>
     </div>`;
 }
@@ -743,6 +772,60 @@ function attachCards(index, question) {
 
 /* ─────────────────────────────────────────────────────────── upload ── */
 
+/**
+ * Turn an object that is already in the bucket into a job the agent can run.
+ *
+ * Shared by a fresh upload and by resuming one that never got registered — the
+ * bytes are in the same place either way, so only this second half differs.
+ */
+async function registerAndAnalyse({ job_id, filename, size_bytes, content_type }) {
+  const u = state.upload;
+  u.status = 'uploading';
+  u.stage = 'Registering the job';
+  render();
+
+  await api('/api/jobs', {
+    method: 'POST',
+    body: JSON.stringify({
+      job_id,
+      title: filename.replace(/\.[^.]+$/, ''),
+      sport: u.sport,
+      filename,
+      size_bytes,
+      content_type,
+    }),
+  });
+
+  // It has a job document now, so it is no longer stranded.
+  state.pendingUploads = state.pendingUploads.filter((p) => p.job_id !== job_id);
+
+  u.status = 'analyzing';
+  u.stage = 'Handed to the agent';
+  selectJob(job_id);
+  playbackUrl = null;
+  render();
+
+  await ask('Analyse this match and suggest clips.');
+  u.status = 'idle';
+  u.file = null;
+  u.name = '';
+  render();
+}
+
+
+async function resumeUpload(jobId) {
+  const pending = state.pendingUploads.find((p) => p.job_id === jobId);
+  if (!pending) return;
+  try {
+    await registerAndAnalyse(pending);
+  } catch (err) {
+    state.upload.status = 'idle';
+    say(`That upload could not be picked up: ${err.message}`);
+    render();
+  }
+}
+
+
 async function startUpload() {
   const u = state.upload;
   if (!u.file) return;
@@ -778,32 +861,12 @@ async function startUpload() {
       xhr.send(u.file);
     });
 
-    u.stage = 'Registering the job';
-    render();
-
-    await api('/api/jobs', {
-      method: 'POST',
-      body: JSON.stringify({
-        job_id: ticket.job_id,
-        title: u.file.name.replace(/\.[^.]+$/, ''),
-        sport: u.sport,
-        filename: u.file.name,
-        size_bytes: u.file.size,
-        content_type: u.file.type || '',
-      }),
+    await registerAndAnalyse({
+      job_id: ticket.job_id,
+      filename: u.file.name,
+      size_bytes: u.file.size,
+      content_type: u.file.type || '',
     });
-
-    u.status = 'analyzing';
-    u.stage = 'Handed to the agent';
-    selectJob(ticket.job_id);
-    playbackUrl = null;
-    render();
-
-    await ask('Analyse this match and suggest clips.');
-    u.status = 'idle';
-    u.file = null;
-    u.name = '';
-    render();
   } catch (err) {
     u.status = 'idle';
     u.stage = '';
@@ -869,7 +932,9 @@ document.addEventListener('change', (event) => {
 });
 
 document.addEventListener('click', (event) => {
-  if (event.target.id === 'start-analysis') startUpload();
+  if (event.target.id === 'start-analysis') { startUpload(); return; }
+  const resume = event.target.closest('[data-resume]');
+  if (resume) resumeUpload(resume.dataset.resume);
 });
 
 $('composer').addEventListener('submit', (event) => {

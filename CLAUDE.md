@@ -187,6 +187,28 @@ cannot sign locally — it raises "you need a private key to sign credentials".
 route signing through IAM's signBlob, and the service account needs
 `roles/iam.serviceAccountTokenCreator` **on itself** (`api_self_sign` in iam.tf).
 
+**The agent scopes `list_jobs` from the session, not from a parameter.**
+Editors never see a job id, so the agent has to be able to list their jobs to
+answer "what's still processing?" — but an `owner_uid` argument would be an
+argument the model fills in, and a uid the model can supply is a uid it can
+guess. `pipeline.list_jobs` takes an ADK `ToolContext` and reads
+`tool_context.user_id`, which comes from the session the API opened with the
+verified Identity Platform uid, and is never shown to the model.
+
+Filtering by status is done in Python after the read, because a Firestore
+filter on it would need a composite index per status on top of
+`jobs_by_owner_recent`. That read over-fetches: a page of finished jobs would
+otherwise hide the running ones underneath it and the agent would answer
+"nothing is processing".
+
+**An upload with no job document is recoverable, not lost.** The browser mints
+a job id, PUTs to GCS, then registers the job in a second call — so a failure
+between the two strands a match-length file in the bucket with nothing pointing
+at it. `GET /api/jobs/pending-uploads` lists objects under the caller's own
+`uploads/<uid>/` prefix that have no job, and the editor's "Use last night's
+upload" button registers one rather than uploading it again. Registration also
+checks the object exists now, so a job cannot be created pointing at nothing.
+
 **The agent's tool list is bound at import time.** `sprtz_agents.agent` builds
 `tools=` when the module loads, so whatever is unset *while deploy.py imports it*
 is missing from the packaged agent permanently — setting `MCP_CATALOG_URL` on the
