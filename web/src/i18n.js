@@ -17,10 +17,10 @@ const BASE = 'en-GB';
 const STRINGS = {
   'en-GB': {
     'lang.name': 'English (UK)',
+    'sessions.deleteNote': 'This removes the conversation only. The match, its moments and its clips are not affected.',
     'sessions.noMatch': 'No match yet',
     'sessions.untitled': 'New session',
     'sessions.deleteConfirm': 'Delete the session',
-    'header.untitled': 'Untitled match',
 
     'sessions.empty': 'No sessions yet. Upload a match to start one.',
 
@@ -40,8 +40,6 @@ const STRINGS = {
 
     'header.newSession': 'New session',
     'header.signOut': 'Sign out',
-    'header.noMatch': 'No match loaded',
-    'header.uploadToBegin': 'Upload a recording to begin',
 
     'signin.title': 'Sportscut',
     'signin.blurb': 'Sign in to analyse a match and cut it into short-form clips.',
@@ -149,10 +147,10 @@ const STRINGS = {
 
   de: {
     'lang.name': 'Deutsch',
+    'sessions.deleteNote': 'Damit wird nur das Gespräch entfernt. Das Spiel, seine Szenen und Clips bleiben erhalten.',
     'sessions.noMatch': 'Noch kein Spiel',
     'sessions.untitled': 'Neue Sitzung',
     'sessions.deleteConfirm': 'Sitzung löschen',
-    'header.untitled': 'Unbenanntes Spiel',
 
     'sessions.empty': 'Noch keine Sitzungen. Laden Sie ein Spiel hoch, um zu beginnen.',
 
@@ -173,8 +171,6 @@ const STRINGS = {
 
     'header.newSession': 'Neue Sitzung',
     'header.signOut': 'Abmelden',
-    'header.noMatch': 'Kein Spiel geladen',
-    'header.uploadToBegin': 'Aufnahme hochladen, um zu beginnen',
 
     'signin.title': 'Sportscut',
     'signin.blurb': 'Melden Sie sich an, um ein Spiel zu analysieren und in Kurzclips zu schneiden.',
@@ -264,10 +260,10 @@ const STRINGS = {
 
   it: {
     'lang.name': 'Italiano',
+    'sessions.deleteNote': 'Verrà rimossa solo la conversazione. La partita, le sue azioni e le clip restano.',
     'sessions.noMatch': 'Nessuna partita',
     'sessions.untitled': 'Nuova sessione',
     'sessions.deleteConfirm': 'Eliminare la sessione',
-    'header.untitled': 'Partita senza titolo',
 
     'sessions.empty': 'Ancora nessuna sessione. Carica una partita per iniziarne una.',
 
@@ -287,8 +283,6 @@ const STRINGS = {
 
     'header.newSession': 'Nuova sessione',
     'header.signOut': 'Esci',
-    'header.noMatch': 'Nessuna partita caricata',
-    'header.uploadToBegin': 'Carica una registrazione per iniziare',
 
     'signin.title': 'Sportscut',
     'signin.blurb': 'Accedi per analizzare una partita e montarla in clip brevi.',
@@ -377,10 +371,10 @@ const STRINGS = {
 
   fr: {
     'lang.name': 'Français',
+    'sessions.deleteNote': 'Seule la conversation est supprimée. Le match, ses actions et ses clips ne sont pas touchés.',
     'sessions.noMatch': 'Pas encore de match',
     'sessions.untitled': 'Nouvelle session',
     'sessions.deleteConfirm': 'Supprimer la session',
-    'header.untitled': 'Match sans titre',
 
     'sessions.empty': 'Aucune session pour le moment. Importez un match pour en démarrer une.',
 
@@ -400,8 +394,6 @@ const STRINGS = {
 
     'header.newSession': 'Nouvelle session',
     'header.signOut': 'Se déconnecter',
-    'header.noMatch': 'Aucun match chargé',
-    'header.uploadToBegin': 'Importez un enregistrement pour commencer',
 
     'signin.title': 'Sportscut',
     'signin.blurb': 'Connectez-vous pour analyser un match et le monter en clips courts.',
@@ -494,10 +486,10 @@ const STRINGS = {
 
   es: {
     'lang.name': 'Español',
+    'sessions.deleteNote': 'Solo se elimina la conversación. El partido, sus jugadas y sus clips no se ven afectados.',
     'sessions.noMatch': 'Sin partido todavía',
     'sessions.untitled': 'Nueva sesión',
     'sessions.deleteConfirm': 'Eliminar la sesión',
-    'header.untitled': 'Partido sin título',
 
     'sessions.empty': 'Aún no hay sesiones. Sube un partido para empezar una.',
 
@@ -517,8 +509,6 @@ const STRINGS = {
 
     'header.newSession': 'Nueva sesión',
     'header.signOut': 'Cerrar sesión',
-    'header.noMatch': 'Ningún partido cargado',
-    'header.uploadToBegin': 'Sube una grabación para empezar',
 
     'signin.title': 'Sportscut',
     'signin.blurb': 'Inicia sesión para analizar un partido y montarlo en clips cortos.',

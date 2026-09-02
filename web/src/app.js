@@ -31,8 +31,7 @@ import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
 } from './settings.js';
 import {
-  createSession, listSessions, loadSessions, reconcile, removeSession,
-  sessionForJob, updateSession,
+  createSession, listSessions, loadSessions, removeSession, updateSession,
 } from './sessions.js';
 
 const CONFIG = window.SPRTZ_CONFIG || {};
@@ -390,14 +389,10 @@ function watchJobs(uid) {
           orderBy('createdAt', 'desc'), limit(50)),
     (snap) => {
       state.jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // Jobs are the durable record, so any without a session get one — a match
-      // uploaded elsewhere would otherwise exist and be unreachable here.
-      state.sessions = reconcile(state.jobs);
-      if (!state.sessionKey && state.sessions.length) {
-        openSession(state.sessions[0].id);
-      } else {
-        render();
-      }
+      // Deliberately does not create a session per job. The sidebar lists
+      // conversations; matches are reached through the agent and the job cards,
+      // and exist perfectly well without anyone having talked about them.
+      render();
     },
     (err) => console.error('jobs listener', err),
   );
@@ -807,22 +802,21 @@ function startSession() {
 
 
 /**
- * Remove a session, and the match inside it if there is one.
+ * Remove a conversation.
  *
- * A session that owns a job is the only route to that job in this UI, so
- * deleting the row without the job would strand a match-length video in a
- * bucket with nothing pointing at it. The job goes through the agent, which
- * deletes the media too; the row goes immediately, because waiting on an agent
- * turn to redraw a list makes the click feel broken.
+ * Only the conversation. A match is hours of analysis over a multi-gigabyte
+ * upload; a session is a few lines in localStorage. Deleting the cheap thing
+ * must never take the expensive one with it, and a sidebar tidy-up is exactly
+ * the moment someone would do that by accident. Matches are deleted from the
+ * job card, where the confirmation says what actually goes.
  */
-async function deleteSession(sessionId) {
+function deleteSession(sessionId) {
   const session = listSessions().find((s) => s.id === sessionId);
   if (!session) return;
 
-  const job = state.jobs.find((j) => j.id === session.jobId);
-  const name = session.title || job?.title || t('sessions.untitled');
-  const warning = job ? `\n\n${t('jobs.deleteConfirm')}` : '';
-  if (!window.confirm(`${t('sessions.deleteConfirm')} "${name}"?${warning}`)) return;
+  const name = session.title || t('sessions.untitled');
+  if (!window.confirm(
+    `${t('sessions.deleteConfirm')} "${name}"?\n\n${t('sessions.deleteNote')}`)) return;
 
   removeSession(sessionId);
   state.sessions = listSessions();
@@ -832,11 +826,6 @@ async function deleteSession(sessionId) {
     if (next) openSession(next.id); else startSession();
   } else {
     render();
-  }
-
-  if (job) {
-    selectJob(job.id);
-    await ask('Delete this job, its video and everything found in it.');
   }
 }
 
@@ -939,15 +928,6 @@ function actionsRow(msg) {
 
 function render() {
   renderSessions();
-  const job = state.job;
-  $('game-title').textContent = job ? (job.title || t('header.untitled')) : t('header.noMatch');
-
-  const parts = [];
-  if (job?.media?.durationSec) parts.push(dur(job.media.durationSec));
-  if (state.moments.length) parts.push(`${state.moments.length} moments`);
-  parts.push(state.clips.length ? `${state.clips.length} in reel` : 'no reel yet');
-  $('context-line').textContent = job ? parts.join(' · ') : 'Upload a recording to begin';
-
   $('transcript').innerHTML = state.msgs.map((m) => `
     <div class="msg ${m.who === 'agent' ? 'msg-agent' : ''}">
       <div class="msg-label">${m.who === 'agent' ? 'Agent' : 'You'}</div>
@@ -1249,12 +1229,16 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type }
   // It has a job document now, so it is no longer stranded.
   state.pendingUploads = state.pendingUploads.filter((p) => p.job_id !== job_id);
 
-  // The match belongs to the conversation that uploaded it. Without this the
-  // reconcile below would open a second session for the same job.
-  const open = state.sessionKey && !sessionForJob(job_id)
-    ? updateSession(state.sessionKey, { jobId: job_id, title: filename.replace(/\.[^.]+$/, '') })
-    : null;
-  if (open) state.sessions = listSessions();
+  // Note what this conversation is now about, so reopening it comes back here.
+  // A bookmark, not a claim: the job is not owned by this session, and outlives
+  // it.
+  if (state.sessionKey) {
+    updateSession(state.sessionKey, {
+      jobId: job_id,
+      title: filename.replace(/\.[^.]+$/, ''),
+    });
+    state.sessions = listSessions();
+  }
 
   u.status = 'analyzing';
   u.stage = 'Handed to the agent';

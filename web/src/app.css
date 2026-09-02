@@ -29,6 +29,9 @@ input, button, textarea { font-family: var(--font-body); }
   align-items: stretch;
   border-bottom: 2px solid var(--color-text);
   flex: none;
+  /* The context block used to set this and push the buttons right. With it
+     gone the header would collapse to the logo's height. */
+  min-height: 56px;
 }
 
 .brand {
@@ -36,6 +39,8 @@ input, button, textarea { font-family: var(--font-body); }
   align-items: center;
   padding: 0 20px;
   border-right: 2px solid var(--color-text);
+  /* Everything after the brand sits at the far end of the header. */
+  margin-right: auto;
 }
 
 /* The wordmark carries its own weight and letterspacing, so it is sized by
@@ -62,32 +67,6 @@ input, button, textarea { font-family: var(--font-body); }
   font-size: 15px;
   letter-spacing: -0.02em;
   text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.header-context {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 20px;
-  height: 56px;
-  min-width: 0;
-}
-
-.game-title {
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.context-line {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--color-neutral-600);
   white-space: nowrap;
 }
 
