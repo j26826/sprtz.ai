@@ -343,6 +343,27 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### Deleting media
+
+**Already-gone counts as deleted.** Listing a couple of thousand HLS segments
+and then deleting them is not atomic, so an object can disappear between the
+two — a second delete of the same job, or a re-encode clearing the prefix. A 404
+means the prefix is emptier than it was, not that the operation failed. Treating
+one as an error aborted a real job deletion at segment 1400 of about 2000 and
+left the job in Firestore pointing at a half-deleted package.
+
+A 503 is not a 404: `delete_prefix` counts real failures separately and
+`delete_job_media` refuses to report success while any remain, because dropping
+the job document while objects survive leaves gigabytes nothing points at.
+
+Deletes run through a thread pool. Two thousand round trips in series is slow
+enough to matter on its own, and the time it takes is also the window in which
+something else can remove an object from under the listing.
+
+`delete_object` catches `NotFound` from the delete rather than calling `exists()`
+first — a check followed by a delete is two calls with a gap in the middle,
+which is the race being guarded against rather than a way to avoid it.
+
 ### Static caching
 
 CSS and JS are served `no-cache`, meaning **revalidate**, not "do not store".

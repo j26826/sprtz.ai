@@ -101,12 +101,25 @@ def delete_job_media(job_id: str, gcs_uri: str = "") -> dict:
         job_id: Job whose media to remove.
         gcs_uri: gs:// URI of the source upload. Skipped when empty.
     """
-    removed = {"hls_objects": 0, "source_deleted": False}
+    removed = {"hls_objects": 0, "already_gone": 0, "failed": 0, "source_deleted": False}
     try:
         if HLS_BUCKET:
-            removed["hls_objects"] = gcs.delete_prefix(HLS_BUCKET, f"jobs/{job_id}/")
+            counts = gcs.delete_prefix(HLS_BUCKET, f"jobs/{job_id}/")
+            removed["hls_objects"] = counts["deleted"]
+            removed["already_gone"] = counts["already_gone"]
+            removed["failed"] = counts["failed"]
         if gcs_uri:
             removed["source_deleted"] = gcs.delete_object(gcs_uri)
+
+        # Objects that were already gone are not a problem — the caller wanted
+        # them gone. Only ones that refused to delete leave the prefix dirty,
+        # and the job should not be dropped from Firestore while they remain,
+        # or nothing points at them any more.
+        if removed["failed"]:
+            return {
+                "status": "error", "job_id": job_id,
+                "error": f"{removed['failed']} object(s) could not be deleted", **removed,
+            }
         return {"status": "success", "job_id": job_id, **removed}
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not delete media for %s", job_id)
