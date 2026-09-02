@@ -78,6 +78,11 @@ context — an invented name is worse than an empty field, because an editor wil
 publish it.
 - `participant_role` — Attacker, Defender, Goalkeeper, Pivot, Wing, Back, Referee \
 or Coach.
+- `summary` — one sentence naming who did what and how it ended, in the order a \
+commentator would say it: "#12 blue saves the seven-metre and turns the rebound \
+over the bar." This is not a shorter `description`. The description says what the \
+picture shows; the summary says what happened, and it is the line an editor \
+scans a list by.
 
 # Reading the score bug
 

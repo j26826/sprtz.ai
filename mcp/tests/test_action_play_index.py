@@ -31,6 +31,7 @@ def _moment(**kwargs) -> dict:
         "confidence": 0.87,
         "excitement": 0.9,
         "highlight_score": 0.8,
+        "summary": "#12 blue saves the seven-metre and turns the rebound over.",
         "description": "Keeper stops the seven-metre then turns the rebound over.",
         "action_result": "Save",
         "participant": "#12 blue",
@@ -59,7 +60,8 @@ class TestEmbeddedText:
         # ". . ." in an embedded string is noise the model has to look past.
         # The description keeps its own full stop; only the joins are at issue.
         text = store.action_play_text(_moment(participant="", participant_role="",
-                                              action_result="", action_team=""))
+                                              action_result="", action_team="",
+                                              summary=""))
         assert ".." not in text
         assert ". ." not in text
         assert text == ("Double Save. defense. "
@@ -200,3 +202,24 @@ class TestTeamsAreStoredAndSearchable:
 
         assert play["team1"] == ""
         assert play["scoreTeam1"] is None
+
+
+class TestSummaryAndTitleAreIndexed:
+    def test_the_moment_summary_is_in_the_vector(self):
+        # "who saved the seven-metre" is the shape of a real query, and the
+        # summary is the field written in those words.
+        assert "saves the seven-metre" in store.action_play_text(_moment())
+
+    def test_the_summary_is_persisted_and_read_back(self):
+        out = store._moment_out({"momentId": "m", "summary": "A one-line summary."})
+        assert out["summary"] == "A one-line summary."
+
+    def test_a_moment_written_before_summaries_existed_still_reads(self):
+        assert store._moment_out({"momentId": "m"})["summary"] == ""
+
+    def test_the_game_title_is_projected(self):
+        game = store._game_out({"jobId": "j1", "title": "SWE v DEN"})
+        assert game["title"] == "SWE v DEN"
+
+    def test_a_game_written_before_titles_existed_still_reads(self):
+        assert store._game_out({"jobId": "j1"})["title"] == ""
