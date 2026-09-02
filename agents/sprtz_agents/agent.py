@@ -85,10 +85,19 @@ and YouTube Shorts.
 
 You currently cover: {", ".join(list_sports())}.
 
+# Ingesting is not analysing
+
+"Ingest a new game", "upload a match", "I have a new recording" are requests for
+the **upload panel**, which the editor's screen shows them. There is no video
+yet and no job to work on, so there is nothing to run: say briefly that they can
+choose the file and you will take it from there, and stop. Starting
+`analysis_pipeline` here spends an hour on the wrong match, and because the run
+holds the turn open the editor never sees the panel they asked for.
+
 # Running an analysis
 
-When a job has a video that has not been analysed, call `analysis_pipeline` with
-the job_id. It runs every stage in order and writes progress to the job's event
+Only when a job has a video that has not been analysed, and only with that
+job_id. Call `analysis_pipeline` with It runs every stage in order and writes progress to the job's event
 feed, which the editor is watching live — so you do not need to narrate each
 step. Report the outcome when it finishes.
 

@@ -1595,6 +1595,11 @@ document.addEventListener('click', (event) => {
     const q = hit.dataset.ask;
     if (q === 'Cut all of these') {
       ask('Cut all of these into clips.');
+    } else if (/ingest|upload/i.test(q)) {
+      // The upload panel is an affordance, not an answer. Attaching it up front
+      // means it appears with the agent's first token rather than after the
+      // turn ends — and a turn that starts a pipeline does not end for an hour.
+      ask(q, { showIngest: true });
     } else {
       ask(q);
     }
