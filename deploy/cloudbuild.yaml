@@ -137,8 +137,13 @@ steps:
         node --check web/src/i18n.js
         node --check web/src/settings.js
         node --check web/src/sessions.js
-        # Parsing is not enough: a missing translation key, a dead element id
-        # and an unbound button all parse and fail in a browser.
+        # Parsing is not enough: a call to a function that no longer exists, a
+        # missing translation key, a dead element id and an unbound button all
+        # parse cleanly and fail in a browser. acorn is for the first of those —
+        # without it that check is skipped, so it is installed here rather than
+        # left to chance.
+        npm --prefix web ci --silent --no-fund --no-audit \
+          || npm --prefix web install --silent --no-fund --no-audit
         node web/check.mjs
 
   - id: build-web

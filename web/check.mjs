@@ -32,6 +32,87 @@ const app = stripComments(read('src/app.js'));
 const i18n = read('src/i18n.js');
 const html = read('index.html');
 
+/* ── every function called is a function that exists ──────────────────────── */
+
+/**
+ * This needs a real parser, and three hand-rolled attempts proved it.
+ *
+ * Pattern matching cannot tell a call from the word "the" in a comment, a
+ * destructured parameter from an undeclared name, or where a template literal
+ * ends. Each attempt produced more noise than signal, and a check that cries
+ * wolf is one people stop reading — which is how a deleted playerMarkup and a
+ * deleted renderSessions each reached production, both of them blanking the
+ * whole screen because the throw happened inside render().
+ *
+ * acorn is a parser. If it is not installed the check is skipped and said to be
+ * skipped, rather than quietly passing: CI installs it, so it always runs where
+ * it matters.
+ */
+async function checkSymbols(source) {
+  let acorn;
+  try {
+    acorn = await import('acorn');
+  } catch {
+    console.warn('  (symbol check skipped: acorn is not installed)');
+    return;
+  }
+
+  const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  const declared = new Set();
+  const called = [];
+
+  const bind = (node) => {
+    if (!node) return;
+    if (node.type === 'Identifier') declared.add(node.name);
+    else if (node.type === 'ObjectPattern') node.properties.forEach((p) => bind(p.value ?? p.argument));
+    else if (node.type === 'ArrayPattern') node.elements.forEach(bind);
+    else if (node.type === 'AssignmentPattern') bind(node.left);
+    else if (node.type === 'RestElement') bind(node.argument);
+  };
+
+  const walk = (node) => {
+    if (!node || typeof node.type !== 'string') return;
+
+    if (node.type === 'FunctionDeclaration' && node.id) declared.add(node.id.name);
+    if (node.type === 'ClassDeclaration' && node.id) declared.add(node.id.name);
+    if (node.type === 'VariableDeclarator') bind(node.id);
+    if (node.type === 'ImportSpecifier') declared.add(node.local.name);
+    if (node.type === 'ImportDefaultSpecifier') declared.add(node.local.name);
+    if (node.type === 'ImportNamespaceSpecifier') declared.add(node.local.name);
+    if (node.params) node.params.forEach(bind);
+    if (node.type === 'CatchClause') bind(node.param);
+
+    // A bare name being called. A method call has a MemberExpression callee and
+    // is somebody else's problem.
+    if (node.type === 'CallExpression' && node.callee.type === 'Identifier') {
+      called.push(node.callee.name);
+    }
+
+    for (const key of Object.keys(node)) {
+      const child = node[key];
+      if (Array.isArray(child)) child.forEach(walk);
+      else if (child && typeof child.type === 'string') walk(child);
+    }
+  };
+
+  walk(ast);
+
+  const GLOBALS = new Set([
+    'String', 'Number', 'Boolean', 'Array', 'Object', 'Date', 'JSON', 'Promise',
+    'Error', 'Set', 'Map', 'RegExp', 'parseInt', 'parseFloat', 'isNaN', 'fetch',
+    'setTimeout', 'setInterval', 'clearInterval', 'clearTimeout', 'alert',
+    'confirm', 'prompt', 'decodeURIComponent', 'encodeURIComponent', 'atob',
+    'btoa', 'structuredClone', 'queueMicrotask', 'requestAnimationFrame',
+  ]);
+
+  for (const name of new Set(called)) {
+    if (GLOBALS.has(name) || declared.has(name)) continue;
+    fail(`app.js calls ${name}() but nothing declares, imports or binds it`);
+  }
+}
+
+await checkSymbols(readFileSync(new URL('src/app.js', ROOT), 'utf8'));
+
 /* ── every translation key resolves ───────────────────────────────────────── */
 
 const base = i18n.slice(i18n.indexOf("'en-GB': {"), i18n.indexOf("'en-US': {"));
