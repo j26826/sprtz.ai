@@ -135,3 +135,18 @@ def delete_prefix(bucket: str, prefix: str) -> int:
     if removed:
         logger.info("cleared %d objects under gs://%s/%s", removed, bucket, prefix)
     return removed
+
+
+def delete_object(gcs_uri: str) -> bool:
+    """Delete one object. False if it was already gone.
+
+    Already-gone is a success for a delete: a caller retrying after a partial
+    failure should not be told the second attempt failed.
+    """
+    bucket_name, blob_name = split_uri(gcs_uri)
+    blob = client().bucket(bucket_name).blob(blob_name)
+    if not blob.exists():
+        return False
+    blob.delete()
+    logger.info("deleted %s", gcs_uri)
+    return True

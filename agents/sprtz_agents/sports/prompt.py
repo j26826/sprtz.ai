@@ -72,7 +72,11 @@ so it matches `team1` or `team2`. If the bug is not legible use the shirt colour
 Leave it empty when no side owns the action, such as a referee decision.
 - Never infer who is playing from the competition, the venue, the kit or the \
 commentary's turn of phrase. An empty field is correct; a guessed one is a team \
-that never played.\
+that never played.
+
+Report `competition` and `venue` for the clip as a whole, and only when a caption, \
+a graphic or the commentary actually names one. Leave them empty otherwise — do \
+not work the competition out from the teams, or the venue from the home side.\
 """
 
 

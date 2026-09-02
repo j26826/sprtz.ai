@@ -39,6 +39,7 @@ const state = {
   user: null,
   msgs: [],
   jobs: [],
+  game: null,          // the match-level record for the selected job
   jobId: null,
   job: null,
   moments: [],
@@ -237,6 +238,7 @@ function selectJob(jobId) {
   state.jobId = jobId;
   state.moments = [];
   state.clips = [];
+  state.game = null;
   state.events = [];
   state.playing = null;
   playbackUrl = null;
@@ -245,6 +247,13 @@ function selectJob(jobId) {
   state.unsubscribe.push(onSnapshot(doc(db, 'jobs', jobId), (snap) => {
     if (snap.exists()) { state.job = { id: snap.id, ...snap.data() }; render(); }
   }));
+
+  // The game record lives in its own top-level collection, keyed by job id, so
+  // it is a separate listener rather than part of the job document.
+  state.unsubscribe.push(onSnapshot(doc(db, 'games', jobId), (snap) => {
+    state.game = snap.exists() ? snap.data() : null;
+    render();
+  }, () => { state.game = null; }));
 
   state.unsubscribe.push(onSnapshot(
     query(collection(db, 'jobs', jobId, 'moments'), orderBy('startSec', 'asc'), limit(500)),
@@ -458,6 +467,91 @@ function sinceLabel(value) {
 }
 
 
+// The run's stages and the share of the bar each one owns, mirroring
+// STAGE_SPANS in the agent's pipeline. They are not equal slices: analysis is
+// an hour of Gemini calls and everything else is minutes, so equal thirds would
+// leave the bar parked mid-way for most of a run.
+const STAGES = [
+  { key: 'ingest', label: 'Ingest', start: 0, end: 5 },
+  { key: 'transcode', label: 'Playback', start: 5, end: 20 },
+  { key: 'analysis', label: 'Analysis', start: 20, end: 80 },
+  { key: 'clips', label: 'Clips', start: 80, end: 95 },
+  { key: 'captions', label: 'Captions', start: 95, end: 100 },
+];
+
+/** How far through its own span a stage is, given overall progress. */
+function stageFill(stage, progress) {
+  if (progress >= stage.end) return 100;
+  if (progress <= stage.start) return 0;
+  return ((progress - stage.start) / (stage.end - stage.start)) * 100;
+}
+
+function stageStrip(job) {
+  const progress = Math.max(0, Math.min(100, job.progress || 0));
+  const current = job.stage || '';
+  return `
+    <div class="stage-strip">
+      ${STAGES.map((s) => {
+        const fill = stageFill(s, progress);
+        const active = s.key === current && fill < 100;
+        return `
+          <div class="stage" style="flex-grow:${s.end - s.start}"
+               data-state="${fill >= 100 ? 'done' : active ? 'active' : 'todo'}">
+            <div class="stage-meter"><i style="width:${fill}%"></i></div>
+            <div class="stage-label">${esc(s.label)}</div>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+
+function gameCard() {
+  const g = state.game;
+  if (!g) {
+    return `<div class="panel-light"><div class="job">
+      <div class="job-stage">No game details yet — they are written when the
+      analysis finishes.</div></div></div>`;
+  }
+  // Observed and grounded values are shown as what they are. A competition read
+  // off a caption and one found by a web search are different kinds of claim,
+  // and collapsing them would hide which is which.
+  const rows = [
+    ['Sport', g.sport],
+    ['Home team', g.homeTeam || g.groundedHomeTeam],
+    ['Away team', g.awayTeam || g.groundedAwayTeam],
+    ['Competition', g.competition || g.groundedCompetition],
+    ['Venue', g.venue || g.groundedVenue],
+    ['Final score', g.finalScore],
+    ['Outcome', g.eventOutcome],
+    ['Sentiment', g.sentiment],
+    ['Mood', g.mood],
+  ].filter(([, value]) => value);
+
+  return `
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-head-title">Game details</div>
+        <div class="panel-head-meta">${g.momentCount || 0} moments</div>
+      </div>
+      <div class="game-grid">
+        ${rows.map(([label, value]) => `
+          <div class="game-row">
+            <div class="field-label">${esc(label)}</div>
+            <div class="game-value">${esc(value)}</div>
+          </div>`).join('')}
+      </div>
+      ${g.summary ? `<div class="game-summary">${esc(g.summary)}</div>` : ''}
+      ${g.grounded && g.groundingSources?.length ? `
+        <div class="game-sources">
+          <div class="field-label">Fixture identified by web search</div>
+          ${g.groundingSources.slice(0, 3).map((s) => `
+            <a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer"
+               class="link-btn">${esc(s.title || s.uri)}</a>`).join('')}
+        </div>` : ''}
+    </div>`;
+}
+
+
 function jobsCard() {
   if (!state.jobs.length) {
     return `<div class="panel-light"><div class="job">
@@ -478,6 +572,7 @@ function jobsCard() {
         <div class="job-stage">${esc(j.stage || '')}${
           j.media?.segmentCount ? ` · ${j.media.segmentCount} segments` : ''}</div>
         ${running && !stalled ? `
+          ${stageStrip(j)}
           <div class="meter-row">
             <div class="meter meter-neutral"><i style="width:${j.progress || 0}%"></i></div>
             <div class="meter-pct">${Math.round(j.progress || 0)}%</div>
@@ -494,6 +589,13 @@ function jobsCard() {
             <p>${esc(j.error)}</p>
             <button class="btn-outline" data-retry="${esc(j.id)}">Retry</button>
           </div>` : ''}
+        <div class="job-actions">
+          ${running && !stalled
+            ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">Cancel</button>`
+            : `<button class="link-btn" data-reanalyse="${esc(j.id)}">Analyse again</button>`}
+          <button class="link-btn" data-delete-job="${esc(j.id)}"
+                  data-title="${esc(j.title || j.id)}">Delete</button>
+        </div>
       </div>`;
   }).join('')}</div>`;
 }
@@ -566,6 +668,7 @@ function render() {
       ${m.showIngest ? ingestCard() : ''}
       ${m.showReel ? reelCard() : ''}
       ${m.showJobs ? jobsCard() : ''}
+      ${m.showGame ? gameCard() : ''}
       ${m.showPublish ? publishCard() : ''}
       ${m.showActivity ? activityCard() : ''}
       ${actionsRow(m)}
@@ -792,7 +895,14 @@ function attachCards(index, question) {
   const msg = state.msgs[index];
   if (!msg) return;
 
-  if (/ingest|upload|new game|new match|import|analy[sz]e a/.test(q)) {
+  if (/game detail|about (the|this) (game|match)|who played|final score|which game|find (the|a) (game|match)|what was the (game|match)/.test(q)) {
+    // A question about the match itself, not the plays inside it. The two are
+    // described in almost the same words, so the order of these branches is
+    // what decides which card appears.
+    msg.showGame = true;
+    msg.showActions = true;
+    msg.actions = ['Show me the best moments', "What's still processing?"];
+  } else if (/ingest|upload|new game|new match|import|analy[sz]e a/.test(q)) {
     msg.showIngest = true;
   } else if (/process|job|status|fail|error|still running/.test(q)) {
     msg.showJobs = true;
@@ -928,7 +1038,8 @@ async function startUpload() {
 document.addEventListener('click', (event) => {
   const t = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
-    + '[data-sport],[data-close-player],[data-prepare-playback]');
+    + '[data-sport],[data-close-player],[data-prepare-playback],'
+    + '[data-reanalyse],[data-cancel-job],[data-delete-job]');
   if (!t) return;
 
   if (t.dataset.ask) {
@@ -962,6 +1073,27 @@ document.addEventListener('click', (event) => {
   if (t.dataset.platform) {
     state.platforms[t.dataset.platform] = !state.platforms[t.dataset.platform];
     render();
+    return;
+  }
+  if (t.dataset.reanalyse) {
+    selectJob(t.dataset.reanalyse);
+    ask('Clear this job\'s previous results and analyse the match again.');
+    return;
+  }
+  if (t.dataset.cancelJob) {
+    selectJob(t.dataset.cancelJob);
+    ask('Cancel the analysis running on this job.');
+    return;
+  }
+  if (t.dataset.deleteJob) {
+    // Deleting takes the uploaded match with it, so the confirmation names what
+    // goes rather than asking a generic "are you sure?".
+    const name = t.dataset.title || 'this job';
+    if (!window.confirm(
+      `Delete "${name}"?\n\nThis removes the uploaded video, every detected `
+      + 'moment, the clips and the game details. It cannot be undone.')) return;
+    selectJob(t.dataset.deleteJob);
+    ask('Delete this job, its video and everything found in it.');
     return;
   }
   if (t.dataset.preparePlayback) {

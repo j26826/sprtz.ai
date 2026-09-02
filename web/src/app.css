@@ -356,6 +356,27 @@ input, button, textarea { font-family: var(--font-body); }
 
 .meter-row { display: flex; align-items: center; gap: 9px; margin-top: 8px; }
 
+/* Stage strip: one segment per pipeline stage, widths in proportion to how long
+   each stage actually takes, so the bar moves at a roughly constant rate
+   through a run rather than sitting still through the hour of analysis. */
+.stage-strip { display: flex; gap: 4px; margin-top: 9px; }
+.stage { flex-grow: 1; flex-basis: 0; }
+.stage[data-state="todo"] { opacity: 0.45; }
+.stage-meter { height: 4px; background: var(--color-neutral-300); }
+.stage-meter i { display: block; height: 4px; background: var(--color-neutral-800); }
+.stage[data-state="active"] .stage-meter i { background: var(--color-accent); }
+
+.stage-label {
+  margin-top: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
+.stage[data-state="active"] .stage-label { color: var(--color-accent); }
+
 .meter-pct {
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
@@ -587,3 +608,23 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* Slot the live player is re-parented into after each render. */
 .player-slot:empty { display: none; }
+
+/* Game details */
+.game-grid { display: grid; grid-template-columns: repeat(2, 1fr); }
+.game-row {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--color-neutral-300);
+  border-right: 1px solid var(--color-neutral-300);
+}
+.game-value { font-size: 13px; font-weight: 700; margin-top: 3px; }
+.game-summary {
+  padding: 11px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--color-neutral-300);
+}
+.game-sources { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+
+@media (max-width: 560px) {
+  .game-grid { grid-template-columns: 1fr; }
+}

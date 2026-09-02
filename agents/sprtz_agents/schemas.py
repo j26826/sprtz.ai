@@ -219,6 +219,20 @@ class SegmentAnalysis(BaseModel):
     scoreboard_readable: bool = Field(
         default=False, description="Whether an on-screen score bug was legible in this segment."
     )
+    competition: str = Field(
+        default="",
+        description=(
+            "Competition or league, only if a caption, graphic or the commentary "
+            "actually names it. Empty otherwise — never infer it from the teams."
+        ),
+    )
+    venue: str = Field(
+        default="",
+        description=(
+            "Arena or ground, only if named on screen or by the commentary. Empty "
+            "otherwise — never infer it from the home team."
+        ),
+    )
 
 
 class Moment(BaseModel):
@@ -282,6 +296,90 @@ class Moment(BaseModel):
             "actionTeam": self.action_team,
             "description": self.description,
             "confidenceScore": round(self.confidence * 100),
+        }
+
+
+class GameDetails(BaseModel):
+    """The match as a whole, for the game-level index.
+
+    Two kinds of field live here and they are not equally trustworthy. The
+    factual ones — teams, score, competition, venue — are only ever copied from
+    something on screen or said aloud, and stay empty when nothing said it. The
+    interpretive ones — sentiment, mood, outcome — are judgements over what the
+    analysis observed, and are allowed to be inferred because inference is what
+    they are.
+    """
+
+    job_id: str
+    sport: str
+    home_team: str = Field(default="", description="As printed on the score bug.")
+    away_team: str = Field(default="", description="As printed on the score bug.")
+    competition: str = Field(default="", description="League or competition, if named on screen.")
+    venue: str = Field(default="", description="Arena or ground, if named on screen.")
+    final_score: str = Field(
+        default="",
+        description=(
+            "Last legible scoreline, as 'H-A'. Empty when no score bug was ever "
+            "readable — not '0-0', which is a real result."
+        ),
+    )
+    event_outcome: str = Field(
+        default="",
+        description=(
+            "Who won, phrased as '<team> win' or 'Draw'. Empty when the final "
+            "score was never legible, because the winner is then unknown."
+        ),
+    )
+    sentiment: str = Field(
+        default="Neutral",
+        description="Overall tone of the match: Positive, Neutral or Negative.",
+    )
+    mood: str = Field(
+        default="",
+        description="One word for how the match felt: Intense, End-to-end, Cagey, One-sided.",
+    )
+    summary: str = Field(
+        default="", description="Two or three sentences on how the match went."
+    )
+    moment_count: int = 0
+    highlight_count: int = 0
+
+    # Grounding sits beside the observations rather than merging into them, so
+    # it is always possible to tell what a camera showed from what a search
+    # suggested. Merging the two silently is how a record ends up asserting a
+    # fixture nobody can check.
+    grounded: bool = False
+    grounded_competition: str = ""
+    grounded_venue: str = ""
+    grounded_home_team: str = ""
+    grounded_away_team: str = ""
+    match_date: str = ""
+    grounding_sources: list[dict] = Field(default_factory=list)
+
+    def as_game_record(self) -> dict:
+        """The shape returned to callers asking about the game rather than its moments."""
+        return {
+            "type": "GameDetails",
+            "jobId": self.job_id,
+            "sport": self.sport,
+            "homeTeam": self.home_team,
+            "awayTeam": self.away_team,
+            "competition": self.competition,
+            "venue": self.venue,
+            "finalScore": self.final_score,
+            "eventOutcome": self.event_outcome,
+            "sentiment": self.sentiment,
+            "mood": self.mood,
+            "summary": self.summary,
+            "momentCount": self.moment_count,
+            # Empty unless a search actually identified the fixture.
+            "grounded": self.grounded,
+            "groundedCompetition": self.grounded_competition,
+            "groundedVenue": self.grounded_venue,
+            "groundedHomeTeam": self.grounded_home_team,
+            "groundedAwayTeam": self.grounded_away_team,
+            "matchDate": self.match_date,
+            "groundingSources": self.grounding_sources,
         }
 
 

@@ -153,6 +153,210 @@ def format_timecode(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def delete_job(job_id: str) -> dict[str, Any]:
+    """Remove a job and everything hanging off it.
+
+    Firestore does not cascade: deleting a document leaves its subcollections
+    addressable and billable for ever, so the moments, clips and events have to
+    go explicitly. The game record lives in its own top-level collection and is
+    not a subcollection at all, which is exactly the sort of thing a cascade you
+    imagined into existence would miss.
+
+    The source video is not deleted here — that is the media server's bucket and
+    its job, and doing it from two places is how you end up doing it neither.
+    """
+    removed = {"moments": 0, "clips": 0, "events": 0, "game": 0}
+    for name in ("moments", "clips", "events"):
+        removed[name] = _delete_collection(job_ref(job_id).collection(name))
+
+    game = game_ref(job_id).get()
+    if game.exists:
+        game_ref(job_id).delete()
+        removed["game"] = 1
+
+    job_ref(job_id).delete()
+    return {"job_id": job_id, "deleted": True, **removed}
+
+
+def _delete_collection(collection, batch_size: int = 300) -> int:
+    """Delete every document in a collection, a page at a time.
+
+    Paged because a match yields hundreds of moments and a single batch has a
+    limit; unbounded, this is the call that fails on exactly the biggest job.
+    """
+    total = 0
+    while True:
+        docs = list(collection.limit(batch_size).stream())
+        if not docs:
+            return total
+        batch = db().batch()
+        for doc in docs:
+            batch.delete(doc.reference)
+        batch.commit()
+        total += len(docs)
+
+
+def clear_analysis(job_id: str) -> dict[str, Any]:
+    """Drop a job's findings so it can be analysed again from scratch.
+
+    Re-running without this leaves the previous run's moments in place and the
+    new ones land beside them: the same play twice, with different ids, and a
+    moment count that grows every time anyone retries.
+    """
+    removed = {
+        "moments": _delete_collection(job_ref(job_id).collection("moments")),
+        "clips": _delete_collection(job_ref(job_id).collection("clips")),
+    }
+    if game_ref(job_id).get().exists:
+        game_ref(job_id).delete()
+        removed["game"] = 1
+
+    job_ref(job_id).update({
+        "counts": {"moments": 0, "clips": 0},
+        "error": None,
+        "progress": 0,
+        "status": "uploaded",
+        "stage": "ingest",
+        "updatedAt": now(),
+    })
+    return {"job_id": job_id, "cleared": True, **removed}
+
+
+def request_cancel(job_id: str) -> dict[str, Any]:
+    """Ask a running job to stop.
+
+    A flag rather than a kill: the run is a sequence of calls on Agent Runtime
+    with no handle to interrupt, so the stages check this between steps and stop
+    at the next boundary. That means cancelling a segment analysis takes effect
+    when that segment finishes, not instantly.
+    """
+    job_ref(job_id).update({
+        "cancelRequested": True,
+        "status": "cancelling",
+        "updatedAt": now(),
+    })
+    return {"job_id": job_id, "cancelling": True}
+
+
+def cancel_requested(job_id: str) -> bool:
+    snapshot = job_ref(job_id).get()
+    return bool((snapshot.to_dict() or {}).get("cancelRequested")) if snapshot.exists else False
+
+
+# --- Games --------------------------------------------------------------------
+#
+# A game record is indexed separately from its moments, in its own top-level
+# collection with its own vector index. That separation is the point: "find the
+# Sweden Denmark match" and "find the double save" are different questions over
+# different units, and one index holding both would return moments to someone
+# asking for a game and vice versa, because a match summary and the moments
+# inside it share most of their vocabulary.
+
+
+def game_ref(job_id: str):
+    return db().collection("games").document(job_id)
+
+
+def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict[str, Any]:
+    """Write the match-level record with its own embedding."""
+    from google.cloud.firestore_v1.vector import Vector
+
+    owner_uid = get_job(job_id).get("ownerUid", "")
+    text = embed_text.strip() or " ".join(
+        str(game.get(k, "")) for k in ("sport", "home_team", "away_team", "summary")
+    )
+    vector = embed([text], task_type="RETRIEVAL_DOCUMENT")[0]
+
+    payload = {
+        "jobId": job_id,
+        "ownerUid": owner_uid,
+        "sport": game.get("sport", ""),
+        "homeTeam": game.get("home_team", ""),
+        "awayTeam": game.get("away_team", ""),
+        "competition": game.get("competition", ""),
+        "venue": game.get("venue", ""),
+        "finalScore": game.get("final_score", ""),
+        "eventOutcome": game.get("event_outcome", ""),
+        "sentiment": game.get("sentiment", ""),
+        "mood": game.get("mood", ""),
+        "summary": game.get("summary", ""),
+        "momentCount": game.get("moment_count", 0),
+        "highlightCount": game.get("highlight_count", 0),
+        # Grounded values are kept apart from observed ones so a reader can
+        # always tell a caption from a search result.
+        "grounded": game.get("grounded", False),
+        "groundedCompetition": game.get("grounded_competition", ""),
+        "groundedVenue": game.get("grounded_venue", ""),
+        "groundedHomeTeam": game.get("grounded_home_team", ""),
+        "groundedAwayTeam": game.get("grounded_away_team", ""),
+        "matchDate": game.get("match_date", ""),
+        "groundingSources": game.get("grounding_sources", []),
+        "embedding": Vector(vector),
+        "updatedAt": now(),
+    }
+    game_ref(job_id).set(payload)
+    return {"job_id": job_id, "indexed": True}
+
+
+def _game_out(data: dict[str, Any]) -> dict[str, Any]:
+    """Firestore document -> the GameDetails shape, without the 768-float vector."""
+    return {
+        "type": "GameDetails",
+        "jobId": data.get("jobId", ""),
+        "sport": data.get("sport", ""),
+        "homeTeam": data.get("homeTeam", ""),
+        "awayTeam": data.get("awayTeam", ""),
+        "competition": data.get("competition", ""),
+        "venue": data.get("venue", ""),
+        "finalScore": data.get("finalScore", ""),
+        "eventOutcome": data.get("eventOutcome", ""),
+        "sentiment": data.get("sentiment", ""),
+        "mood": data.get("mood", ""),
+        "summary": data.get("summary", ""),
+        "momentCount": data.get("momentCount", 0),
+        "grounded": data.get("grounded", False),
+        "groundedCompetition": data.get("groundedCompetition", ""),
+        "groundedVenue": data.get("groundedVenue", ""),
+        "groundedHomeTeam": data.get("groundedHomeTeam", ""),
+        "groundedAwayTeam": data.get("groundedAwayTeam", ""),
+        "matchDate": data.get("matchDate", ""),
+        "groundingSources": data.get("groundingSources", []),
+    }
+
+
+def get_game(job_id: str) -> dict[str, Any]:
+    snapshot = game_ref(job_id).get()
+    if not snapshot.exists:
+        raise KeyError(f"No game record for job {job_id!r}.")
+    return _game_out(snapshot.to_dict())
+
+
+def knn_search_games(query: str, owner_uid: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Find whole matches by meaning, scoped to one owner.
+
+    The owner filter is not optional here: unlike moments, which are reached
+    through a job the caller already owns, this searches across every game in
+    the collection.
+    """
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+    from google.cloud.firestore_v1.vector import Vector
+
+    vector = embed([query], task_type="RETRIEVAL_QUERY")[0]
+    results = (
+        db().collection("games")
+        .where(filter=FieldFilter("ownerUid", "==", owner_uid))
+        .find_nearest(
+            vector_field="embedding",
+            query_vector=Vector(vector),
+            distance_measure=DistanceMeasure.COSINE,
+            limit=limit,
+        )
+        .stream()
+    )
+    return [_game_out(doc.to_dict()) for doc in results]
+
+
 # --- Jobs ---------------------------------------------------------------------
 
 
@@ -270,7 +474,16 @@ def record_teams(job_id: str, home: str, away: str) -> dict[str, Any]:
 
 def update_job_status(job_id: str, status: str, stage: str | None = None,
                       error: str | None = None, progress: int | None = None) -> dict[str, Any]:
-    patch: dict[str, Any] = {"status": status, "updatedAt": now()}
+    """Patch a job's status, stage, error or progress.
+
+    An empty status leaves the status alone. Progress updates arrive far more
+    often than status changes — once per analysed segment — and they have no
+    opinion about the status, so writing "" over it would blank the field the
+    whole UI reads.
+    """
+    patch: dict[str, Any] = {"updatedAt": now()}
+    if status:
+        patch["status"] = status
     if stage is not None:
         patch["stage"] = stage
     if error is not None:

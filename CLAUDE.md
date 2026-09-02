@@ -130,6 +130,76 @@ prompt — they describe the response shape, which is identical for every segmen
 so they cache and cost the short prompt nothing. The segment prompt had 305
 characters of headroom against `test_segment_prompt_stays_short`.
 
+### Game details, and grounding
+
+Each job also gets a **GameDetails** record: sport, home and away team,
+competition, venue, final score, event outcome, sentiment, mood and a summary.
+It lives in its own top-level `games` collection with its own vector index.
+
+The separation is the point. "Find the Sweden Denmark match" and "find the
+double save" are different questions over different units, and one index holding
+both answers each with the other — a match summary and the moments inside it
+share most of their vocabulary. `find_games`/`knn_search_games` answer the first,
+`search_moments`/`knn_search_moments` the second, and the root agent is told
+which is which because it is the easiest thing here to get wrong.
+
+**Facts are assembled in code; only judgements are generated.** Teams, final
+score, competition and venue are settled from what the segments observed —
+consensus for the constant ones, the latest legible reading for the score. Only
+sentiment, mood and the summary come from a model, over a digest of
+observations. A model asked for "the game details" in one call returns a
+coherent-sounding record whose teams never played each other, in a competition
+that does not include them, at a venue in the wrong sport.
+
+The final score is the **last legible scoreline**, never a count of detected
+goals: a tally of what the analysis happened to find is not the scoreboard. No
+legible score means no `final_score` and no `event_outcome` — the winner is
+genuinely unknown, and `0-0` is a real result rather than a way of saying
+"unreadable".
+
+**Google Search grounding runs once per match, not once per moment.** It takes
+what was read off the screen and resolves the fixture: full team names, the
+competition, the venue, the date, with sources. Grounded values are stored in
+their own fields beside the observed ones and never overwrite them, so a caption
+and a search result stay distinguishable — merging them would reintroduce the
+invented-fixture failure in a form nobody could audit. Grounding is requested as
+prose-plus-citations and parsed, rather than with a response schema, because
+asking for a search tool and a strict schema in one call is fragile across model
+versions.
+
+### Progress
+
+`progress` existed on the job, the UI read it, and **nothing ever wrote it** —
+which is why the bar never moved. Stages now report through `_progress`, and
+`STAGE_SPANS` gives each stage a share of the bar weighted by how long it
+actually takes: analysis is 20-80 because it is an hour of Gemini calls against
+minutes for everything else, and equal slices would park the bar mid-way for
+most of a run. The web `STAGES` table mirrors it; change one and change both.
+
+Segment completion is what moves the bar during analysis, counted rather than
+indexed because segments finish out of order.
+
+An empty `status` passed to `update_job_status` leaves the status alone.
+Progress updates arrive once per segment and have no opinion about status, so
+without that they would blank the field the whole UI reads.
+
+### Cancelling and deleting
+
+**Cancel is a flag, not a kill.** The run is a sequence of calls on Agent Runtime
+with no handle to interrupt, so stages check `cancel_requested` between steps and
+stop at the next boundary. Moments already found are saved rather than discarded
+— cancelling should not also destroy the hour that was already paid for.
+
+**Delete removes media first, then Firestore.** A failure after the media is gone
+leaves a job pointing at a missing video, which is recoverable; the other order
+leaves orphaned gigabytes nothing refers to. Firestore does not cascade, so
+moments, clips and events are deleted explicitly, and the `games` record is a
+separate top-level document that an imagined cascade would miss entirely.
+
+**Re-analysing clears first.** Without `clear_analysis` the previous run's
+moments stay put and the new ones land beside them: the same play twice, with a
+count that grows on every retry.
+
 ### Search
 
 Retrieval and ranking answer different questions. `knn_search_moments`
