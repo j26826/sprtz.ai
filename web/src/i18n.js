@@ -1,0 +1,553 @@
+/**
+ * Translations for the editor.
+ *
+ * `en-GB` is the base rather than `en-US` because the product's own voice is
+ * British — the agent says "analyse", the moment catalogue says "colour" — so
+ * en-US is the variant that differs, not the other way round. Keeping that
+ * direction means the American spellings live in one small override instead of
+ * every other locale being diffed against a copy nobody edits.
+ *
+ * A missing key falls back to `en-GB` rather than rendering the key itself. A
+ * half-translated locale should read as slightly English, not as
+ * `header.signOut` in the middle of a sentence.
+ */
+
+const BASE = 'en-GB';
+
+const STRINGS = {
+  'en-GB': {
+    'lang.name': 'English (UK)',
+
+    'header.newSession': 'New session',
+    'header.signOut': 'Sign out',
+    'header.noMatch': 'No match loaded',
+    'header.uploadToBegin': 'Upload a recording to begin',
+
+    'signin.title': 'Sportscut',
+    'signin.blurb': 'Sign in to analyse a match and cut it into short-form clips.',
+    'signin.email': 'Email',
+    'signin.password': 'Password',
+    'signin.submit': 'Sign in',
+    'signin.or': 'or',
+    'signin.google': 'Continue with Google',
+
+    'auth.badCredentials': 'That email and password do not match an account.',
+    'auth.noAccount': 'No account with that email. Ask an administrator for access.',
+    'auth.unauthorizedDomain':
+      'This hostname is not in the Identity Platform authorised domains list.',
+    'auth.notEnabled': 'That sign-in method is not enabled on this project.',
+    'auth.failed': 'Sign-in failed.',
+
+    'greeting':
+      'Upload a match and I will watch all of it, mark every moment that clears '
+      + 'confidence, and cut what you ask for.\n\nTell me what you want and I will cut it.',
+    'action.ingest': 'Ingest a new game',
+    'action.processing': "What's still processing?",
+    'action.bestMoments': 'Show me the best moments',
+
+    'ingest.chooseFile': 'Choose file',
+    'ingest.noFile': 'No file chosen',
+    'ingest.dropHere': 'Drop a file here, or choose one',
+    'ingest.sport': 'Sport',
+    'ingest.start': 'Start analysis',
+    'ingest.uploading': 'Uploading…',
+    'ingest.analysing': 'Analysing…',
+    'ingest.useLastUpload': "Use last night's upload",
+    'ingest.strandedNote':
+      'reached storage but was never analysed. Pick it up instead of uploading again.',
+
+    'jobs.none': 'No jobs yet.',
+    'jobs.stalled': 'stalled',
+    'jobs.noProgress': 'No progress for',
+    'jobs.deadRun':
+      'The run that owned this job is gone — a deploy or a restart ends one '
+      + 'mid-flight, and nothing picks it up again. Retrying starts it over.',
+    'jobs.retry': 'Retry',
+    'jobs.analyseAgain': 'Analyse again',
+    'jobs.cancel': 'Cancel',
+    'jobs.delete': 'Delete',
+    'jobs.deleteConfirm':
+      'This removes the uploaded video, every detected moment, the clips and the '
+      + 'game details. It cannot be undone.',
+
+    'stage.ingest': 'Ingest',
+    'stage.transcode': 'Playback',
+    'stage.analysis': 'Analysis',
+    'stage.clips': 'Clips',
+    'stage.captions': 'Captions',
+
+    'game.title': 'Game details',
+    'game.none': 'No game details yet — they are written when the analysis finishes.',
+    'game.moments': 'moments',
+    'game.sport': 'Sport',
+    'game.homeTeam': 'Home team',
+    'game.awayTeam': 'Away team',
+    'game.competition': 'Competition',
+    'game.venue': 'Venue',
+    'game.finalScore': 'Final score',
+    'game.outcome': 'Outcome',
+    'game.sentiment': 'Sentiment',
+    'game.mood': 'Mood',
+    'game.groundedBy': 'Fixture identified by web search',
+
+    'reel.title': 'Working reel',
+    'reel.generate': 'Generate video',
+    'reel.reframe': 'Reframe 9:16',
+    'reel.publish': 'Prepare publish',
+    'reel.play': 'Play',
+
+    'player.close': 'Close',
+    'player.notPackaged': 'This match has not been packaged for playback yet.',
+    'player.preparePlayback': 'Prepare playback',
+    'player.notReady': 'Playback is not ready yet',
+
+    'composer.send': 'Send',
+    'composer.thinking': 'Scanning the game…',
+    'agent.label': 'Agent',
+    'publish.note': 'Sportscut packages clips for download — it does not post on your behalf.',
+  },
+
+  'en-US': {
+    'lang.name': 'English (US)',
+    // Only what actually differs. Everything else falls through to en-GB.
+    'signin.blurb': 'Sign in to analyze a match and cut it into short-form clips.',
+    'greeting':
+      'Upload a match and I will watch all of it, mark every moment that clears '
+      + 'confidence, and cut what you ask for.\n\nTell me what you want and I will cut it.',
+    'ingest.start': 'Start analysis',
+    'ingest.analysing': 'Analyzing…',
+    'ingest.strandedNote':
+      'reached storage but was never analyzed. Pick it up instead of uploading again.',
+    'jobs.analyseAgain': 'Analyze again',
+    'composer.thinking': 'Scanning the game…',
+  },
+
+  de: {
+    'lang.name': 'Deutsch',
+
+    'header.newSession': 'Neue Sitzung',
+    'header.signOut': 'Abmelden',
+    'header.noMatch': 'Kein Spiel geladen',
+    'header.uploadToBegin': 'Aufnahme hochladen, um zu beginnen',
+
+    'signin.title': 'Sportscut',
+    'signin.blurb': 'Melden Sie sich an, um ein Spiel zu analysieren und in Kurzclips zu schneiden.',
+    'signin.email': 'E-Mail',
+    'signin.password': 'Passwort',
+    'signin.submit': 'Anmelden',
+    'signin.or': 'oder',
+    'signin.google': 'Weiter mit Google',
+
+    'auth.badCredentials': 'E-Mail und Passwort gehören zu keinem Konto.',
+    'auth.noAccount': 'Kein Konto mit dieser E-Mail. Bitte wenden Sie sich an eine Administratorin oder einen Administrator.',
+    'auth.unauthorizedDomain':
+      'Dieser Hostname steht nicht in der Liste autorisierter Domains in Identity Platform.',
+    'auth.notEnabled': 'Diese Anmeldemethode ist in diesem Projekt nicht aktiviert.',
+    'auth.failed': 'Anmeldung fehlgeschlagen.',
+
+    'greeting':
+      'Laden Sie ein Spiel hoch. Ich sehe es vollständig durch, markiere jede Szene, '
+      + 'die sicher genug ist, und schneide, was Sie brauchen.\n\nSagen Sie mir, was Sie wollen.',
+    'action.ingest': 'Neues Spiel einlesen',
+    'action.processing': 'Was läuft gerade noch?',
+    'action.bestMoments': 'Zeig mir die besten Szenen',
+
+    'ingest.chooseFile': 'Datei wählen',
+    'ingest.noFile': 'Keine Datei gewählt',
+    'ingest.dropHere': 'Datei hierher ziehen oder auswählen',
+    'ingest.sport': 'Sportart',
+    'ingest.start': 'Analyse starten',
+    'ingest.uploading': 'Wird hochgeladen…',
+    'ingest.analysing': 'Wird analysiert…',
+    'ingest.useLastUpload': 'Letzten Upload verwenden',
+    'ingest.strandedNote':
+      'wurde gespeichert, aber nie analysiert. Übernehmen Sie ihn, statt erneut hochzuladen.',
+
+    'jobs.none': 'Noch keine Aufträge.',
+    'jobs.stalled': 'steht still',
+    'jobs.noProgress': 'Kein Fortschritt seit',
+    'jobs.deadRun':
+      'Der Durchlauf für diesen Auftrag existiert nicht mehr — ein Deployment oder '
+      + 'Neustart beendet ihn mittendrin, und niemand nimmt ihn wieder auf. '
+      + 'Ein neuer Versuch startet von vorn.',
+    'jobs.retry': 'Erneut versuchen',
+    'jobs.analyseAgain': 'Erneut analysieren',
+    'jobs.cancel': 'Abbrechen',
+    'jobs.delete': 'Löschen',
+    'jobs.deleteConfirm':
+      'Damit werden das hochgeladene Video, alle erkannten Szenen, die Clips und die '
+      + 'Spieldaten entfernt. Das lässt sich nicht rückgängig machen.',
+
+    'stage.ingest': 'Einlesen',
+    'stage.transcode': 'Wiedergabe',
+    'stage.analysis': 'Analyse',
+    'stage.clips': 'Clips',
+    'stage.captions': 'Texte',
+
+    'game.title': 'Spieldaten',
+    'game.none': 'Noch keine Spieldaten — sie entstehen mit dem Abschluss der Analyse.',
+    'game.moments': 'Szenen',
+    'game.sport': 'Sportart',
+    'game.homeTeam': 'Heimmannschaft',
+    'game.awayTeam': 'Gastmannschaft',
+    'game.competition': 'Wettbewerb',
+    'game.venue': 'Spielstätte',
+    'game.finalScore': 'Endstand',
+    'game.outcome': 'Ergebnis',
+    'game.sentiment': 'Stimmung',
+    'game.mood': 'Charakter',
+    'game.groundedBy': 'Begegnung über Websuche ermittelt',
+
+    'reel.title': 'Aktueller Zusammenschnitt',
+    'reel.generate': 'Video erzeugen',
+    'reel.reframe': 'Auf 9:16 umrahmen',
+    'reel.publish': 'Veröffentlichung vorbereiten',
+    'reel.play': 'Abspielen',
+
+    'player.close': 'Schließen',
+    'player.notPackaged': 'Dieses Spiel wurde noch nicht für die Wiedergabe aufbereitet.',
+    'player.preparePlayback': 'Wiedergabe vorbereiten',
+    'player.notReady': 'Wiedergabe ist noch nicht bereit',
+
+    'composer.send': 'Senden',
+    'composer.thinking': 'Spiel wird gesichtet…',
+    'agent.label': 'Agent',
+    'publish.note':
+      'Sportscut stellt Clips zum Download bereit — es veröffentlicht nichts in Ihrem Namen.',
+  },
+
+  it: {
+    'lang.name': 'Italiano',
+
+    'header.newSession': 'Nuova sessione',
+    'header.signOut': 'Esci',
+    'header.noMatch': 'Nessuna partita caricata',
+    'header.uploadToBegin': 'Carica una registrazione per iniziare',
+
+    'signin.title': 'Sportscut',
+    'signin.blurb': 'Accedi per analizzare una partita e montarla in clip brevi.',
+    'signin.email': 'Email',
+    'signin.password': 'Password',
+    'signin.submit': 'Accedi',
+    'signin.or': 'oppure',
+    'signin.google': 'Continua con Google',
+
+    'auth.badCredentials': 'Email e password non corrispondono a nessun account.',
+    'auth.noAccount': "Nessun account con questa email. Chiedi l'accesso a un amministratore.",
+    'auth.unauthorizedDomain':
+      "Questo host non è nell'elenco dei domini autorizzati di Identity Platform.",
+    'auth.notEnabled': 'Questo metodo di accesso non è abilitato in questo progetto.',
+    'auth.failed': 'Accesso non riuscito.',
+
+    'greeting':
+      'Carica una partita: la guardo tutta, segno ogni azione che supera la soglia '
+      + 'di confidenza e monto quello che mi chiedi.\n\nDimmi cosa ti serve.',
+    'action.ingest': 'Carica una nuova partita',
+    'action.processing': 'Cosa è ancora in lavorazione?',
+    'action.bestMoments': 'Mostrami le azioni migliori',
+
+    'ingest.chooseFile': 'Scegli file',
+    'ingest.noFile': 'Nessun file scelto',
+    'ingest.dropHere': 'Trascina un file qui, oppure scegline uno',
+    'ingest.sport': 'Sport',
+    'ingest.start': 'Avvia analisi',
+    'ingest.uploading': 'Caricamento…',
+    'ingest.analysing': 'Analisi…',
+    'ingest.useLastUpload': "Usa l'ultimo caricamento",
+    'ingest.strandedNote':
+      'è arrivato in archivio ma non è mai stato analizzato. Riprendilo invece di ricaricarlo.',
+
+    'jobs.none': 'Nessun lavoro per ora.',
+    'jobs.stalled': 'fermo',
+    'jobs.noProgress': 'Nessun avanzamento da',
+    'jobs.deadRun':
+      'Il processo che seguiva questo lavoro non esiste più — un rilascio o un riavvio '
+      + 'lo interrompe a metà e nessuno lo riprende. Riprovare lo fa ripartire da capo.',
+    'jobs.retry': 'Riprova',
+    'jobs.analyseAgain': 'Analizza di nuovo',
+    'jobs.cancel': 'Annulla',
+    'jobs.delete': 'Elimina',
+    'jobs.deleteConfirm':
+      'Verranno rimossi il video caricato, tutte le azioni rilevate, le clip e i dati '
+      + 'della partita. Non si può annullare.',
+
+    'stage.ingest': 'Acquisizione',
+    'stage.transcode': 'Riproduzione',
+    'stage.analysis': 'Analisi',
+    'stage.clips': 'Clip',
+    'stage.captions': 'Testi',
+
+    'game.title': 'Dati della partita',
+    'game.none': "Nessun dato ancora — vengono scritti al termine dell'analisi.",
+    'game.moments': 'azioni',
+    'game.sport': 'Sport',
+    'game.homeTeam': 'Squadra di casa',
+    'game.awayTeam': 'Squadra ospite',
+    'game.competition': 'Competizione',
+    'game.venue': 'Impianto',
+    'game.finalScore': 'Punteggio finale',
+    'game.outcome': 'Esito',
+    'game.sentiment': 'Tono',
+    'game.mood': 'Carattere',
+    'game.groundedBy': 'Partita identificata tramite ricerca web',
+
+    'reel.title': 'Montaggio in corso',
+    'reel.generate': 'Genera video',
+    'reel.reframe': 'Inquadra 9:16',
+    'reel.publish': 'Prepara la pubblicazione',
+    'reel.play': 'Riproduci',
+
+    'player.close': 'Chiudi',
+    'player.notPackaged': 'Questa partita non è ancora stata preparata per la riproduzione.',
+    'player.preparePlayback': 'Prepara la riproduzione',
+    'player.notReady': 'La riproduzione non è ancora pronta',
+
+    'composer.send': 'Invia',
+    'composer.thinking': 'Sto guardando la partita…',
+    'agent.label': 'Agente',
+    'publish.note':
+      'Sportscut prepara le clip da scaricare — non pubblica nulla per tuo conto.',
+  },
+
+  fr: {
+    'lang.name': 'Français',
+
+    'header.newSession': 'Nouvelle session',
+    'header.signOut': 'Se déconnecter',
+    'header.noMatch': 'Aucun match chargé',
+    'header.uploadToBegin': 'Importez un enregistrement pour commencer',
+
+    'signin.title': 'Sportscut',
+    'signin.blurb': 'Connectez-vous pour analyser un match et le monter en clips courts.',
+    'signin.email': 'E-mail',
+    'signin.password': 'Mot de passe',
+    'signin.submit': 'Se connecter',
+    'signin.or': 'ou',
+    'signin.google': 'Continuer avec Google',
+
+    'auth.badCredentials': 'Cet e-mail et ce mot de passe ne correspondent à aucun compte.',
+    'auth.noAccount':
+      'Aucun compte avec cet e-mail. Demandez un accès à un administrateur.',
+    'auth.unauthorizedDomain':
+      "Ce nom d'hôte ne figure pas dans les domaines autorisés d'Identity Platform.",
+    'auth.notEnabled': "Cette méthode de connexion n'est pas activée sur ce projet.",
+    'auth.failed': 'Échec de la connexion.',
+
+    'greeting':
+      "Importez un match : je le regarde en entier, je marque chaque action qui "
+      + "dépasse le seuil de confiance, et je monte ce que vous demandez.\n\n"
+      + 'Dites-moi ce qu’il vous faut.',
+    'action.ingest': 'Importer un nouveau match',
+    'action.processing': 'Qu’est-ce qui est encore en cours ?',
+    'action.bestMoments': 'Montrez-moi les meilleures actions',
+
+    'ingest.chooseFile': 'Choisir un fichier',
+    'ingest.noFile': 'Aucun fichier choisi',
+    'ingest.dropHere': 'Déposez un fichier ici, ou choisissez-en un',
+    'ingest.sport': 'Sport',
+    'ingest.start': "Lancer l'analyse",
+    'ingest.uploading': 'Import en cours…',
+    'ingest.analysing': 'Analyse en cours…',
+    'ingest.useLastUpload': 'Utiliser le dernier import',
+    'ingest.strandedNote':
+      "est bien arrivé dans le stockage mais n'a jamais été analysé. Reprenez-le "
+      + 'plutôt que de le réimporter.',
+
+    'jobs.none': 'Aucun traitement pour le moment.',
+    'jobs.stalled': 'à l’arrêt',
+    'jobs.noProgress': 'Aucune progression depuis',
+    'jobs.deadRun':
+      "Le traitement qui suivait ce match n'existe plus — un déploiement ou un "
+      + "redémarrage l'interrompt en cours, et rien ne le reprend. Réessayer le "
+      + 'relance depuis le début.',
+    'jobs.retry': 'Réessayer',
+    'jobs.analyseAgain': 'Analyser à nouveau',
+    'jobs.cancel': 'Annuler',
+    'jobs.delete': 'Supprimer',
+    'jobs.deleteConfirm':
+      'Cela supprime la vidéo importée, toutes les actions détectées, les clips et '
+      + 'les données du match. C’est irréversible.',
+
+    'stage.ingest': 'Import',
+    'stage.transcode': 'Lecture',
+    'stage.analysis': 'Analyse',
+    'stage.clips': 'Clips',
+    'stage.captions': 'Textes',
+
+    'game.title': 'Détails du match',
+    'game.none': "Pas encore de détails — ils sont écrits à la fin de l'analyse.",
+    'game.moments': 'actions',
+    'game.sport': 'Sport',
+    'game.homeTeam': 'Équipe à domicile',
+    'game.awayTeam': 'Équipe visiteuse',
+    'game.competition': 'Compétition',
+    'game.venue': 'Salle',
+    'game.finalScore': 'Score final',
+    'game.outcome': 'Issue',
+    'game.sentiment': 'Tonalité',
+    'game.mood': 'Ambiance',
+    'game.groundedBy': 'Rencontre identifiée par recherche web',
+
+    'reel.title': 'Montage en cours',
+    'reel.generate': 'Générer la vidéo',
+    'reel.reframe': 'Recadrer en 9:16',
+    'reel.publish': 'Préparer la publication',
+    'reel.play': 'Lire',
+
+    'player.close': 'Fermer',
+    'player.notPackaged': "Ce match n'a pas encore été préparé pour la lecture.",
+    'player.preparePlayback': 'Préparer la lecture',
+    'player.notReady': "La lecture n'est pas encore prête",
+
+    'composer.send': 'Envoyer',
+    'composer.thinking': 'Analyse du match…',
+    'agent.label': 'Agent',
+    'publish.note':
+      'Sportscut prépare des clips à télécharger — il ne publie rien à votre place.',
+  },
+
+  es: {
+    'lang.name': 'Español',
+
+    'header.newSession': 'Nueva sesión',
+    'header.signOut': 'Cerrar sesión',
+    'header.noMatch': 'Ningún partido cargado',
+    'header.uploadToBegin': 'Sube una grabación para empezar',
+
+    'signin.title': 'Sportscut',
+    'signin.blurb': 'Inicia sesión para analizar un partido y montarlo en clips cortos.',
+    'signin.email': 'Correo electrónico',
+    'signin.password': 'Contraseña',
+    'signin.submit': 'Iniciar sesión',
+    'signin.or': 'o',
+    'signin.google': 'Continuar con Google',
+
+    'auth.badCredentials': 'Ese correo y contraseña no corresponden a ninguna cuenta.',
+    'auth.noAccount': 'No hay cuenta con ese correo. Pide acceso a un administrador.',
+    'auth.unauthorizedDomain':
+      'Este host no está en la lista de dominios autorizados de Identity Platform.',
+    'auth.notEnabled': 'Ese método de inicio de sesión no está habilitado en este proyecto.',
+    'auth.failed': 'No se pudo iniciar sesión.',
+
+    'greeting':
+      'Sube un partido: lo veo entero, marco cada jugada que supera el umbral de '
+      + 'confianza y monto lo que me pidas.\n\nDime qué necesitas.',
+    'action.ingest': 'Cargar un partido nuevo',
+    'action.processing': '¿Qué sigue en proceso?',
+    'action.bestMoments': 'Muéstrame las mejores jugadas',
+
+    'ingest.chooseFile': 'Elegir archivo',
+    'ingest.noFile': 'Ningún archivo elegido',
+    'ingest.dropHere': 'Arrastra un archivo aquí, o elige uno',
+    'ingest.sport': 'Deporte',
+    'ingest.start': 'Iniciar análisis',
+    'ingest.uploading': 'Subiendo…',
+    'ingest.analysing': 'Analizando…',
+    'ingest.useLastUpload': 'Usar la última subida',
+    'ingest.strandedNote':
+      'llegó al almacenamiento pero nunca se analizó. Retómalo en vez de subirlo otra vez.',
+
+    'jobs.none': 'Todavía no hay trabajos.',
+    'jobs.stalled': 'detenido',
+    'jobs.noProgress': 'Sin avance desde hace',
+    'jobs.deadRun':
+      'El proceso que llevaba este trabajo ya no existe — un despliegue o un reinicio '
+      + 'lo corta a medias y nadie lo retoma. Reintentar lo empieza de nuevo.',
+    'jobs.retry': 'Reintentar',
+    'jobs.analyseAgain': 'Analizar de nuevo',
+    'jobs.cancel': 'Cancelar',
+    'jobs.delete': 'Eliminar',
+    'jobs.deleteConfirm':
+      'Esto elimina el vídeo subido, todas las jugadas detectadas, los clips y los '
+      + 'datos del partido. No se puede deshacer.',
+
+    'stage.ingest': 'Ingesta',
+    'stage.transcode': 'Reproducción',
+    'stage.analysis': 'Análisis',
+    'stage.clips': 'Clips',
+    'stage.captions': 'Textos',
+
+    'game.title': 'Datos del partido',
+    'game.none': 'Aún no hay datos — se escriben al terminar el análisis.',
+    'game.moments': 'jugadas',
+    'game.sport': 'Deporte',
+    'game.homeTeam': 'Equipo local',
+    'game.awayTeam': 'Equipo visitante',
+    'game.competition': 'Competición',
+    'game.venue': 'Recinto',
+    'game.finalScore': 'Resultado final',
+    'game.outcome': 'Desenlace',
+    'game.sentiment': 'Tono',
+    'game.mood': 'Carácter',
+    'game.groundedBy': 'Encuentro identificado mediante búsqueda web',
+
+    'reel.title': 'Montaje en curso',
+    'reel.generate': 'Generar vídeo',
+    'reel.reframe': 'Reencuadrar a 9:16',
+    'reel.publish': 'Preparar publicación',
+    'reel.play': 'Reproducir',
+
+    'player.close': 'Cerrar',
+    'player.notPackaged': 'Este partido todavía no se ha preparado para reproducción.',
+    'player.preparePlayback': 'Preparar reproducción',
+    'player.notReady': 'La reproducción aún no está lista',
+
+    'composer.send': 'Enviar',
+    'composer.thinking': 'Revisando el partido…',
+    'agent.label': 'Agente',
+    'publish.note':
+      'Sportscut prepara clips para descargar — no publica nada en tu nombre.',
+  },
+};
+
+export const LOCALES = Object.keys(STRINGS);
+
+const STORAGE_KEY = 'sportscut.locale';
+
+/**
+ * The locale to start in.
+ *
+ * A stored choice wins, then the browser's languages in the order it lists
+ * them. `en` alone resolves to en-GB because that is the base; a US browser
+ * says `en-US` explicitly and gets it.
+ */
+export function detectLocale() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored && STRINGS[stored]) return stored;
+  } catch { /* private windows throw on access; fall through to the browser */ }
+
+  for (const tag of navigator.languages || [navigator.language || '']) {
+    if (STRINGS[tag]) return tag;
+    const base = String(tag).split('-')[0];
+    const match = LOCALES.find((l) => l === base || l.split('-')[0] === base);
+    if (match) return match;
+  }
+  return BASE;
+}
+
+let current = BASE;
+
+export function setLocale(locale) {
+  current = STRINGS[locale] ? locale : BASE;
+  try {
+    localStorage.setItem(STORAGE_KEY, current);
+  } catch { /* a preference that cannot be stored is still good for this tab */ }
+  document.documentElement.lang = current;
+  return current;
+}
+
+export function getLocale() {
+  return current;
+}
+
+export function localeName(locale) {
+  return STRINGS[locale]?.['lang.name'] || locale;
+}
+
+/** Translate. Falls back to en-GB, then to the key, so nothing renders blank. */
+export function t(key) {
+  const value = STRINGS[current]?.[key];
+  if (value !== undefined) return value;
+  return STRINGS[BASE][key] ?? key;
+}

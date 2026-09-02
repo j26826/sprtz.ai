@@ -269,6 +269,46 @@ Public Suffix List, so no cookie can span two services.
 Reviewing a moment is a seek to its in point with a stop at its out point — that
 is what replaces a timeline.
 
+### Sessions
+
+An Identity Platform ID token lasts an hour and the SDK renews it only when
+something asks, so a tab left open sends a stale one and gets a 401 that reads
+as "logged out". Three things address that, and the second is the one that
+matters: persistence is set explicitly, a timer refreshes at 45 minutes, and
+**`api()` retries once on a 401 with a force-refreshed token**. The retry is
+what turns an expiry into a pause nobody notices; once only, because a second
+401 is a real authentication failure.
+
+Restoring a stored session is asynchronous and `onAuthStateChanged` fires `null`
+first, so the page paints nothing until auth resolves — otherwise every reload
+flashes the sign-in card, which is itself indistinguishable from being logged
+out.
+
+### Languages
+
+Six locales in `web/src/i18n.js`: en-GB, en-US, de, it, fr, es. **en-GB is the
+base**, because the product's own voice is British — the agent says "analyse" —
+so en-US is a small override of what actually differs rather than a full second
+copy nobody edits.
+
+A missing key falls back to en-GB, never to the key itself: a half-translated
+locale should read as slightly English, not print `header.signOut` mid-sentence.
+Static chrome carries `data-i18n`; the chat and its cards call `t()` as they
+render, so switching language re-renders rather than reloads. The greeting is
+rebuilt only when it is the only message on screen — rewriting something the
+editor has already read would be worse than leaving it.
+
+`STAGES` in `app.js` mirrors `STAGE_SPANS` in the agent's pipeline. Change one
+and change both.
+
+### Brand
+
+The wordmark and app icon are real assets under `web/src/assets/`, served from
+the app's own origin. The brand pink in them is **not** the Modernist accent —
+`--color-accent` stays `#ec3013` and the logo carries its own colour. Do not
+reconcile them by editing the tokens without deciding that deliberately: every
+other accent in the app comes from that variable.
+
 ### UI
 
 Chat-first, implementing `SPRTZ AI Chat.dc.html` on the vendored **Modernist**

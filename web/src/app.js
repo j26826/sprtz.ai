@@ -20,11 +20,13 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import {
   getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, getIdToken,
-  signInWithEmailAndPassword,
+  signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
   getFirestore, collection, doc, query, where, orderBy, limit, onSnapshot,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+
+import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
 
 const CONFIG = window.SPRTZ_CONFIG || {};
 // Empty means same-origin, which is how the load balancer serves it: `/` is
@@ -61,13 +63,13 @@ const PLATFORM_SPEC = {
   youtube: { name: 'YouTube Shorts', spec: '9:16 · title from caption' },
 };
 
-const GREETING = {
+// Built per render rather than once, so switching language re-reads it.
+const greeting = () => ({
   who: 'agent',
-  text: 'Upload a match and I will watch all of it, mark every moment that clears '
-      + 'confidence, and cut what you ask for.\n\nTell me what you want and I will cut it.',
+  text: t('greeting'),
   showActions: true,
-  actions: ['Ingest a new game', "What's still processing?", 'Show me the best moments'],
-};
+  actions: [t('action.ingest'), t('action.processing'), t('action.bestMoments')],
+});
 
 /* ─────────────────────────────────────────────────────────── utils ── */
 
@@ -100,15 +102,99 @@ function bytes(n) {
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
+/**
+ * Call the API with a live credential.
+ *
+ * An ID token lasts an hour and the SDK only renews it when something asks, so
+ * a tab left open overnight sends a stale one and gets a 401 that reads as
+ * "logged out". The retry below is the actual fix: on a 401 the token is force
+ * refreshed once and the call repeated, which turns an expiry into a pause
+ * nobody notices. Once only — a second 401 is a real authentication failure and
+ * retrying it forever would hide that.
+ */
 async function api(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (state.user) headers.Authorization = `Bearer ${await getIdToken(state.user)}`;
-  const res = await fetch(`${API}${path}`, { ...options, headers, credentials: 'include' });
+  const send = async (forceRefresh) => {
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    if (state.user) {
+      headers.Authorization = `Bearer ${await getIdToken(state.user, forceRefresh)}`;
+    }
+    return fetch(`${API}${path}`, { ...options, headers, credentials: 'include' });
+  };
+
+  let res = await send(false);
+  if (res.status === 401 && state.user) res = await send(true);
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `${res.status} ${res.statusText}`);
   }
   return res.json();
+}
+
+
+// Renewed well inside the hour an ID token lasts, so a long analysis never
+// crosses an expiry with a stale credential. Firebase caches aggressively, so
+// this is cheap: a refresh that is not needed does not go to the network.
+const TOKEN_REFRESH_MS = 45 * 60 * 1000;
+let refreshTimer = null;
+
+/**
+ * Apply the current locale to everything on the page.
+ *
+ * Static chrome carries `data-i18n`; the chat and its cards are re-rendered,
+ * because they are built from templates that call t() as they run. The greeting
+ * is rebuilt only when it is the only thing on screen — replacing it mid-
+ * conversation would rewrite something the editor has already read.
+ */
+function applyLocale() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  if (state.msgs.length === 1 && state.msgs[0].who === 'agent') {
+    state.msgs = [greeting()];
+  }
+  render();
+}
+
+
+function mountLanguagePicker() {
+  const select = $('lang-select');
+  if (!select) return;
+  select.innerHTML = LOCALES.map(
+    (l) => `<option value="${l}"${l === getLocale() ? ' selected' : ''}>${localeName(l)}</option>`,
+  ).join('');
+  select.addEventListener('change', () => {
+    setLocale(select.value);
+    applyLocale();
+  });
+}
+
+
+async function signOutNow() {
+  try {
+    // Drop the listeners before the credential goes, or Firestore reports a
+    // permission error on the way out that looks like a bug.
+    state.unsubscribe.forEach((off) => off());
+    state.unsubscribe = [];
+    destroyPlayer();
+    state.sessionId = null;
+    await signOut(auth);
+  } catch (err) {
+    console.warn('sign out failed', err);
+  }
+}
+
+
+function keepSessionAlive(user) {
+  clearInterval(refreshTimer);
+  if (!user) return;
+  refreshTimer = setInterval(() => {
+    getIdToken(user, true).catch((err) => {
+      // A failure here is not fatal on its own — api() still force-refreshes on
+      // a 401 — so it is logged rather than shown.
+      console.warn('token refresh failed', err);
+    });
+  }, TOKEN_REFRESH_MS);
 }
 
 /* ──────────────────────────────────────────────────────────── auth ── */
@@ -133,14 +219,12 @@ function signinError(err) {
   const box = $('signin-error');
   const code = err?.code || '';
   const message = {
-    'auth/invalid-credential': 'That email and password do not match an account.',
-    'auth/wrong-password': 'That email and password do not match an account.',
-    'auth/user-not-found': 'No account with that email. Ask an administrator for access.',
-    'auth/unauthorized-domain':
-      'This hostname is not in the Identity Platform authorised domains list.',
-    'auth/operation-not-allowed':
-      'That sign-in method is not enabled on this project.',
-  }[code] || err?.message || 'Sign-in failed.';
+    'auth/invalid-credential': t('auth.badCredentials'),
+    'auth/wrong-password': t('auth.badCredentials'),
+    'auth/user-not-found': t('auth.noAccount'),
+    'auth/unauthorized-domain': t('auth.unauthorizedDomain'),
+    'auth/operation-not-allowed': t('auth.notEnabled'),
+  }[code] || err?.message || t('auth.failed');
   box.textContent = message;
   box.classList.remove('hidden');
 }
@@ -185,13 +269,34 @@ $('google-btn').addEventListener('click', async () => {
   } catch { /* leave it hidden */ }
 })();
 
+// Survive a closed tab. The SDK defaults to local persistence, but saying so
+// makes it a decision rather than a default someone can change underneath us —
+// and a session that silently became in-memory would look exactly like the
+// expiry complaint this is meant to fix.
+setLocale(detectLocale());
+mountLanguagePicker();
+applyLocale();
+
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn('could not set auth persistence', err);
+});
+
 onAuthStateChanged(auth, async (user) => {
   state.user = user;
+  keepSessionAlive(user);
+  // Restoring a stored session is asynchronous and fires null first. Showing
+  // the sign-in card in that gap makes every reload look like a logout.
+  document.body.dataset.authResolved = '1';
   $('signin').classList.toggle('hidden', !!user);
   $('app').classList.toggle('hidden', !user);
-  if (!user) return;
+  if (!user) {
+    state.msgs = [];
+    state.jobs = [];
+    state.jobId = null;
+    return;
+  }
 
-  state.msgs = [GREETING];
+  state.msgs = [greeting()];
   render();
   watchJobs(user.uid);
   try {
@@ -359,17 +464,17 @@ function ingestCard() {
         <div class="dropzone" id="dropzone">
           <div class="dz-thumb"><span class="thumb-stripes"></span></div>
           <div style="flex:1;min-width:0">
-            <div class="dz-name">${esc(u.name || 'No file chosen')}</div>
+            <div class="dz-name">${esc(u.name || t('ingest.noFile'))}</div>
             <div class="dz-meta">${esc(u.name
               ? `${u.size} · ${u.sport} · via Upload`
-              : 'Drop a file here, or choose one')}</div>
+              : t('ingest.dropHere'))}</div>
           </div>
-          <label class="file-label">Choose file
+          <label class="file-label">${esc(t('ingest.chooseFile'))}
             <input type="file" id="file-input" accept="video/*" style="display:none" />
           </label>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center">
-          <div class="field-label" style="margin-right:4px">Sport</div>
+          <div class="field-label" style="margin-right:4px">${esc(t('ingest.sport'))}</div>
           ${state.sports.map((s) => `
             <button class="chip" data-sport="${esc(s)}" aria-pressed="${u.sport === s}"
                     style="text-transform:capitalize">${esc(s)}</button>`).join('')}
@@ -388,19 +493,20 @@ function ingestCard() {
           </div>` : ''}
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
           <button class="btn-solid" id="start-analysis" ${u.file && u.status === 'idle' ? '' : 'disabled'}>
-            ${u.status === 'uploading' ? 'Uploading…' : u.status === 'analyzing' ? 'Analysing…' : 'Start analysis'}
+            ${u.status === 'uploading' ? t('ingest.uploading')
+               : u.status === 'analyzing' ? t('ingest.analysing') : t('ingest.start')}
           </button>
           ${pending ? `
             <button class="btn-outline" data-resume="${esc(pending.job_id)}"
                     ${u.status === 'idle' ? '' : 'disabled'}
                     title="${esc(pending.filename)} — ${bytes(pending.size_bytes)}">
-              Use last night's upload
+              ${esc(t('ingest.useLastUpload'))}
             </button>` : ''}
         </div>
         ${pending ? `
           <div class="dz-meta" style="margin-top:8px">
-            ${esc(pending.filename)} · ${bytes(pending.size_bytes)} reached storage but was
-            never analysed. Pick it up instead of uploading again.
+            ${esc(pending.filename)} · ${bytes(pending.size_bytes)}
+            ${esc(t('ingest.strandedNote'))}
           </div>` : ''}
       </div>
     </div>`;
@@ -413,7 +519,7 @@ function reelCard() {
   return `
     <div class="panel">
       <div class="panel-head">
-        <div class="panel-head-title">Working reel</div>
+        <div class="panel-head-title">${esc(t('reel.title'))}</div>
         <div class="panel-head-meta">${dur(total)} · ${esc(aspect)}</div>
       </div>
       <div class="reel-bars">
@@ -430,12 +536,12 @@ function reelCard() {
             <div class="step-val">${(c.durationSec || 0).toFixed(1)}s</div>
             <button class="step-btn" data-clip-longer="${esc(c.clipId)}">+</button>
           </div>
-          <button class="link-btn" data-clip-play="${esc(c.clipId)}">Play</button>
+          <button class="link-btn" data-clip-play="${esc(c.clipId)}">${esc(t('reel.play'))}</button>
         </div>`).join('')}
       <div class="panel-actions">
-        <button class="btn-solid" data-ask="Generate the video">Generate video</button>
-        <button class="btn-outline" data-ask="Reframe it vertical">Reframe 9:16</button>
-        <button class="btn-outline" data-ask="Prepare it for publishing">Prepare publish</button>
+        <button class="btn-solid" data-ask="Generate the video">${esc(t('reel.generate'))}</button>
+        <button class="btn-outline" data-ask="Reframe it vertical">${esc(t('reel.reframe'))}</button>
+        <button class="btn-outline" data-ask="Prepare it for publishing">${esc(t('reel.publish'))}</button>
       </div>
     </div>`;
 }
@@ -472,11 +578,11 @@ function sinceLabel(value) {
 // an hour of Gemini calls and everything else is minutes, so equal thirds would
 // leave the bar parked mid-way for most of a run.
 const STAGES = [
-  { key: 'ingest', label: 'Ingest', start: 0, end: 5 },
-  { key: 'transcode', label: 'Playback', start: 5, end: 20 },
-  { key: 'analysis', label: 'Analysis', start: 20, end: 80 },
-  { key: 'clips', label: 'Clips', start: 80, end: 95 },
-  { key: 'captions', label: 'Captions', start: 95, end: 100 },
+  { key: 'ingest', start: 0, end: 5 },
+  { key: 'transcode', start: 5, end: 20 },
+  { key: 'analysis', start: 20, end: 80 },
+  { key: 'clips', start: 80, end: 95 },
+  { key: 'captions', start: 95, end: 100 },
 ];
 
 /** How far through its own span a stage is, given overall progress. */
@@ -498,7 +604,7 @@ function stageStrip(job) {
           <div class="stage" style="flex-grow:${s.end - s.start}"
                data-state="${fill >= 100 ? 'done' : active ? 'active' : 'todo'}">
             <div class="stage-meter"><i style="width:${fill}%"></i></div>
-            <div class="stage-label">${esc(s.label)}</div>
+            <div class="stage-label">${esc(t(`stage.${s.key}`))}</div>
           </div>`;
       }).join('')}
     </div>`;
@@ -509,29 +615,28 @@ function gameCard() {
   const g = state.game;
   if (!g) {
     return `<div class="panel-light"><div class="job">
-      <div class="job-stage">No game details yet — they are written when the
-      analysis finishes.</div></div></div>`;
+      <div class="job-stage">${esc(t('game.none'))}</div></div></div>`;
   }
   // Observed and grounded values are shown as what they are. A competition read
   // off a caption and one found by a web search are different kinds of claim,
   // and collapsing them would hide which is which.
   const rows = [
-    ['Sport', g.sport],
-    ['Home team', g.homeTeam || g.groundedHomeTeam],
-    ['Away team', g.awayTeam || g.groundedAwayTeam],
-    ['Competition', g.competition || g.groundedCompetition],
-    ['Venue', g.venue || g.groundedVenue],
-    ['Final score', g.finalScore],
-    ['Outcome', g.eventOutcome],
-    ['Sentiment', g.sentiment],
-    ['Mood', g.mood],
+    [t('game.sport'), g.sport],
+    [t('game.homeTeam'), g.homeTeam || g.groundedHomeTeam],
+    [t('game.awayTeam'), g.awayTeam || g.groundedAwayTeam],
+    [t('game.competition'), g.competition || g.groundedCompetition],
+    [t('game.venue'), g.venue || g.groundedVenue],
+    [t('game.finalScore'), g.finalScore],
+    [t('game.outcome'), g.eventOutcome],
+    [t('game.sentiment'), g.sentiment],
+    [t('game.mood'), g.mood],
   ].filter(([, value]) => value);
 
   return `
     <div class="panel">
       <div class="panel-head">
-        <div class="panel-head-title">Game details</div>
-        <div class="panel-head-meta">${g.momentCount || 0} moments</div>
+        <div class="panel-head-title">${esc(t('game.title'))}</div>
+        <div class="panel-head-meta">${g.momentCount || 0} ${esc(t('game.moments'))}</div>
       </div>
       <div class="game-grid">
         ${rows.map(([label, value]) => `
@@ -543,7 +648,7 @@ function gameCard() {
       ${g.summary ? `<div class="game-summary">${esc(g.summary)}</div>` : ''}
       ${g.grounded && g.groundingSources?.length ? `
         <div class="game-sources">
-          <div class="field-label">Fixture identified by web search</div>
+          <div class="field-label">${esc(t('game.groundedBy'))}</div>
           ${g.groundingSources.slice(0, 3).map((s) => `
             <a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer"
                class="link-btn">${esc(s.title || s.uri)}</a>`).join('')}
@@ -555,7 +660,7 @@ function gameCard() {
 function jobsCard() {
   if (!state.jobs.length) {
     return `<div class="panel-light"><div class="job">
-      <div class="job-stage">No jobs yet.</div></div></div>`;
+      <div class="job-stage">${esc(t('jobs.none'))}</div></div></div>`;
   }
   return `<div class="panel-light">${state.jobs.map((j) => {
     const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
@@ -567,7 +672,7 @@ function jobsCard() {
         <div class="job-top">
           <div class="job-name">${esc(j.title || j.source?.originalName || j.id)}</div>
           <div class="job-status" data-tone="${tone}">${
-            stalled ? 'stalled' : esc(j.status || 'unknown')}</div>
+            stalled ? esc(t('jobs.stalled')) : esc(j.status || 'unknown')}</div>
         </div>
         <div class="job-stage">${esc(j.stage || '')}${
           j.media?.segmentCount ? ` · ${j.media.segmentCount} segments` : ''}</div>
@@ -579,22 +684,21 @@ function jobsCard() {
           </div>` : ''}
         ${stalled ? `
           <div class="job-error">
-            <p>No progress for ${esc(sinceLabel(j.updatedAt))}. The run that owned this
-               job is gone — a deploy or a restart ends one mid-flight, and nothing
-               picks it up again. Retrying starts it over.</p>
-            <button class="btn-outline" data-retry="${esc(j.id)}">Retry</button>
+            <p>${esc(t('jobs.noProgress'))} ${esc(sinceLabel(j.updatedAt))}.
+               ${esc(t('jobs.deadRun'))}</p>
+            <button class="btn-outline" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
           </div>` : ''}
         ${failed && j.error ? `
           <div class="job-error">
             <p>${esc(j.error)}</p>
-            <button class="btn-outline" data-retry="${esc(j.id)}">Retry</button>
+            <button class="btn-outline" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
           </div>` : ''}
         <div class="job-actions">
           ${running && !stalled
-            ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">Cancel</button>`
-            : `<button class="link-btn" data-reanalyse="${esc(j.id)}">Analyse again</button>`}
+            ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
+            : `<button class="link-btn" data-reanalyse="${esc(j.id)}">${esc(t('jobs.analyseAgain'))}</button>`}
           <button class="link-btn" data-delete-job="${esc(j.id)}"
-                  data-title="${esc(j.title || j.id)}">Delete</button>
+                  data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
       </div>`;
   }).join('')}</div>`;
@@ -621,7 +725,7 @@ function publishCard() {
         <textarea class="caption-box" id="caption" rows="3">${
           esc(state.clips[0]?.captions?.tiktok || '')}</textarea>
         <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-          <div class="field-label">Sportscut packages clips for download — it does not post on your behalf.</div>
+          <div class="field-label">${esc(t('publish.note'))}</div>
           <div style="flex:1"></div>
           <button class="btn-solid" data-ask="Finalise the job for publishing">
             ${posted ? '✓ Packaged' : 'Prepare package'}
@@ -675,8 +779,8 @@ function render() {
     </div>`).join('')
     + (state.thinking ? `
       <div class="msg msg-agent">
-        <div class="msg-label">Agent</div>
-        <div class="thinking-text">Scanning the game…</div>
+        <div class="msg-label">${esc(t('agent.label'))}</div>
+        <div class="thinking-text">${esc(t('composer.thinking'))}</div>
       </div>` : '');
 
   $('suggestions').innerHTML = [
@@ -727,7 +831,7 @@ function buildPlayerEl(m) {
     <div class="player-bar">
       <span>${clock(m.startSec)} → ${clock(m.endSec)}</span>
       <span style="flex:1"></span>
-      <button class="link-btn" data-close-player="1">Close</button>
+      <button class="link-btn" data-close-player="1">${esc(t('player.close'))}</button>
     </div>`;
   return el;
 }
@@ -761,11 +865,11 @@ async function mountPlayer() {
     playerEl.insertAdjacentHTML('beforeend', `
       <div class="error-note">
         <p>${notReady
-          ? 'This match has not been packaged for playback yet.'
-          : `Playback is not ready yet: ${esc(err.message)}`}</p>
+          ? esc(t('player.notPackaged'))
+          : `${esc(t('player.notReady'))}: ${esc(err.message)}`}</p>
         ${notReady ? `
           <button class="btn-outline" data-prepare-playback="1">
-            Prepare playback
+            ${esc(t('player.preparePlayback'))}
           </button>` : ''}
       </div>`);
     return;
@@ -1039,7 +1143,7 @@ document.addEventListener('click', (event) => {
   const t = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
-    + '[data-reanalyse],[data-cancel-job],[data-delete-job]');
+    + '[data-reanalyse],[data-cancel-job],[data-delete-job],#sign-out');
   if (!t) return;
 
   if (t.dataset.ask) {
@@ -1075,6 +1179,10 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
+  if (t.id === 'sign-out') {
+    signOutNow();
+    return;
+  }
   if (t.dataset.reanalyse) {
     selectJob(t.dataset.reanalyse);
     ask('Clear this job\'s previous results and analyse the match again.');
@@ -1089,9 +1197,7 @@ document.addEventListener('click', (event) => {
     // Deleting takes the uploaded match with it, so the confirmation names what
     // goes rather than asking a generic "are you sure?".
     const name = t.dataset.title || 'this job';
-    if (!window.confirm(
-      `Delete "${name}"?\n\nThis removes the uploaded video, every detected `
-      + 'moment, the clips and the game details. It cannot be undone.')) return;
+    if (!window.confirm(`${t('jobs.delete')} "${name}"?\n\n${t('jobs.deleteConfirm')}`)) return;
     selectJob(t.dataset.deleteJob);
     ask('Delete this job, its video and everything found in it.');
     return;
@@ -1135,11 +1241,11 @@ $('composer').addEventListener('submit', (event) => {
 });
 
 $('new-session').addEventListener('click', () => {
-  state.msgs = [GREETING];
+  state.msgs = [greeting()];
   state.sessionId = null;
   state.playing = null;
   render();
 });
 
-state.msgs = [GREETING];
+state.msgs = [greeting()];
 render();
