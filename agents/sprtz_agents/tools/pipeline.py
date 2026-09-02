@@ -9,6 +9,7 @@ Firestore, not in a prompt.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from typing import Any
 
@@ -45,6 +46,43 @@ async def _emit(job_id: str, stage: str, message: str, level: str = "info", **da
         logger.warning("could not emit event for job %s: %s", job_id, message, exc_info=True)
 
 
+def stage(name: str):
+    """Mark the job failed if a stage raises, instead of leaving it running.
+
+    A stage that dies takes its progress reporting with it, so the job keeps the
+    status it had and reads as still working for ever — which is what a
+    container going down mid-response looks like from here. Recording the
+    failure is what turns that into something the editor can see and retry.
+    """
+    def decorate(func):
+        @functools.wraps(func)
+        async def run(*args, **kwargs):
+            job_id = kwargs.get("job_id") or (args[0] if args else "")
+            try:
+                return await func(*args, **kwargs)
+            except Exception as exc:
+                detail = f"{type(exc).__name__}: {exc}"
+                logger.exception("stage %s failed for job %s", name, job_id)
+                if job_id:
+                    await _emit(job_id, name, f"Stage failed: {detail}", level="error")
+                    try:
+                        await mcp_client.call_tool(
+                            "catalog", "update_job_status",
+                            {"job_id": job_id, "status": "failed",
+                             "stage": name, "error": detail},
+                        )
+                    except Exception:
+                        # Reporting the failure failed too; the log is all that
+                        # is left, so do not lose the original either.
+                        logger.exception("could not record the failure of job %s", job_id)
+                return {"status": "error", "job_id": job_id, "error": detail}
+
+        return run
+
+    return decorate
+
+
+@stage("ingest")
 async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
     """Probe the uploaded video and work out how it will be segmented.
 
@@ -116,6 +154,7 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
     }
 
 
+@stage("playback")
 async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     """Transcode the uploaded video to HLS and publish it behind the CDN.
 
@@ -183,6 +222,7 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     }
 
 
+@stage("analysis")
 async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> dict:
     """Analyse the whole match and save the key moments it finds.
 
@@ -326,6 +366,7 @@ async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int =
     return saved
 
 
+@stage("clips")
 async def propose_clips(
     job_id: str,
     max_clips: int,
@@ -595,6 +636,7 @@ async def save_clip_copy(
     )
 
 
+@stage("captions")
 async def finalize_job(job_id: str) -> dict:
     """Check every clip is publishable and mark the job ready for export.
 

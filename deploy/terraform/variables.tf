@@ -144,7 +144,12 @@ variable "media_worker_cpu" {
 
 variable "media_worker_memory" {
   type        = string
-  description = "Memory allocation for the ffmpeg-backed MCP server. Keep at or below 1GiB per CPU."
+  # The "1GiB per CPU" rule this used to state was the memory-to-CPU ratio
+  # theory that a plain control deploy disproved; it is not a constraint.
+  # Size this against one ffmpeg run instead, since concurrency is 1: the
+  # process, plus whatever segments are waiting to drain to GCS out of a
+  # filesystem that is really RAM.
+  description = "Memory allocation for the ffmpeg-backed MCP server, sized for one concurrent job."
   default     = "2Gi"
 }
 

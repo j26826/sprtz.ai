@@ -101,8 +101,14 @@ resource "google_cloud_run_v2_service" "mcp_media" {
 
   template {
     service_account = google_service_account.mcp_media.email
-    # ffmpeg work is CPU-bound; one heavy job per instance keeps latency sane.
-    max_instance_request_concurrency = 4
+    # One ffmpeg per instance. This said 4 while the comment said one, and four
+    # concurrent remuxes sharing 2 GiB went over the limit and took the
+    # container down mid-response — observed at 2103 MiB, not inferred. The
+    # writable filesystem here is memory, so every segment ffmpeg writes before
+    # the uploader drains it is RAM, and that cost multiplies by concurrency.
+    # Parallelism comes from max_instance_count instead, where each job gets a
+    # whole container's memory and CPU.
+    max_instance_request_concurrency = 1
     timeout                          = "3600s"
 
     scaling {
