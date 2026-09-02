@@ -256,6 +256,16 @@ steps:
         uv sync --no-dev
         uv export --no-dev --no-hashes --format requirements-txt > requirements.txt
 
+        # These must be present in *this* process, not only in the deployed
+        # engine's env: sprtz_agents.agent binds its tool list at import time,
+        # and deploy.py imports it to package the agent. Without them the MCP
+        # toolsets are silently dropped from the packaged agent and no runtime
+        # variable can put them back.
+        export MCP_CATALOG_URL="$$(tf mcp_catalog_url)"
+        export MCP_MEDIA_URL="$$(tf mcp_media_url)"
+        export GOOGLE_CLOUD_PROJECT="$PROJECT_ID"
+        export GOOGLE_CLOUD_LOCATION="$$VERTEX_REGION"
+
         uv run python deployment/deploy.py \
           --project "$PROJECT_ID" \
           --location "$$VERTEX_REGION" \

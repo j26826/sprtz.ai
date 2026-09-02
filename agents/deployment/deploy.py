@@ -70,12 +70,22 @@ def build_env(pairs: list[str], logs_bucket: str, commit: str) -> dict[str, str]
 
 
 def read_requirements(path: str) -> list[str]:
+    """Read a requirements file, dropping comments and editable installs.
+
+    The comment test must run on the *stripped* line. `uv export` indents its
+    provenance comments — "    # via aiohttp" — so testing the raw line lets
+    them through as requirements, and the Agent Runtime SDK then reports
+    "Failed to parse constraint: # via aiohttp" for each one.
+    """
+    requirements: list[str] = []
     with open(path) as handle:
-        return [
-            line.strip()
-            for line in handle
-            if line.strip() and not line.startswith(("#", "-e"))
-        ]
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith(("#", "-e")):
+                continue
+            # An inline "pkg==1.0  # via x" comment is not a constraint either.
+            requirements.append(line.split("#", 1)[0].strip())
+    return [r for r in requirements if r]
 
 
 def find_existing(agent_engines, display_name: str):

@@ -141,11 +141,28 @@ def _build_tools() -> list:
         pipeline.describe_taxonomy,
     ]
 
-    # The MCP servers are absent in unit tests and in a bare local run; the agent
-    # is still useful without them, so their absence is a warning, not a failure.
-    for toolset in (mcp_client.build_media_toolset(), mcp_client.build_catalog_toolset()):
-        if toolset is not None:
+    # This list is bound at import time, so whatever is missing here is missing
+    # from the packaged agent for good — a runtime environment variable cannot
+    # add it back. Absence is legitimate in unit tests and a bare local run, so
+    # it is not fatal, but it must be loud enough to notice in a deploy log.
+    missing: list[str] = []
+    for name, toolset in (
+        ("media", mcp_client.build_media_toolset()),
+        ("catalog", mcp_client.build_catalog_toolset()),
+    ):
+        if toolset is None:
+            missing.append(name)
+        else:
             tools.append(toolset)
+
+    if missing:
+        logger.warning(
+            "packaging without the %s MCP toolset(s); the agent will not be able "
+            "to call those tools at runtime even once the URLs are set, because "
+            "tools are bound now. Set MCP_CATALOG_URL and MCP_MEDIA_URL before "
+            "importing this module.",
+            " and ".join(missing),
+        )
 
     return tools
 

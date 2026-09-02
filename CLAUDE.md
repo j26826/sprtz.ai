@@ -155,6 +155,13 @@ startup probe failing with no application output, suspect time, not the image.
 > committed into comments before a plain control deploy disproved it. When a
 > platform behaviour looks arbitrary, run the boring control first.
 
+**The agent's tool list is bound at import time.** `sprtz_agents.agent` builds
+`tools=` when the module loads, so whatever is unset *while deploy.py imports it*
+is missing from the packaged agent permanently — setting `MCP_CATALOG_URL` on the
+deployed engine cannot add it back. The deploy step exports those URLs into its
+own process for that reason. Six tools without them, eight with; if a deploy log
+says "packaging without the ... MCP toolset(s)", the agent shipped crippled.
+
 **Sign-in is email/password, because that is what the tenant has enabled.**
 Google sign-in needs a `defaultSupportedIdpConfig`, which needs an OAuth 2.0 web
 client created by hand — the IAP OAuth Admin APIs that used to supply one shut
