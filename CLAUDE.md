@@ -155,6 +155,11 @@ startup probe failing with no application output, suspect time, not the image.
 > committed into comments before a plain control deploy disproved it. When a
 > platform behaviour looks arbitrary, run the boring control first.
 
+**Every hostname the app is served from must be in Identity Platform's
+`authorizedDomains`,** or the browser SDK fails sign-in with
+`auth/unauthorized-domain`. Terraform includes the load balancer host; add any
+new one there rather than only in the console, since an apply rewrites the list.
+
 **Serverless NEG backends reject `timeout_sec`.** A backend service fronting
 Cloud Run cannot set a request deadline; the Cloud Run service's own `timeout`
 is what applies. The API's is 3600s because the agent's SSE stream stays open

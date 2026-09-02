@@ -19,14 +19,18 @@ resource "google_identity_platform_config" "default" {
     }
   }
 
-  authorized_domains = concat(
+  # The load balancer hostname must be here or the browser SDK refuses to sign
+  # in with auth/unauthorized-domain. The Cloud Run URL is kept for direct
+  # access during development, though ingress now blocks it in this deployment.
+  authorized_domains = distinct(concat(
     [
       "localhost",
       "${var.project_id}.firebaseapp.com",
+      local.app_host,
       replace(replace(google_cloud_run_v2_service.web.uri, "https://", ""), "/", ""),
     ],
     var.identity_platform_authorized_domains,
-  )
+  ))
 
   depends_on = [google_project_service.services]
 }
