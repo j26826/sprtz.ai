@@ -1,5 +1,5 @@
 /**
- * SPRTZ AI — chat-first sports video agent.
+ * Sportscut — chat-first sports video agent.
  *
  * Implements `SPRTZ AI Chat.dc.html` on the Modernist design system. The design
  * is a prototype driven by fixture data; this is the same interface driven by
@@ -519,7 +519,7 @@ function publishCard() {
         <textarea class="caption-box" id="caption" rows="3">${
           esc(state.clips[0]?.captions?.tiktok || '')}</textarea>
         <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-          <div class="field-label">Sprtz packages clips for download — it does not post on your behalf.</div>
+          <div class="field-label">Sportscut packages clips for download — it does not post on your behalf.</div>
           <div style="flex:1"></div>
           <button class="btn-solid" data-ask="Finalise the job for publishing">
             ${posted ? '✓ Packaged' : 'Prepare package'}

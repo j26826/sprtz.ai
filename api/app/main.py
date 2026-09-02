@@ -1,4 +1,4 @@
-"""Sprtz AI API — FastAPI behind IAP."""
+"""Sportscut API — FastAPI behind IAP."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ logger = logging.getLogger("sprtz-api")
 settings = get_settings()
 
 app = FastAPI(
-    title="Sprtz AI API",
+    title="Sportscut API",
     version="0.1.0",
-    description="Upload, analysis control and agent conversation for the SPRTZ AI Editor.",
+    description="Upload, analysis control and agent conversation for the Sportscut editor.",
     docs_url="/api/docs" if settings.environment != "prod" else None,
 )
 

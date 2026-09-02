@@ -1,4 +1,4 @@
-# Sprtz AI — build, test, provision and deploy.
+# Sportscut — build, test, provision and deploy.
 #
 # One pipeline, run on push to main. Order matters: tests gate images, images
 # must exist in Artifact Registry before Terraform points Cloud Run at them, and
@@ -303,7 +303,7 @@ steps:
             return (out.get(key) or {}).get("value", "(unset)")
         line = "-" * 62
         print(line)
-        print(" Sprtz AI deployed")
+        print(" Sportscut deployed")
         print(line)
         for label, key in (
             ("Editor", "web_url"),

@@ -1,13 +1,13 @@
-# Sprtz AI — Architecture
+# Sportscut — Architecture
 
-Sprtz AI turns a long-form sports video into a ranked set of short-form clips ready
+Sportscut turns a long-form sports video into a ranked set of short-form clips ready
 for TikTok, Instagram Reels and YouTube Shorts. Everything runs on Google Cloud
 native services and is provisioned by Terraform.
 
 ```
                          ┌──────────────────────────────────────┐
   Browser ──► IAP ──────►│  web (Cloud Run, static SPA)         │
-   │  Identity Platform  │  "SPRTZ AI Editor"                   │
+   │  Identity Platform  │  "Sportscut editor"                  │
    │                     └──────────────────────────────────────┘
    │                                    │ REST (IAP-signed JWT)
    │                                    ▼

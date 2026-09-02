@@ -33,7 +33,7 @@ resource "google_cloudbuild_trigger" "main" {
   project     = var.project_id
   location    = var.region
   name        = "${local.prefix}-main"
-  description = "Build, test and deploy Sprtz AI on push to main."
+  description = "Build, test and deploy Sportscut on push to main."
 
   service_account = google_service_account.cloudbuild.id
   filename        = "deploy/cloudbuild.yaml"

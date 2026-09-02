@@ -62,7 +62,7 @@ else
     --project "$PROJECT_ID" \
     --location "$REGION" \
     --repository-format docker \
-    --description "Sprtz AI container images."
+    --description "Sportscut container images."
   echo "✓ artifact registry created"
 fi
 
