@@ -8,6 +8,7 @@ COPY src/app.js /usr/share/nginx/html/app.js
 COPY src/app.css /usr/share/nginx/html/app.css
 COPY src/i18n.js /usr/share/nginx/html/i18n.js
 COPY src/settings.js /usr/share/nginx/html/settings.js
+COPY src/sessions.js /usr/share/nginx/html/sessions.js
 # Brand wordmark and app icon. Served from the app's own origin so they are
 # covered by the same cache and CSP as everything else.
 COPY src/assets/ /usr/share/nginx/html/assets/

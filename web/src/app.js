@@ -30,6 +30,10 @@ import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i1
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
 } from './settings.js';
+import {
+  createSession, listSessions, loadSessions, reconcile, removeSession,
+  sessionForJob, updateSession,
+} from './sessions.js';
 
 const CONFIG = window.SPRTZ_CONFIG || {};
 // Empty means same-origin, which is how the load balancer serves it: `/` is
@@ -45,6 +49,8 @@ const state = {
   msgs: [],
   jobs: [],
   game: null,          // the match-level record for the selected job
+  sessions: [],
+  sessionKey: null,    // the open session, which may not have a job yet
   jobId: null,
   job: null,
   moments: [],
@@ -325,6 +331,7 @@ $('google-btn').addEventListener('click', async () => {
 // and a session that silently became in-memory would look exactly like the
 // expiry complaint this is meant to fix.
 const initialSettings = loadSettings();
+state.sessions = loadSessions();
 applyTheme(initialSettings.theme);
 setLocale(initialSettings.locale || detectLocale());
 mountSettings();
@@ -383,8 +390,14 @@ function watchJobs(uid) {
           orderBy('createdAt', 'desc'), limit(50)),
     (snap) => {
       state.jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      if (!state.jobId && state.jobs.length) selectJob(state.jobs[0].id);
-      else render();
+      // Jobs are the durable record, so any without a session get one — a match
+      // uploaded elsewhere would otherwise exist and be unreachable here.
+      state.sessions = reconcile(state.jobs);
+      if (!state.sessionKey && state.sessions.length) {
+        openSession(state.sessions[0].id);
+      } else {
+        render();
+      }
     },
     (err) => console.error('jobs listener', err),
   );
@@ -722,29 +735,110 @@ function renderSessions() {
   const list = $('sessions-list');
   if (!list) return;
 
-  if (!state.jobs.length) {
+  if (!state.sessions.length) {
     list.innerHTML = `<div class="sessions-empty">${esc(t('sessions.empty'))}</div>`;
     return;
   }
 
-  list.innerHTML = state.jobs.map((j) => {
-    const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
-    const failed = j.status === 'failed' || j.status === 'rejected';
+  const jobsById = new Map(state.jobs.map((j) => [j.id, j]));
+
+  list.innerHTML = state.sessions.map((session) => {
+    const job = session.jobId ? jobsById.get(session.jobId) : null;
+    const running = job && ['analyzing', 'transcoding', 'uploaded'].includes(job.status);
+    const failed = job && (job.status === 'failed' || job.status === 'rejected');
     const tone = failed ? 'failed' : running ? 'running' : 'idle';
-    const stamp = toDate(j.createdAt);
-    const meta = running && !isStalled(j)
-      ? `${esc(j.stage || j.status)} · ${Math.round(j.progress || 0)}%`
-      : esc(j.status || '');
+
+    // A session with no job yet is a conversation waiting for a match. Saying
+    // so is better than showing it blank, which reads as a broken row.
+    const meta = !job ? esc(t('sessions.noMatch'))
+      : running && !isStalled(job)
+        ? `${esc(job.stage || job.status)} · ${Math.round(job.progress || 0)}%`
+        : esc(job.status || '');
+    const stamp = new Date(session.createdAt || Date.now());
+
     return `
-      <button class="session" data-session="${esc(j.id)}" data-tone="${tone}"
-              aria-current="${j.id === state.jobId}">
-        <div class="session-name">${esc(j.title || j.source?.originalName || j.id)}</div>
-        <div class="session-meta">${meta}${
-          stamp ? ` · ${stamp.toLocaleDateString(getLocale())}` : ''}</div>
-      </button>`;
+      <div class="session-row">
+        <button class="session" data-session="${esc(session.id)}" data-tone="${tone}"
+                aria-current="${session.id === state.sessionKey}">
+          <div class="session-name">${esc(
+            session.title || job?.title || t('sessions.untitled'))}</div>
+          <div class="session-meta">${meta} · ${
+            stamp.toLocaleDateString(getLocale())}</div>
+        </button>
+        <button class="session-delete" data-delete-session="${esc(session.id)}"
+                title="${esc(t('jobs.delete'))}" aria-label="${esc(t('jobs.delete'))}">&times;</button>
+      </div>`;
   }).join('');
 }
 
+
+/** Open a session: its match if it has one, otherwise a clean conversation. */
+function openSession(sessionId) {
+  const session = listSessions().find((s) => s.id === sessionId);
+  if (!session) return;
+
+  state.sessionKey = sessionId;
+  state.sessionId = null;          // a new agent session per conversation
+  state.msgs = [greeting()];
+  state.playing = null;
+  destroyPlayer();
+
+  if (session.jobId) {
+    selectJob(session.jobId);
+  } else {
+    state.unsubscribe.forEach((off) => off());
+    state.unsubscribe = [];
+    state.jobId = null;
+    state.job = null;
+    state.moments = [];
+    state.clips = [];
+    state.events = [];
+    state.game = null;
+    render();
+  }
+}
+
+
+function startSession() {
+  const session = createSession();
+  state.sessions = listSessions();
+  openSession(session.id);
+}
+
+
+/**
+ * Remove a session, and the match inside it if there is one.
+ *
+ * A session that owns a job is the only route to that job in this UI, so
+ * deleting the row without the job would strand a match-length video in a
+ * bucket with nothing pointing at it. The job goes through the agent, which
+ * deletes the media too; the row goes immediately, because waiting on an agent
+ * turn to redraw a list makes the click feel broken.
+ */
+async function deleteSession(sessionId) {
+  const session = listSessions().find((s) => s.id === sessionId);
+  if (!session) return;
+
+  const job = state.jobs.find((j) => j.id === session.jobId);
+  const name = session.title || job?.title || t('sessions.untitled');
+  const warning = job ? `\n\n${t('jobs.deleteConfirm')}` : '';
+  if (!window.confirm(`${t('sessions.deleteConfirm')} "${name}"?${warning}`)) return;
+
+  removeSession(sessionId);
+  state.sessions = listSessions();
+
+  if (state.sessionKey === sessionId) {
+    const next = state.sessions[0];
+    if (next) openSession(next.id); else startSession();
+  } else {
+    render();
+  }
+
+  if (job) {
+    selectJob(job.id);
+    await ask('Delete this job, its video and everything found in it.');
+  }
+}
 
 function jobsCard() {
   if (!state.jobs.length) {
@@ -1155,6 +1249,13 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type }
   // It has a job document now, so it is no longer stranded.
   state.pendingUploads = state.pendingUploads.filter((p) => p.job_id !== job_id);
 
+  // The match belongs to the conversation that uploaded it. Without this the
+  // reconcile below would open a second session for the same job.
+  const open = state.sessionKey && !sessionForJob(job_id)
+    ? updateSession(state.sessionKey, { jobId: job_id, title: filename.replace(/\.[^.]+$/, '') })
+    : null;
+  if (open) state.sessions = listSessions();
+
   u.status = 'analyzing';
   u.stage = 'Handed to the agent';
   selectJob(job_id);
@@ -1237,7 +1338,8 @@ document.addEventListener('click', (event) => {
   const hit = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
-    + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session]');
+    + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
+    + '[data-delete-session]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -1273,8 +1375,9 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
+  if (hit.dataset.deleteSession) { deleteSession(hit.dataset.deleteSession); return; }
   if (hit.dataset.session) {
-    if (hit.dataset.session !== state.jobId) selectJob(hit.dataset.session);
+    if (hit.dataset.session !== state.sessionKey) openSession(hit.dataset.session);
     return;
   }
   if (hit.dataset.reanalyse) {
@@ -1342,12 +1445,7 @@ $('open-settings')?.addEventListener('click', openSettings);
 $('close-settings')?.addEventListener('click', closeSettings);
 $('sign-out')?.addEventListener('click', signOutNow);
 
-$('new-session').addEventListener('click', () => {
-  state.msgs = [greeting()];
-  state.sessionId = null;
-  state.playing = null;
-  render();
-});
+$('new-session').addEventListener('click', startSession);
 
 state.msgs = [greeting()];
 render();
