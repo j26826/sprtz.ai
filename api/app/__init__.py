@@ -1,1 +1,1 @@
-"""Sprtz AI API service."""
+"""Sportscut API service."""

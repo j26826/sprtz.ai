@@ -1,4 +1,4 @@
-# Sprtz AI
+# Sportscut
 
 An agentic SaaS that watches a full sports match and hands an editor a ranked set
 of short-form clips ready for TikTok, Instagram Reels and YouTube Shorts.
@@ -64,7 +64,7 @@ mcp/          MCP tool servers (Cloud Run)
   media_server/         ffmpeg: probe, HLS, cut, reframe, burn-in
   catalog_server/       Firestore, embeddings, KNN + Gemini rerank
 api/          FastAPI behind IAP: signed uploads, signed CDN URLs, agent proxy
-web/          The SPRTZ AI Editor SPA
+web/          The Sportscut editor SPA
 deploy/
   cloudbuild.yaml       the whole CI/CD pipeline
   terraform/            every resource, every API enablement

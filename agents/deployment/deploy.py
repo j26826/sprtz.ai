@@ -135,7 +135,7 @@ def main() -> int:
         "extra_packages": ["sprtz_agents"],
         "env_vars": env_vars,
         "display_name": args.display_name,
-        "description": "Sprtz AI sports video analysis agent.",
+        "description": "Sportscut sports video analysis agent.",
     }
     if args.service_account:
         common["service_account"] = args.service_account

@@ -1,6 +1,6 @@
 variable "project_id" {
   type        = string
-  description = "Google Cloud project that hosts every Sprtz AI resource."
+  description = "Google Cloud project that hosts every Sportscut resource."
 }
 
 variable "region" {

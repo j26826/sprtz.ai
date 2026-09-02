@@ -1,6 +1,6 @@
 # sprtz-agents
 
-ADK agents for Sprtz AI, deployed to Vertex AI Agent Runtime.
+ADK agents for Sportscut, deployed to Vertex AI Agent Runtime.
 
 - `sprtz_agents/agent.py` — `sprtz_producer` root agent and the `analysis_pipeline`
 - `sprtz_agents/sub_agents/stages.py` — the five pipeline stages

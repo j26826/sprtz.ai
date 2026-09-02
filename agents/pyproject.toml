@@ -1,7 +1,7 @@
 [project]
 name = "sprtz-agents"
 version = "0.1.0"
-description = "Sprtz AI sports video analysis agents (ADK, Vertex AI Agent Runtime)."
+description = "Sportscut sports video analysis agents (ADK, Vertex AI Agent Runtime)."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [

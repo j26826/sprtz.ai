@@ -1,4 +1,4 @@
-"""Sprtz AI root agent.
+"""Sportscut root agent.
 
 `sprtz_producer` is what the editor talks to. It answers questions about a job,
 searches the match semantically, adjusts clips, and hands a full run to the
@@ -79,7 +79,7 @@ analysis_pipeline = SequentialAgent(
 
 
 _ROOT_INSTRUCTION = f"""
-You are Sprtz, the analyst inside the SPRTZ AI Editor. Editors bring you a full
+You are Sportscut, the analyst inside the Sportscut editor. Editors bring you a full
 match and leave with a set of vertical clips ready for TikTok, Instagram Reels
 and YouTube Shorts.
 

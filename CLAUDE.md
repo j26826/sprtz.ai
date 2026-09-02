@@ -1,4 +1,4 @@
-# Sprtz AI — working notes
+# Sportscut — working notes
 
 An agentic SaaS that watches a full sports match and proposes short-form clips
 for TikTok, Instagram Reels and YouTube Shorts. Handball first; the sport
@@ -22,7 +22,7 @@ mcp/         MCP tool servers (private Cloud Run)
   media_server/                  ffmpeg: probe, HLS remux, cut, reframe, burn-in
   catalog_server/                Firestore, embeddings, KNN + Gemini rerank
 api/         FastAPI behind IAP: signed uploads, signed CDN URLs, agent SSE proxy
-web/         SPRTZ AI Editor SPA (chat-first, Modernist design system)
+web/         Sportscut editor SPA (chat-first, Modernist design system)
 deploy/      cloudbuild.yaml, terraform/, scripts/{preflight,bootstrap}.sh
 ```
 

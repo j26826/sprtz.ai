@@ -63,7 +63,7 @@ resource "google_identity_platform_default_supported_idp_config" "google" {
 resource "google_apikeys_key" "identity_platform" {
   project      = var.project_id
   name         = "${local.prefix}-web-key"
-  display_name = "Sprtz AI web (Identity Platform)"
+  display_name = "Sportscut web (Identity Platform)"
 
   restrictions {
     api_targets {
