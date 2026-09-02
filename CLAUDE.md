@@ -343,6 +343,23 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### Static caching
+
+CSS and JS are served `no-cache`, meaning **revalidate**, not "do not store".
+Nothing here adds a content hash to a filename, so blind caching means a browser
+holding the last release's `app.css` against this release's `index.html`. That
+is not hypothetical: the header logo rule shipped, the server served it, and the
+page kept the old sizing for an hour because the browser never asked. nginx
+answers from the ETag with a 304, so the cost is one conditional request per
+file per load. `/assets/` keeps a long cache because those files are stable
+within a release — replacing one means renaming it.
+
+**`add_header` does not merge across levels.** A location that declares any
+`add_header` of its own inherits none from the server block, so every location
+that sets a cache header repeats the three security headers. It reads as
+duplication and is the only way to keep them; without it a caching change
+silently drops `X-Frame-Options` off the document.
+
 ### Brand
 
 The wordmark and app icon are real assets under `web/src/assets/`, served from
