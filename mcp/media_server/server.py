@@ -198,6 +198,28 @@ def transcode_hls(gcs_uri: str, job_id: str) -> dict:
 
 
 @mcp.tool
+def playback_ready(job_id: str) -> dict:
+    """Whether a job's HLS package is actually in the bucket.
+
+    A job document can record a playback URL for a package that no longer
+    exists — a delete that removed the media and then failed, or a bucket
+    cleared by hand. The record is a claim; this is the check.
+
+    Args:
+        job_id: Job whose package to look for.
+    """
+    if not HLS_BUCKET:
+        return {"status": "error", "error": "HLS_BUCKET is not configured."}
+    try:
+        path = f"jobs/{job_id}/hls/{transcoder.MASTER_PLAYLIST}"
+        return {"status": "success", "job_id": job_id,
+                "ready": gcs.object_exists(HLS_BUCKET, path), "path": path}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not check playback for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+
+
+@mcp.tool
 def transcode_status(transcoder_job: str) -> dict:
     """Ask whether an HLS encode has finished.
 

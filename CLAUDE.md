@@ -343,6 +343,20 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
+### A playback record is not a package
+
+`prepare_playback` used to return early whenever the job carried an `hlsUrl`,
+which made a half-deleted job unrecoverable: the record pointed at objects a
+failed delete had already removed, so the editor was told playback was ready,
+the CDN answered 403, and asking for it again did nothing. It now confirms the
+master playlist is in the bucket with `playback_ready` before trusting the
+record, and re-encodes when it is not.
+
+The path that check uses has to match the one Transcoder writes to and the one
+the CDN URL is built from. A test asserts all three agree, because if they ever
+drift the check fails silently for every job and every request re-encodes a
+match.
+
 ### Deleting media
 
 **Already-gone counts as deleted.** Listing a couple of thousand HLS segments
