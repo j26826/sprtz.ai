@@ -285,8 +285,15 @@ resource "google_cloud_run_v2_service" "api" {
       # parent-domain trick — and none was possible on *.run.app, which is on
       # the Public Suffix List.
       env {
+        # Empty by default, which makes the playback cookie host-only. The load
+        # balancer serves the CDN from the app's own hostname, so a Domain
+        # attribute widens the cookie for no benefit — and a Domain a browser
+        # declines is the whole cookie lost, which surfaces as an opaque 403
+        # inside the player rather than as anything mentioning cookies. Set the
+        # variable only for a deployment that genuinely serves the CDN from a
+        # sibling host.
         name  = "CDN_COOKIE_DOMAIN"
-        value = var.cdn_cookie_domain != "" ? var.cdn_cookie_domain : local.app_host
+        value = var.cdn_cookie_domain
       }
       env {
         name = "CDN_SIGNING_KEY"

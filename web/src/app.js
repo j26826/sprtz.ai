@@ -1282,6 +1282,16 @@ async function mountPlayer() {
       // segment request without any per-request setup.
       xhrSetup: (xhr) => { xhr.withCredentials = true; },
     });
+    // A 403 here is the CDN refusing the request, and it means one specific
+    // thing: the signed cookie the API just set did not come back with it. The
+    // player's own message for that is "manifestLoadError", which sends the
+    // reader to the encode rather than to the cookie.
+    hls.on(window.Hls.Events.ERROR, (_event, data) => {
+      const status = data?.response?.code;
+      if (status !== 403 || !data.fatal) return;
+      playerEl.insertAdjacentHTML('beforeend',
+        `<div class="error-note">${esc(t('player.forbidden'))}</div>`);
+    });
     hls.loadSource(url);
     hls.attachMedia(video);
     hls.on(window.Hls.Events.MANIFEST_PARSED, () => { video.currentTime = start; video.play().catch(() => {}); });
