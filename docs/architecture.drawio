@@ -1,0 +1,375 @@
+<mxfile host="app.diagrams.net" agent="Sportscut" type="device">
+  <diagram id="components" name="Components">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="v1" value="Sportscut — components" style="text;html=1;align=left;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="20" width="600" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="v2" value="Agentic short-form clipping for sport. One hostname, four Cloud Run services,&#10;one Agent Runtime engine." style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#7A7A7A;" vertex="1" parent="1">
+          <mxGeometry x="60" y="48" width="700" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="v3" value="Browser" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#9AA3AD;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=14;fontStyle=1;fontColor=#5A6570;" vertex="1" parent="1">
+          <mxGeometry x="60" y="96" width="1420" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="v4" value="Editor SPA&#10;ES modules, no bundler&#10;app.js · cards.js · search.js" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="84" y="140" width="250" height="104" as="geometry" />
+        </mxCell>
+        <mxCell id="v5" value="hls.js player&#10;seeks to the in point,&#10;stops at the out point" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="354" y="140" width="190" height="104" as="geometry" />
+        </mxCell>
+        <mxCell id="v6" value="Firebase SDK&#10;ID token, refreshed at 45 min&#10;live Firestore listeners" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="564" y="140" width="230" height="104" as="geometry" />
+        </mxCell>
+        <mxCell id="v7" value="Identity Platform&#10;email/password&#10;accounts provisioned by hand" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="814" y="140" width="200" height="104" as="geometry" />
+        </mxCell>
+        <mxCell id="v8" value="No self-service sign-up, and no&#10;federated button unless a provider&#10;is actually configured — the editor&#10;never offers a method that can&#10;only fail." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="1044" y="130" width="260" height="124" as="geometry" />
+        </mxCell>
+        <mxCell id="v9" value="Google Cloud load balancer — one hostname, so everything is same-origin" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#9AA3AD;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=14;fontStyle=1;fontColor=#5A6570;" vertex="1" parent="1">
+          <mxGeometry x="60" y="306" width="1420" height="168" as="geometry" />
+        </mxCell>
+        <mxCell id="v10" value="Global external HTTPS LB&#10;managed certificate" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="84" y="356" width="210" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="v11" value="/&#10;→ web" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="324" y="356" width="130" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="v12" value="/api/*&#10;→ api" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="484" y="356" width="130" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="v13" value="/jobs/*&#10;→ HLS bucket&#10;Cloud CDN, signed cookie" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="644" y="356" width="210" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="v14" value="The same hostname is load-bearing: the CDN cookie is same-origin because of it.&#10;On separate *.run.app hosts it could not be — run.app is on the Public Suffix List.&#10;&#10;Reach is controlled by ingress. Both public services accept traffic only from the&#10;balancer, so their run.app URLs are dead ends." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="884" y="346" width="420" height="118" as="geometry" />
+        </mxCell>
+        <mxCell id="v15" value="Cloud Run" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#9AA3AD;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=14;fontStyle=1;fontColor=#5A6570;" vertex="1" parent="1">
+          <mxGeometry x="60" y="514" width="700" height="356" as="geometry" />
+        </mxCell>
+        <mxCell id="v16" value="web&#10;nginx, serves src/ as written&#10;no-cache revalidation" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="84" y="562" width="300" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="v17" value="api — FastAPI&#10;verifies the ID token · signs upload and&#10;thumbnail URLs · mints the CDN cookie&#10;proxies the agent's SSE stream" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="84" y="654" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="v18" value="mcp-catalog&#10;Firestore · embeddings&#10;KNN + Gemini rerank" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="404" y="562" width="330" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="v19" value="mcp-media&#10;ffmpeg: probe, cut, keyframe still, reframe&#10;drives Transcoder API · concurrency 1,&#10;because the writable filesystem is memory" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="404" y="654" width="330" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="v20" value="The MCP servers are ingress-ALL rather than internal-only: Cloud Run services calling&#10;each other egress over the public internet, so internal-only would 404 the very callers&#10;they exist for. They stay private through IAM — every call carries an OIDC token." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="84" y="774" width="650" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="v21" value="Vertex AI Agent Runtime — one engine, resolved by display name" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#9AA3AD;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=14;fontStyle=1;fontColor=#5A6570;" vertex="1" parent="1">
+          <mxGeometry x="800" y="514" width="680" height="356" as="geometry" />
+        </mxCell>
+        <mxCell id="v22" value="sprtz_producer  (root agent)&#10;list_jobs · get_job_summary · find_games&#10;search_moments · list_action_plays&#10;prepare_playback · generate_thumbnails&#10;re-analyse · cancel · delete" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="824" y="562" width="300" height="124" as="geometry" />
+        </mxCell>
+        <mxCell id="v23" value="The tool list is bound at import&#10;time: whatever is unset while&#10;deploy.py imports the module is&#10;missing from the packaged agent&#10;for good.&#10;&#10;MCP toolsets need a header_provider,&#10;not static headers — a token would&#10;expire an hour into the deployment." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="1144" y="552" width="310" height="144" as="geometry" />
+        </mxCell>
+        <mxCell id="v24" value="analysis_pipeline  (SequentialAgent)" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="824" y="706" width="630" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="v25" value="ingest" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#D79B00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="826" y="754" width="98" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v26" value="transcode" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#D79B00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="930" y="754" width="98" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v27" value="analysis" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#D79B00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1034" y="754" width="98" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v28" value="clips" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#D79B00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1138" y="754" width="98" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v29" value="captions" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#D79B00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1242" y="754" width="98" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v30" value="publish" style="rounded=1;arcSize=24;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#D79B00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1346" y="754" width="98" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v31" value="Every stage is wrapped so a death is recorded: a container killed mid-response&#10;otherwise leaves the job reading as working for ever." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="824" y="812" width="630" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v32" value="Data" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#9AA3AD;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=14;fontStyle=1;fontColor=#5A6570;" vertex="1" parent="1">
+          <mxGeometry x="60" y="910" width="700" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="v33" value="GCS uploads&#10;the source video" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="84" y="958" width="130" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v34" value="GCS media&#10;analysis segments,&#10;clip renders,&#10;moment stills" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="224" y="958" width="140" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v35" value="GCS hls&#10;480p package,&#10;poster" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="374" y="958" width="120" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v36" value="Firestore&#10;jobs · moments · clips · events&#10;games (top level, own index)&#10;moments_knn_all · games_knn_all" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="514" y="958" width="220" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v37" value="Secret Manager — CDN signing key" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="84" y="1086" width="410" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v38" value="Firestore rules require request.auth. Jobs are shared across the desk: any signed-in&#10;user reads and deletes any job, and ownerUid is provenance rather than a gate." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="84" y="1146" width="650" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="v39" value="Google APIs" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#9AA3AD;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=14;fontStyle=1;fontColor=#5A6570;" vertex="1" parent="1">
+          <mxGeometry x="800" y="910" width="680" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="v40" value="Gemini 2.5 Flash&#10;segment analysis at 1 fps,&#10;rerank, game judgement" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="824" y="958" width="200" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v41" value="gemini-embedding-001&#10;768 dimensions — must equal&#10;the Firestore index width" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="1034" y="958" width="200" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v42" value="Google Search&#10;grounding&#10;once per match" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="1244" y="958" width="110" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v43" value="Transcoder&#10;API&#10;GCS → GCS" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="1364" y="958" width="92" height="108" as="geometry" />
+        </mxCell>
+        <mxCell id="v44" value="IAM signBlob — Cloud Run has no private key, so every signed URL goes through it" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="824" y="1086" width="632" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="v45" value="Transcoder's own service agent needs the bucket grants, not the media service account —&#10;and both failures surface minutes into an encode rather than when the job is created." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="824" y="1146" width="632" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="v46" value="Delivery — merging to main is a deploy" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#9AA3AD;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=14;fontStyle=1;fontColor=#5A6570;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1276" width="1420" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="v47" value="GitHub&#10;main" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#8C8C8C;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="84" y="1326" width="110" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="v48" value="Cloud Build&#10;pytest · ruff · check.mjs · node --test&#10;terraform apply" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#8C8C8C;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="224" y="1326" width="260" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="v49" value="Artifact Registry&#10;web · api · mcp images" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#8C8C8C;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="514" y="1326" width="190" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="v50" value="deploy.py&#10;creates or updates the engine&#10;by display name" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#8C8C8C;fontSize=11;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="734" y="1326" width="240" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="v51" value="Terraform owns everything except the Agent Runtime engine. The provider creates one with&#10;spec.deployment_source while the SDK updates it with spec.package_spec, and the API refuses&#10;to move an engine from one to the other — so the script owns that lifecycle instead." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="1004" y="1316" width="452" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="e52" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#6C8EBF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="v4" target="v10">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e53" value="sign in" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#D6B656;dashed=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="v6" target="v7">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e54" value="playlist and segments" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#B85450;exitX=0.5;exitY=1;entryX=0.25;entryY=0;" edge="1" parent="1" source="v5" target="v13">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e55" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#B85450;" edge="1" parent="1" source="v10" target="v11">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e56" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#B85450;" edge="1" parent="1" source="v10" target="v12">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e57" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#B85450;" edge="1" parent="1" source="v10" target="v13">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e58" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#B85450;exitX=0.25;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="1" source="v11" target="v16">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e59" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#B85450;exitX=0.5;exitY=1;entryX=0.9;entryY=0;" edge="1" parent="1" source="v12" target="v17">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e60" value="signed URL PUT&#10;— straight to GCS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;dashed=1;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="v4" target="v33">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="30" y="192" /><mxPoint x="30" y="1012" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e61" value="live listeners" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;dashed=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="v6" target="v36">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="679" y="286" /><mxPoint x="774" y="286" /><mxPoint x="774" y="890" /><mxPoint x="624" y="890" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e62" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#B85450;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="v13" target="v35">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="696" y="890" /><mxPoint x="434" y="890" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e63" value="SSE stream" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#D79B00;exitX=1;exitY=0.25;entryX=0;entryY=0.75;" edge="1" parent="1" source="v17" target="v22">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="776" y="679" /><mxPoint x="776" y="655" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e64" value="reads the key" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;exitX=0.15;exitY=1;entryX=0.15;entryY=0;" edge="1" parent="1" source="v17" target="v37">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e65" value="signs URLs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#D6B656;exitX=0.6;exitY=1;entryX=0.02;entryY=0;" edge="1" parent="1" source="v17" target="v44">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="264" y="1250" /><mxPoint x="837" y="1250" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e66" value="MCP over OIDC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#82B366;exitX=0;exitY=0.85;entryX=1;entryY=0.3;" edge="1" parent="1" source="v22" target="v18">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="780" y="656" /><mxPoint x="740" y="656" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e67" value="MCP over OIDC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#82B366;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="v24" target="v19">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e68" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;exitX=0.9;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="v18" target="v36">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e69" value="embeds each ActionPlay" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#D6B656;exitX=1;exitY=0.2;entryX=0.5;entryY=0;" edge="1" parent="1" source="v18" target="v41">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1134" y="585" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e70" value="one call per window" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#D79B00;exitX=0.02;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="v24" target="v40">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="798" y="890" /><mxPoint x="924" y="890" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e71" value="grounding" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#D79B00;dashed=1;exitX=0.98;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="v24" target="v42">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1454" y="890" /><mxPoint x="1299" y="890" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e72" value="range reads" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;exitX=0.15;exitY=1;entryX=0.85;entryY=0;" edge="1" parent="1" source="v19" target="v33">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="454" y="780" /></Array>
+            <mxPoint x="0" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e73" value="writes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;exitX=0.4;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="v19" target="v34">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="0" y="10" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e74" value="starts, polls" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#D6B656;exitX=1;exitY=0.75;entryX=0.5;entryY=0;" edge="1" parent="1" source="v19" target="v43">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="768" y="729" /><mxPoint x="768" y="890" /><mxPoint x="1410" y="890" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e75" value="writes the package" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;exitX=0.5;exitY=1;entryX=0.9;entryY=1;" edge="1" parent="1" source="v43" target="v35">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1410" y="1240" /><mxPoint x="446" y="1240" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e76" value="reads the cut segment" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#9673A6;dashed=1;exitX=0;exitY=0.2;entryX=1;entryY=0.2;" edge="1" parent="1" source="v40" target="v34">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="900" y="985" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e77" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#8C8C8C;" edge="1" parent="1" source="v47" target="v48">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e78" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#8C8C8C;" edge="1" parent="1" source="v48" target="v49">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e79" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#8C8C8C;" edge="1" parent="1" source="v49" target="v50">
+          <mxGeometry relative="1" as="geometry">
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e80" value="packages, updates" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=10;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=blockThin;endFill=1;strokeWidth=1.4;strokeColor=#8C8C8C;dashed=1;exitX=1;exitY=0.5;entryX=0.5;entryY=1;" edge="1" parent="1" source="v50" target="v22">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1494" y="1364" /><mxPoint x="1494" y="700" /><mxPoint x="974" y="700" /></Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="database-design" name="Database design">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1760" pageHeight="1420" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="v1" value="Sportscut — database design" style="text;html=1;align=left;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="20" width="700" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="v2" value="Firestore, native mode. Two owning collections at top level; everything about a job&#10;lives in its subcollections. No relational joins — every read is a direct lookup&#10;or a declared index." style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#7A7A7A;" vertex="1" parent="1">
+          <mxGeometry x="60" y="48" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="v3" value="jobs/{jobId}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#3C4A5C;strokeColor=#3C4A5C;fontColor=#FFFFFF;fontSize=12;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="380" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="v4" value="PK jobId            string&#10;   ownerUid         string   provenance, not a gate&#10;   title            string&#10;   sport            string   handball | equestrian&#10;   status           string   uploaded|analyzing|analyzed|&#10;                             clips_ready|ready|needs_attention|&#10;                             failed|cancelled|cancelling&#10;   stage            string   ingest..captions|complete&#10;   progress         int      0-100, monotonic non-decreasing&#10;   metadataLanguage string   fixed at registration&#10;   source.gcsUri    string&#10;   source.bytes     int&#10;   source.originalName string&#10;   media.durationSec, .width, .height, .fps,&#10;        .videoCodec, .audioCodec, .segmentCount&#10;   playback.hlsUrl, .posterUrl, .renditions,&#10;        .segmentSeconds, .readyAt&#10;   teams.home, .away        consensus, handball only&#10;   counts.moments, .clips&#10;   cancelRequested  bool&#10;   error            string | null&#10;   createdAt, updatedAt     timestamp" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#4A4A4A;verticalAlign=top;align=left;fontSize=11;spacing=4;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="60" y="136" width="380" height="406" as="geometry" />
+        </mxCell>
+        <mxCell id="v5" value="jobs/{jobId}/moments/{momentId}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#3C4A5C;strokeColor=#3C4A5C;fontColor=#FFFFFF;fontSize=12;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="500" y="110" width="400" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="v6" value="PK momentId          string  uuid4[:16]&#10;FK jobId, ownerUid&#10;   momentType, category, label   string&#10;   startSec, endSec, peakSec     float  match-absolute&#10;   confidence, excitement        float  0-1&#10;   highlightScore                float  type prior x conf x excite&#10;   description, summary          string&#10;   evidence            array&lt;string&gt;&#10;   scoreboard          string | null&#10;   isGoal              bool&#10;   actionResult, participant,&#10;     participantRole, actionTeam string&#10;   team1, team2        string   consensus (handball only)&#10;   scoreTeam1, scoreTeam2  int | null   null = unreadable, not 0&#10;   executionDetails, harmonyIndex string  equestrian only&#10;   thumbUri            string   gs:// PNG at the peak frame&#10;   segmentIndexes      array&lt;int&gt;   &gt;1 = merged across windows&#10;   embedding           vector&lt;768&gt;  whole ActionPlay, not just&#10;                                    the description&#10;   createdAt           timestamp" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#4A4A4A;verticalAlign=top;align=left;fontSize=11;spacing=4;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="500" y="136" width="400" height="370" as="geometry" />
+        </mxCell>
+        <mxCell id="v7" value="jobs/{jobId}/clips/{clipId}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#3C4A5C;strokeColor=#3C4A5C;fontColor=#FFFFFF;fontSize=12;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="500" y="536" width="400" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="v8" value="PK clipId            string&#10;FK jobId, ownerUid, momentId&#10;   startSec, endSec, durationSec  float&#10;   aspect              string   9:16 | 1:1&#10;   platforms           array&lt;string&gt;&#10;   hookText, title     string&#10;   captions            map&lt;platform, string&gt;&#10;   hashtags            array&lt;string&gt;&#10;   score, rationale&#10;   status              string   suggested&#10;   renderUri, thumbnailUri  string | null&#10;   createdAt, updatedAt     timestamp" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#4A4A4A;verticalAlign=top;align=left;fontSize=11;spacing=4;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="500" y="562" width="400" height="226" as="geometry" />
+        </mxCell>
+        <mxCell id="v9" value="jobs/{jobId}/events/{eventId}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#3C4A5C;strokeColor=#3C4A5C;fontColor=#FFFFFF;fontSize=12;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="500" y="818" width="400" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="v10" value="PK eventId           string   auto-id&#10;FK jobId&#10;   ts                 timestamp&#10;   stage               string&#10;   level                string   info | warning | error&#10;   message              string&#10;   data                 map     stage-specific extras" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#4A4A4A;verticalAlign=top;align=left;fontSize=11;spacing=4;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="500" y="844" width="400" height="136" as="geometry" />
+        </mxCell>
+        <mxCell id="v11" value="games/{jobId}  (top level, keyed by jobId)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#6B4F8F;strokeColor=#6B4F8F;fontColor=#FFFFFF;fontSize=12;fontStyle=1;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="960" y="110" width="420" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="v12" value="PK jobId             string   == jobs/{jobId}&#10;   ownerUid          string&#10;   title, sport      string&#10;   discipline        string   label, not code; equestrian&#10;   disciplineConfidence  float&#10;   homeTeam, awayTeam    string   empty when teams are not&#10;                                 constant across the job&#10;   competition, venue    string&#10;   finalScore        string   last legible scoreline, never&#10;                              a count of detected goals&#10;   eventOutcome      string&#10;   sentiment, mood, summary   string  model judgement&#10;   momentCount, highlightCount  int&#10;   grounded          bool&#10;   groundedCompetition, groundedVenue,&#10;     groundedHomeTeam, groundedAwayTeam  string&#10;   matchDate         string&#10;   groundingSources  array&lt;{title, uri}&gt;&#10;   embedding         vector&lt;768&gt;&#10;   updatedAt         timestamp" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#4A4A4A;verticalAlign=top;align=left;fontSize=11;spacing=4;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="960" y="136" width="420" height="370" as="geometry" />
+        </mxCell>
+        <mxCell id="v13" value="jobId is a foreign key by convention, not by a Firestore constraint:&#10;there is no cross-collection reference type. games/{jobId} shares its&#10;document id with jobs/{jobId} instead of storing jobId as a field&#10;and querying for it." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="960" y="526" width="420" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="v14" value="Firestore indexes (deploy/terraform/firestore.tf)" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1020" width="1660" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="v15" value="jobs_by_owner_recent&#10;jobs&#10;ownerUid ASC, createdAt DESC&#10;list_jobs's old shape. ownerUid is accepted and ignored now — kept so a&#10;caller that still passes one is not silently answered with a filtered list." style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1060" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v16" value="moments_by_score&#10;moments (COLLECTION_GROUP)&#10;jobId ASC, highlightScore DESC&#10;list_moments: every moment of one job, ranked.&#10;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1060" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v17" value="clips_by_score&#10;clips (COLLECTION_GROUP)&#10;jobId ASC, score DESC&#10;list_clips, same shape as moments_by_score.&#10;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="1060" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v18" value="events_by_ts&#10;events (COLLECTION_GROUP)&#10;jobId ASC, ts DESC&#10;the activity feed, newest first.&#10;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1172" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v19" value="moments_knn&#10;moments (COLLECTION_GROUP)&#10;ownerUid ASC + embedding&lt;768&gt;&#10;owner-scoped search. Left in place after the ownership change —&#10;deleting a vector index is the one operation this repo warns against." style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1172" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v20" value="moments_knn_all&#10;moments (COLLECTION_GROUP)&#10;embedding&lt;768&gt; only&#10;unscoped search: what knn_search_moments actually queries now.&#10;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="1172" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v21" value="games_knn&#10;games (COLLECTION)&#10;ownerUid ASC + embedding&lt;768&gt;&#10;same reasoning as moments_knn.&#10;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1284" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v22" value="games_knn_all&#10;games (COLLECTION)&#10;embedding&lt;768&gt; only&#10;what knn_search_games actually queries.&#10;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1284" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v23" value="clips_knn&#10;clips (COLLECTION_GROUP)&#10;ownerUid ASC + embedding&lt;768&gt;&#10;reserved; no clip-level semantic search ships yet.&#10;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EAF2FB;strokeColor=#6C8EBF;fontSize=10;align=left;verticalAlign=top;spacing=6;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="1284" width="520" height="92" as="geometry" />
+        </mxCell>
+        <mxCell id="v24" value="An inequality filter forces the first order_by to be that same field — Firestore will&#10;not run the query otherwise, and it fails on a live read with a link to create an index.&#10;list_action_plays and list_jobs order by the plain field (startSec, createdAt) and apply&#10;any threshold in Python instead, which is what keeps them off a composite index.&#10;&#10;A vector index with an equality prefix (ownerUid) only serves queries carrying that&#10;equality — dropping the owner filter needed the *_knn_all indexes rather than reusing&#10;the scoped ones. Every embedding is 768 dimensions to match gemini-embedding-001 exactly;&#10;a mismatch fails queries at read time; a mismatched write fails silently until then.&#10;&#10;Firestore vector indexes replace themselves on every apply: the provider appends __name__&#10;to what it creates, so the remote object never matches the declared fields and every apply&#10;wants to force-replace it. ignore_changes = [fields] on every *_knn* resource is what stops&#10;that loop; changing a vector definition means deleting the index and re-applying, never&#10;editing in place." style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFFCF0;strokeColor=#D6B656;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#6B5A20;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1416" width="1660" height="190" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
