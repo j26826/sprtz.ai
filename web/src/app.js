@@ -603,14 +603,91 @@ function emptyCard(message) {
 }
 
 
+/**
+ * Normalise a title enough to recognise it in a sentence.
+ *
+ * Titles are composed in code — "FAG v TVB — DAIKIN HBL" — and retyped by hand
+ * into the composer, where the em dash becomes a hyphen and the spacing drifts.
+ * Case, punctuation and runs of whitespace are all noise for this comparison;
+ * the letters and digits are not.
+ */
+function titleKey(text) {
+  return String(text ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+
+/**
+ * The match a question names, if it names one this desk has.
+ *
+ * "Show all moments of FAG v TVB — DAIKIN HBL" is about a specific game, and
+ * answering it with whichever match happens to be selected is worse than
+ * saying nothing. Matched against the whole games list rather than by asking
+ * the agent: the titles are already in the browser, and an exact name is
+ * exactly what a vector search is worst at.
+ *
+ * The longest match wins, so "FAG v TVB — DAIKIN HBL" is not answered by a
+ * different fixture whose title is a prefix of it.
+ */
+function gameNamedIn(question) {
+  const asked = titleKey(question);
+  if (!asked) return null;
+
+  return state.games
+    .map((g) => ({ game: g, key: titleKey(gameHeadline(g)) }))
+    // Two words is not a name. "the game" would otherwise match one.
+    .filter(({ key }) => key.split(' ').length > 1 && asked.includes(key))
+    .sort((a, b) => b.key.length - a.key.length)[0]?.game || null;
+}
+
+
+const MOMENT_SORTS = {
+  // Highest scoring first: the answer to "show me the best moments".
+  score: (a, b) => (b.highlightScore ?? 0) - (a.highlightScore ?? 0),
+  // Match order: the answer to "in order", and how the log reads.
+  time: (a, b) => (a.startSec ?? 0) - (b.startSec ?? 0),
+};
+
+
+/**
+ * The moments a message is about, in the order it asked for.
+ *
+ * Ids are held on the message so scrolling back to an earlier answer finds
+ * what it said. A question naming another match has no ids yet — selectJob's
+ * listener has not answered — so it reads the live list instead, and only
+ * while that match is still the open one.
+ */
+function momentsFor(msg) {
+  const list = msg.momentIds
+    ? msg.momentIds.map(momentById).filter(Boolean)
+    : (!msg.jobId || msg.jobId === state.jobId ? [...state.moments] : []);
+  return list.sort(MOMENT_SORTS[msg.sort] || MOMENT_SORTS.score);
+}
+
+
+function sortRow(msg, index) {
+  if (!msg.showMoments) return '';
+  const sort = msg.sort === 'time' ? 'time' : 'score';
+  return `
+    <div class="panel-head">
+      <div class="panel-head-title">${esc(t('moments.sortBy'))}</div>
+      <div class="panel-head-meta">
+        ${['score', 'time'].map((key) => `
+          <button class="link-btn" data-sort="${index}:${key}"
+                  aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
+      </div>
+    </div>`;
+}
+
+
 function momentsCard(msg, index) {
-  const list = (msg.momentIds || [])
-    .map(momentById)
-    .filter(Boolean);
+  const list = momentsFor(msg);
   if (!list.length) return emptyCard(t('moments.none'));
 
   const view = pageOf(list, msg.page);
-  return `<div class="panel-light">${view.slice.map((m) => {
+  return `<div class="panel-light">${sortRow(msg, index)}${view.slice.map((m) => {
     const clip = state.clips.find((c) => c.momentId === m.momentId);
     const meta = [
       m.label || m.momentType,
@@ -1221,7 +1298,7 @@ function actionsRow(msg) {
  * have made that unreadable.
  */
 function cardAnswersIt(m) {
-  if (m.showMoments) return (m.momentIds || []).some((id) => momentById(id));
+  if (m.showMoments) return momentsFor(m).length > 0;
   if (m.showGames) return state.games.length > 0;
   if (m.showGame) return Boolean(state.game);
   return false;
@@ -1556,14 +1633,28 @@ function attachCards(index, question) {
     msg.showActions = true;
     msg.actions = [t('reel.generate'), t('reel.reframe'), t('reel.publish')];
   } else {
-    // Every moment, highest scoring first — not a top handful. A list that
-    // silently stops at six looks like the analysis found six.
+    // Every moment, not a top handful. A list that silently stops at six looks
+    // like the analysis found six. The order is chosen here rather than baked
+    // in, so the card's own toggle can change it afterwards.
     msg.showMoments = true;
-    msg.momentIds = [...state.moments]
-      .sort((a, b) => (b.highlightScore ?? 0) - (a.highlightScore ?? 0))
-      .map((m) => m.momentId);
+    msg.sort = /\bby time\b|chronolog|in order|match order|timeline|earliest/.test(q)
+      ? 'time' : 'score';
     msg.showActions = true;
     msg.actions = ['Cut all of these', 'Cut a 30-second short'];
+
+    // A question that names a match is about that match, whichever one happens
+    // to be open. Selecting it re-points every listener, so the ids are not
+    // snapshotted — there are none yet — and the card reads the live list until
+    // they arrive.
+    const named = gameNamedIn(question);
+    if (named && (named.jobId || named.id) !== state.jobId) {
+      msg.jobId = named.jobId || named.id;
+      msg.momentIds = null;
+      selectJob(msg.jobId);
+    } else {
+      msg.jobId = state.jobId;
+      msg.momentIds = state.moments.map((m) => m.momentId);
+    }
   }
 }
 
@@ -1703,7 +1794,7 @@ document.addEventListener('click', (event) => {
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
     + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
-    + '[data-open-game],[data-page]');
+    + '[data-open-game],[data-page],[data-sort]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -1726,6 +1817,15 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.gameDetails) { openGameDetails(state.game); return; }
   if (hit.dataset.openGame) {
     openGameDetails(state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame));
+    return;
+  }
+  if (hit.dataset.sort) {
+    const [index, key] = hit.dataset.sort.split(':');
+    const msg = state.msgs[Number(index)];
+    // Back to the first page: page four of a score-ranked list is not page four
+    // of the same moments in match order.
+    if (msg) { msg.sort = key; msg.page = 0; }
+    render();
     return;
   }
   if (hit.dataset.page) {

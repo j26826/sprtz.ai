@@ -9,6 +9,19 @@
    letterbox matte is the same argument at full strength: it is video, not a
    UI surface, so it stays true black. */
 
+/* Structure, alongside the design system's colour and space tokens.
+
+   Rule weight is a theme's business as much as its palette is: Modernist is
+   2px rules and square corners, and a theme built on hairlines and 14px cards
+   is a different object made of the same parts. The radii come from
+   ds/styles.css, which ships them at 0 — the rules below name them so that
+   setting them does something. --rule and --rule-hair live here because the
+   design system has no token for a border width. */
+:root {
+  --rule: 2px;        /* structural: the shell, panels, the composer */
+  --rule-hair: 1px;   /* dividers: rows inside a panel, header buttons */
+}
+
 body {
   margin: 0;
   background: var(--color-bg);
@@ -34,7 +47,7 @@ input, button, textarea { font-family: var(--font-body); }
 .app-header {
   display: flex;
   align-items: stretch;
-  border-bottom: 2px solid var(--color-text);
+  border-bottom: var(--rule) solid var(--color-text);
   flex: none;
   /* The context block used to set this and push the buttons right. With it
      gone the header would collapse to the logo's height. */
@@ -45,7 +58,7 @@ input, button, textarea { font-family: var(--font-body); }
   display: flex;
   align-items: center;
   padding: 0 20px;
-  border-right: 2px solid var(--color-text);
+  border-right: var(--rule) solid var(--color-text);
   /* Everything after the brand sits at the far end of the header. */
   margin-right: auto;
 }
@@ -79,7 +92,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .header-btn {
   border: 0;
-  border-left: 1px solid var(--color-neutral-300);
+  border-left: var(--rule-hair) solid var(--color-neutral-300);
   background: transparent;
   padding: 0 18px;
   font-size: 10.5px;
@@ -104,7 +117,7 @@ input, button, textarea { font-family: var(--font-body); }
   gap: 24px;
 }
 
-.msg { border-left: 2px solid var(--color-neutral-400); padding-left: 16px; }
+.msg { border-left: var(--rule) solid var(--color-neutral-400); padding-left: 16px; }
 .msg-agent { border-left-color: var(--color-accent); }
 
 .msg-label {
@@ -128,8 +141,8 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* ── Inline cards ───────────────────────────────────────────────────── */
 
-.panel { margin-top: 14px; border: 2px solid var(--color-text); max-width: 640px; }
-.panel-light { margin-top: 14px; border: 1px solid var(--color-neutral-300); max-width: 640px; }
+.panel { margin-top: 14px; border: var(--rule) solid var(--color-text); max-width: 640px; }
+.panel-light { margin-top: 14px; border: var(--rule-hair) solid var(--color-neutral-300); max-width: 640px; }
 
 .panel-head {
   display: flex;
@@ -137,7 +150,7 @@ input, button, textarea { font-family: var(--font-body); }
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--color-neutral-300);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
 }
 
 .panel-head-title {
@@ -151,9 +164,20 @@ input, button, textarea { font-family: var(--font-body); }
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  display: flex;
+  gap: 10px;
 }
 
-.row { border-bottom: 1px solid var(--color-neutral-300); }
+/* The chosen sort. A pressed link-button reads as the current state rather
+   than as somewhere to go, so it takes the text colour and loses the hand. */
+.link-btn[aria-pressed="true"] {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: default;
+}
+
+.row { border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
 .row:last-child { border-bottom: 0; }
 
 /* Moments */
@@ -221,7 +245,7 @@ input, button, textarea { font-family: var(--font-body); }
 /* Buttons in the Modernist idiom — flush left labels, square corners */
 
 .btn-outline {
-  border: 1px solid var(--color-text);
+  border: var(--rule-hair) solid var(--color-text);
   background: transparent;
   color: var(--color-text);
   padding: 6px 10px;
@@ -253,7 +277,7 @@ input, button, textarea { font-family: var(--font-body); }
 .btn-solid:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .chip {
-  border: 1px solid var(--color-neutral-400);
+  border: var(--rule-hair) solid var(--color-neutral-400);
   background: transparent;
   color: var(--color-neutral-800);
   padding: 6px 10px;
@@ -272,7 +296,7 @@ input, button, textarea { font-family: var(--font-body); }
 /* Inline player — opens in place, so a moment is reviewed without a timeline */
 
 .inline-player {
-  border-top: 1px solid var(--color-neutral-300);
+  border-top: var(--rule-hair) solid var(--color-neutral-300);
   background: var(--color-neutral-900);
   position: relative;
 }
@@ -286,7 +310,7 @@ input, button, textarea { font-family: var(--font-body); }
   gap: 10px;
   padding: 7px 12px;
   background: var(--color-bg);
-  border-top: 1px solid var(--color-neutral-300);
+  border-top: var(--rule-hair) solid var(--color-neutral-300);
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
   color: var(--color-neutral-700);
@@ -295,7 +319,7 @@ input, button, textarea { font-family: var(--font-body); }
 /* Ingest */
 
 .dropzone {
-  border: 2px dashed var(--color-neutral-500);
+  border: var(--rule) dashed var(--color-neutral-500);
   background: var(--color-neutral-100);
   padding: 18px;
   display: flex;
@@ -318,7 +342,7 @@ input, button, textarea { font-family: var(--font-body); }
 .dz-meta { font-size: 11px; color: var(--color-neutral-700); margin-top: 3px; }
 
 .file-label {
-  border: 1px solid var(--color-text);
+  border: var(--rule-hair) solid var(--color-text);
   background: transparent;
   padding: 7px 11px;
   font-size: 10.5px;
@@ -330,12 +354,12 @@ input, button, textarea { font-family: var(--font-body); }
 }
 .file-label:hover { background: var(--color-accent-100); }
 
-.source-tabs { display: flex; border-bottom: 1px solid var(--color-neutral-300); }
+.source-tabs { display: flex; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
 
 .source-tab {
   flex: 1;
   border: 0;
-  border-right: 1px solid var(--color-neutral-300);
+  border-right: var(--rule-hair) solid var(--color-neutral-300);
   background: transparent;
   color: var(--color-text);
   padding: 9px;
@@ -393,8 +417,8 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* Reel */
 
-.reel-bars { display: flex; height: 30px; border-bottom: 1px solid var(--color-neutral-300); }
-.reel-bar { border-right: 1px solid var(--color-bg); flex-basis: 0; }
+.reel-bars { display: flex; height: 30px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
+.reel-bar { border-right: var(--rule-hair) solid var(--color-bg); flex-basis: 0; }
 
 .clip-row {
   display: grid;
@@ -402,7 +426,7 @@ input, button, textarea { font-family: var(--font-body); }
   gap: 10px;
   align-items: center;
   padding: 9px 12px;
-  border-bottom: 1px solid var(--color-neutral-300);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
 }
 
 .clip-n {
@@ -417,7 +441,7 @@ input, button, textarea { font-family: var(--font-body); }
 .stepper { display: flex; align-items: center; gap: 6px; }
 
 .step-btn {
-  border: 1px solid var(--color-neutral-400);
+  border: var(--rule-hair) solid var(--color-neutral-400);
   background: transparent;
   color: var(--color-text);
   width: 24px;
@@ -452,7 +476,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* Jobs */
 
-.job { padding: 11px 12px; border-bottom: 1px solid var(--color-neutral-300); }
+.job { padding: 11px 12px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
 .job:last-child { border-bottom: 0; }
 
 .job-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
@@ -475,7 +499,7 @@ input, button, textarea { font-family: var(--font-body); }
   gap: 10px;
   align-items: flex-start;
   margin-top: 7px;
-  border-left: 2px solid var(--color-accent-2);
+  border-left: var(--rule) solid var(--color-accent-2);
   background: var(--color-accent-2-100);
   padding: 8px 10px;
 }
@@ -491,7 +515,7 @@ input, button, textarea { font-family: var(--font-body); }
   gap: 12px;
   align-items: center;
   border: 0;
-  border-bottom: 1px solid var(--color-neutral-300);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
   background: transparent;
   color: var(--color-text);
   padding: 11px 12px;
@@ -500,7 +524,7 @@ input, button, textarea { font-family: var(--font-body); }
 .platform:hover { background: var(--color-accent-100); }
 .platform[aria-pressed="true"] { background: var(--color-accent-100); }
 
-.checkmark { width: 14px; height: 14px; border: 2px solid var(--color-neutral-600); }
+.checkmark { width: 14px; height: 14px; border: var(--rule) solid var(--color-neutral-600); }
 .platform[aria-pressed="true"] .checkmark { border-color: var(--color-accent); background: var(--color-accent); }
 
 .platform-name { font-size: 12.5px; font-weight: 700; }
@@ -515,7 +539,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .caption-box {
   width: 100%;
-  border: 1px solid var(--color-neutral-400);
+  border: var(--rule-hair) solid var(--color-neutral-400);
   background: var(--color-neutral-100);
   padding: 9px;
   font-size: 12.5px;
@@ -528,7 +552,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* Composer */
 
-.composer { flex: none; border-top: 2px solid var(--color-text); }
+.composer { flex: none; border-top: var(--rule) solid var(--color-text); }
 
 .suggestions { padding: 12px 48px 8px; display: flex; flex-wrap: wrap; gap: 7px; }
 
@@ -536,7 +560,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .composer-box {
   display: flex;
-  border: 2px solid var(--color-text);
+  border: var(--rule) solid var(--color-text);
   background: var(--color-neutral-100);
 }
 
@@ -553,7 +577,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .composer-send {
   border: 0;
-  border-left: 2px solid var(--color-text);
+  border-left: var(--rule) solid var(--color-text);
   background: var(--color-accent);
   color: #fff;
   padding: 0 20px;
@@ -587,7 +611,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .signin-card {
   width: min(420px, 92vw);
-  border: 2px solid var(--color-text);
+  border: var(--rule) solid var(--color-text);
   background: var(--color-neutral-100);
   padding: var(--space-8);
 }
@@ -600,7 +624,7 @@ input, button, textarea { font-family: var(--font-body); }
 .signin-card p { font-size: 14px; color: var(--color-neutral-800); margin-bottom: var(--space-6); }
 
 .error-note {
-  border-left: 2px solid var(--color-accent-2);
+  border-left: var(--rule) solid var(--color-accent-2);
   background: var(--color-accent-2-100);
   color: var(--color-accent-2-900);
   padding: 9px 11px;
@@ -652,7 +676,7 @@ input, button, textarea { font-family: var(--font-body); }
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  border: 2px solid var(--color-text);
+  border: var(--rule) solid var(--color-text);
   background: transparent;
   color: var(--color-text);
   padding: 6px 8px;
@@ -681,7 +705,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .modal-card {
   width: min(520px, 100%);
   background: var(--color-neutral-100);
-  border: 2px solid var(--color-text);
+  border: var(--rule) solid var(--color-text);
   max-height: 84vh;
   overflow-y: auto;
 }
@@ -691,7 +715,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   align-items: baseline;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 2px solid var(--color-text);
+  border-bottom: var(--rule) solid var(--color-text);
 }
 
 .modal-title {
@@ -702,7 +726,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   text-transform: uppercase;
 }
 
-.setting { padding: 14px 16px; border-bottom: 1px solid var(--color-neutral-300); }
+.setting { padding: 14px 16px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
 .setting:last-child { border-bottom: 0; }
 
 .setting-hint {
@@ -720,7 +744,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   flex: none;
   display: flex;
   flex-direction: column;
-  border-right: 2px solid var(--color-text);
+  border-right: var(--rule) solid var(--color-text);
   background: var(--color-neutral-100);
   min-height: 0;
 }
@@ -728,7 +752,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .sessions-new {
   flex: none;
   border: 0;
-  border-bottom: 2px solid var(--color-text);
+  border-bottom: var(--rule) solid var(--color-text);
   background: var(--color-accent);
   color: #fff;
   padding: 13px 16px;
@@ -748,7 +772,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 /* The row holds the session button and its delete control side by side; the
    delete only appears on hover or focus, so a list of matches is not a row of
    crosses inviting an accident. */
-.session-row { display: flex; align-items: stretch; border-bottom: 1px solid var(--color-neutral-300); }
+.session-row { display: flex; align-items: stretch; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
 .session-row:hover { background: var(--color-accent-100); }
 
 .session-delete {
@@ -819,15 +843,18 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
    so the two sit side by side rather than the facts replacing the footage. The
    card is wider than the settings dialog for that reason — 520px of video and
    a two-column table beside it is neither. */
-.modal-card-wide { width: min(940px, 100%); }
+.modal-card-wide { width: min(1180px, 100%); }
 
+/* The video takes the larger share. The record beside it is a two-column table
+   of short values, which reads fine narrow, while a 16:9 frame squeezed to
+   half a dialog is the thing someone opened this to look at. */
 .detail-split {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
 }
 
 .detail-player {
-  border-right: 2px solid var(--color-text);
+  border-right: var(--rule) solid var(--color-text);
   background: var(--color-neutral-900);
 }
 
@@ -847,7 +874,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .detail-split { grid-template-columns: 1fr; }
   .detail-player {
     border-right: 0;
-    border-bottom: 2px solid var(--color-text);
+    border-bottom: var(--rule) solid var(--color-text);
   }
   .detail-player .player-slot { position: static; }
 }
@@ -863,7 +890,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .detail-key,
 .detail-value {
   padding: 9px 14px;
-  border-bottom: 1px solid var(--color-neutral-300);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -875,7 +902,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-size: 10px;
   color: var(--color-neutral-700);
   white-space: nowrap;
-  border-right: 1px solid var(--color-neutral-300);
+  border-right: var(--rule-hair) solid var(--color-neutral-300);
 }
 
 .detail-value { overflow-wrap: anywhere; }
@@ -892,7 +919,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   justify-content: space-between;
   gap: 12px;
   padding: 9px 12px;
-  border-top: 1px solid var(--color-neutral-300);
+  border-top: var(--rule-hair) solid var(--color-neutral-300);
 }
 
 .pager-count {
@@ -904,3 +931,63 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 
 .pager .link-btn[disabled] { opacity: 0.35; cursor: default; }
+
+
+/* ── Rounding ───────────────────────────────────────────────────────────
+   Inert under Modernist, whose radii are 0 — these rules name the tokens so a
+   theme that sets them is applied rather than ignored.
+
+   Containers that round also clip. A row's own background or bottom rule is
+   square, so without overflow it draws over the corner it is supposed to sit
+   inside — visible as a notch on exactly one row of a list. */
+
+.panel,
+.panel-light,
+.modal-card,
+.dropzone,
+.signin-card,
+.inline-player,
+.detail-player,
+.composer-box,
+.stage-strip,
+.source-tabs {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+/* The popup's two columns share the card's corners rather than having their
+   own, so the player rounds on the left only. */
+.detail-player { border-radius: var(--radius-lg) 0 0 var(--radius-lg); }
+@media (max-width: 760px) {
+  .detail-player { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+}
+
+.btn-solid,
+.btn-outline,
+.chip,
+.link-btn,
+.header-btn,
+.file-label,
+.platform,
+.session,
+.thumb,
+.dz-thumb,
+.step-btn,
+.caption-box,
+.composer-input,
+.header-select {
+  border-radius: var(--radius-md);
+}
+
+.meter,
+.meter i,
+.stage-meter,
+.stage-meter i,
+.reel-bar,
+.checkmark {
+  border-radius: var(--radius-sm);
+}
+
+/* The send button is flush against the input's edge, so it keeps the corners
+   on that side square whatever the theme does. */
+.composer-send { border-radius: 0 var(--radius-md) var(--radius-md) 0; }

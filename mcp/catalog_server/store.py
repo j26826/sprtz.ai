@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -334,6 +335,69 @@ def get_game(job_id: str) -> dict[str, Any]:
     if not snapshot.exists:
         raise KeyError(f"No game record for job {job_id!r}.")
     return _game_out(snapshot.to_dict())
+
+
+def _title_key(text: str) -> str:
+    """Letters and digits only, for comparing a title with a sentence.
+
+    Titles are composed in code — "SWE v DEN — EHF Euro" — and typed back by
+    hand, where the em dash becomes a hyphen and the spacing drifts. Case and
+    punctuation are noise for this comparison; the letters are not.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def match_games_by_title(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Find games whose title appears in ``query``, longest title first.
+
+    A name is what a vector search is worst at. "FAG v TVB — DAIKIN HBL" is
+    abbreviations and a sponsor, so its embedding sits near every other fixture
+    in the same league, and `knn_search_games` answers with a plausible
+    neighbour rather than the match that was named. Comparing the text answers
+    it exactly or not at all, which is the right failure for a name.
+
+    Reads the collection with a field mask so the 768-float embeddings stay in
+    Firestore: this scans every game, and the vectors are almost all of the
+    bytes.
+    """
+    asked = _title_key(query)
+    if not asked:
+        return []
+
+    fields = ["jobId", "title", "homeTeam", "awayTeam",
+              "groundedHomeTeam", "groundedAwayTeam"]
+    hits: list[tuple[int, str]] = []
+    for doc in db().collection("games").select(fields).stream():
+        data = doc.to_dict() or {}
+        for name in _game_names(data):
+            key = _title_key(name)
+            # One word is not a name: a team called "Lions" would answer any
+            # question mentioning lions.
+            if len(key.split()) > 1 and key in asked:
+                hits.append((len(key), data.get("jobId") or doc.id))
+                break
+
+    # Longest first, so a title is not answered by a fixture whose own title is
+    # a prefix of it.
+    hits.sort(key=lambda hit: hit[0], reverse=True)
+
+    games: list[dict[str, Any]] = []
+    for _, job_id in hits[:limit]:
+        try:
+            games.append(get_game(job_id))
+        except KeyError:
+            continue
+    return games
+
+
+def _game_names(data: dict[str, Any]) -> list[str]:
+    """The ways one game might be named: its title, then its fixture."""
+    home = data.get("homeTeam") or data.get("groundedHomeTeam") or ""
+    away = data.get("awayTeam") or data.get("groundedAwayTeam") or ""
+    names = [data.get("title") or ""]
+    if home and away:
+        names += [f"{home} v {away}", f"{home} vs {away}", f"{home} {away}"]
+    return [n for n in names if n]
 
 
 def knn_search_games(query: str, owner_uid: str = "", limit: int = 5) -> list[dict[str, Any]]:
