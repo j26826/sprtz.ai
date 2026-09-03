@@ -116,6 +116,11 @@ const STRINGS = {
     'ingest.noFile': 'No file chosen',
     'ingest.dropHere': 'Drop a file here, or choose one',
     'ingest.sport': 'Sport',
+    'ingest.fromStorage': 'Or use a Cloud Storage location',
+    'ingest.useLocation': 'Use this location',
+    'ingest.fromStorageHint':
+      'For a large recording, copy it in with gcloud storage cp and paste the '
+      + 'gs:// path here. That upload is resumable; the browser one is not.',
     'ingest.start': 'Start analysis',
     'ingest.uploading': 'Uploading…',
     'ingest.analysing': 'Analysing…',
@@ -297,6 +302,11 @@ const STRINGS = {
     'ingest.noFile': 'Keine Datei gewählt',
     'ingest.dropHere': 'Datei hierher ziehen oder auswählen',
     'ingest.sport': 'Sportart',
+    'ingest.fromStorage': 'Oder einen Cloud-Storage-Pfad verwenden',
+    'ingest.useLocation': 'Diesen Pfad verwenden',
+    'ingest.fromStorageHint':
+      'Kopieren Sie große Aufzeichnungen mit gcloud storage cp und fügen Sie den '
+      + 'gs://-Pfad hier ein. Dieser Upload ist fortsetzbar, der im Browser nicht.',
     'ingest.start': 'Analyse starten',
     'ingest.uploading': 'Wird hochgeladen…',
     'ingest.analysing': 'Wird analysiert…',
@@ -459,6 +469,11 @@ const STRINGS = {
     'ingest.noFile': 'Nessun file scelto',
     'ingest.dropHere': 'Trascina un file qui, oppure scegline uno',
     'ingest.sport': 'Sport',
+    'ingest.fromStorage': 'Oppure usa un percorso Cloud Storage',
+    'ingest.useLocation': 'Usa questo percorso',
+    'ingest.fromStorageHint':
+      'Per una registrazione lunga, copiala con gcloud storage cp e incolla qui il '
+      + 'percorso gs://. Quel caricamento è ripristinabile; quello del browser no.',
     'ingest.start': 'Avvia analisi',
     'ingest.uploading': 'Caricamento…',
     'ingest.analysing': 'Analisi…',
@@ -622,6 +637,11 @@ const STRINGS = {
     'ingest.noFile': 'Aucun fichier choisi',
     'ingest.dropHere': 'Déposez un fichier ici, ou choisissez-en un',
     'ingest.sport': 'Sport',
+    'ingest.fromStorage': 'Ou utiliser un emplacement Cloud Storage',
+    'ingest.useLocation': 'Utiliser cet emplacement',
+    'ingest.fromStorageHint':
+      'Pour un long enregistrement, copiez-le avec gcloud storage cp et collez le '
+      + 'chemin gs:// ici. Ce transfert est reprenable ; celui du navigateur non.',
     'ingest.start': "Lancer l'analyse",
     'ingest.uploading': 'Import en cours…',
     'ingest.analysing': 'Analyse en cours…',
@@ -785,6 +805,11 @@ const STRINGS = {
     'ingest.noFile': 'Ningún archivo elegido',
     'ingest.dropHere': 'Arrastra un archivo aquí, o elige uno',
     'ingest.sport': 'Deporte',
+    'ingest.fromStorage': 'O usa una ubicación de Cloud Storage',
+    'ingest.useLocation': 'Usar esta ubicación',
+    'ingest.fromStorageHint':
+      'Para una grabación larga, cópiala con gcloud storage cp y pega aquí la ruta '
+      + 'gs://. Esa subida se puede reanudar; la del navegador no.',
     'ingest.start': 'Iniciar análisis',
     'ingest.uploading': 'Subiendo…',
     'ingest.analysing': 'Analizando…',

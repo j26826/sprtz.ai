@@ -182,6 +182,108 @@ async def create_job(
     return result
 
 
+# gs://bucket/object. Bucket naming is GCS's own rule; the object name is
+# deliberately loose, because GCS object names are a flat key space — there are
+# no directories to traverse out of, so the only thing worth refusing is a
+# control character, which would be a header-splitting attempt rather than a path.
+_GCS_URI = re.compile(r"^gs://([a-z0-9][a-z0-9._\-]{1,61}[a-z0-9])/([^\x00-\x1f]{1,1024})$")
+
+
+class RegisterSourceRequest(BaseModel):
+    gcs_uri: str = Field(min_length=6, max_length=1200)
+    title: str = Field(min_length=1, max_length=200)
+    sport: str = Field(default="handball")
+    metadata_language: str = Field(default="en", max_length=8)
+
+
+@router.post("/from-source", status_code=status.HTTP_201_CREATED)
+async def create_job_from_source(
+    body: RegisterSourceRequest,
+    user: CallerIdentity = Depends(current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Register a job against a video already in Cloud Storage.
+
+    The browser upload is one non-resumable PUT: a twelve-gigabyte file that
+    loses its connection starts again from zero, and these recordings are eight
+    hours long. `gcloud storage cp` is resumable, parallel and already
+    authenticated, so for a file this size the right answer is to let it do the
+    upload and hand the location over afterwards.
+
+    **The bucket is not the caller's to choose.** Reading an object named in a
+    request, with this service's credentials, is a confused deputy unless the
+    set of readable buckets is decided by the deployment — so it is the uploads
+    bucket plus whatever `EXTRA_SOURCE_BUCKETS` names, and nothing else. That is
+    the same boundary a browser upload already has; what changes is who does the
+    copying.
+
+    Size and name come from the object rather than from the request, because the
+    object is the thing that exists.
+    """
+    match = _GCS_URI.match(body.gcs_uri.strip())
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Not a Cloud Storage location. Expected gs://bucket/path/to/video.mp4",
+        )
+
+    bucket_name, object_name = match.groups()
+    if bucket_name not in settings.source_buckets:
+        allowed = ", ".join(sorted(settings.source_buckets)) or "none"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Sources may only be read from: {allowed}.",
+        )
+
+    try:
+        blob = _storage_client().bucket(bucket_name).get_blob(object_name)
+    except Exception as exc:
+        logger.exception("could not read %s", body.gcs_uri)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not reach Cloud Storage.",
+        ) from exc
+
+    if blob is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No object at that location. Check the path and that the copy finished.",
+        )
+    size_bytes = int(blob.size or 0)
+    if size_bytes <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That object is empty.",
+        )
+    if size_bytes > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Source exceeds the {settings.max_upload_bytes // 1024**3} GiB limit.",
+        )
+
+    # Whether it is a video at all is settled by ffprobe in the ingest stage,
+    # the same as for an upload: a name and a content type are both chosen by
+    # whoever wrote the object.
+    result = await clients.call_mcp(
+        "catalog",
+        "create_job",
+        {
+            "job_id": uuid.uuid4().hex[:16],
+            "owner_uid": user.uid,
+            "title": body.title,
+            "sport": body.sport,
+            "gcs_uri": f"gs://{bucket_name}/{object_name}",
+            "original_name": object_name.rsplit("/", 1)[-1],
+            "size_bytes": size_bytes,
+            "content_type": blob.content_type or "",
+            "metadata_language": body.metadata_language,
+        },
+    )
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+    return result
+
+
 @router.get("/pending-uploads")
 async def list_pending_uploads(
     user: CallerIdentity = Depends(current_user),

@@ -65,7 +65,7 @@ const state = {
   sports: ['handball'],
   platforms: { tiktok: true, instagram: true, youtube: false },
   playing: null,          // { momentId, start, end }
-  upload: { file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '' },
+  upload: { file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '', gcsUri: '' },
   pendingUploads: [],     // uploaded to GCS but never registered as a job
   thumbs: { urls: {}, asked: new Set() },  // momentId -> signed URL for its still
   details: null,          // the moment whose popup is open, and playing inside it
@@ -865,6 +865,17 @@ function ingestCard() {
           <label class="file-label">${esc(t('ingest.chooseFile'))}
             <input type="file" id="file-input" accept="video/*" style="display:none" />
           </label>
+        </div>
+        <div class="gcs-row">
+          <div class="field-label">${esc(t('ingest.fromStorage'))}</div>
+          <div class="gcs-input-row">
+            <input class="composer-input" data-gcs-input
+                   placeholder="gs://bucket/path/to/video.mp4"
+                   value="${esc(u.gcsUri || '')}" />
+            <button class="btn-outline" data-register-gcs="1"
+                    ${u.gcsUri ? '' : 'disabled'}>${esc(t('ingest.useLocation'))}</button>
+          </div>
+          <div class="setting-hint">${esc(t('ingest.fromStorageHint'))}</div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center">
           <div class="field-label" style="margin-right:4px">${esc(t('ingest.sport'))}</div>
@@ -1778,6 +1789,58 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
 }
 
 
+/**
+ * Register a job against a video already in Cloud Storage.
+ *
+ * The browser upload is one non-resumable PUT, and these recordings are eight
+ * hours and twelve gigabytes: a dropped connection starts the whole thing
+ * again. `gcloud storage cp` is resumable and parallel, so for a file that size
+ * the right answer is to let it do the copying and hand the location over.
+ */
+async function registerFromStorage() {
+  const u = state.upload;
+  const uri = (u.gcsUri || '').trim();
+  if (!uri) return;
+
+  u.status = 'uploading';
+  u.stage = 'Checking the location';
+  render();
+
+  try {
+    const job = await api('/api/jobs/from-source', {
+      method: 'POST',
+      body: JSON.stringify({
+        gcs_uri: uri,
+        title: uri.split('/').pop().replace(/\.[^.]+$/, '') || uri,
+        sport: u.sport,
+        metadata_language: getSettings().metadataLanguage,
+      }),
+    });
+
+    u.gcsUri = '';
+    u.status = 'analyzing';
+    u.stage = 'Handed to the agent';
+    selectJob(job.job_id);
+    playbackUrl = null;
+    if (state.sessionKey) {
+      updateSession(state.sessionKey, { jobId: job.job_id, title: job.title || uri });
+      state.sessions = listSessions();
+    }
+    render();
+
+    await ask('Analyse this match and suggest clips.', {
+      showJobs: true,
+      showActions: true,
+      actions: [t('action.processing'), t('action.bestMoments')],
+    });
+  } catch (err) {
+    say(`That location could not be used: ${err.message}`);
+  }
+  u.status = 'idle';
+  render();
+}
+
+
 async function resumeUpload(jobId) {
   const pending = state.pendingUploads.find((p) => p.job_id === jobId);
   if (!pending) return;
@@ -1848,7 +1911,7 @@ document.addEventListener('click', (event) => {
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
     + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
-    + '[data-open-game],[data-page],[data-sort],[data-show-all]');
+    + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -1873,6 +1936,7 @@ document.addEventListener('click', (event) => {
     openGameDetails(state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame));
     return;
   }
+  if (hit.dataset.registerGcs) { registerFromStorage(); return; }
   if (hit.dataset.showAll) {
     const msg = state.msgs[Number(hit.dataset.showAll)];
     if (msg) { msg.showAll = true; msg.page = 0; }
@@ -1967,6 +2031,19 @@ document.addEventListener('click', (event) => {
   }
   if (hit.dataset.sport) { state.upload.sport = hit.dataset.sport; render(); }
 });
+
+// The transcript re-renders on every Firestore write, which rebuilds the field
+// underneath whoever is typing in it. Holding the value in state and writing it
+// back is what keeps a pasted path from vanishing mid-analysis.
+document.addEventListener('input', (event) => {
+  if (!event.target.matches?.('[data-gcs-input]')) return;
+  const wasEmpty = !state.upload.gcsUri;
+  state.upload.gcsUri = event.target.value;
+  // Only re-render when the button's enabled state actually changes; doing it
+  // on every keystroke would move the caret to the end of the field.
+  if (wasEmpty !== !state.upload.gcsUri) render();
+});
+
 
 document.addEventListener('change', (event) => {
   if (event.target.id !== 'file-input') return;

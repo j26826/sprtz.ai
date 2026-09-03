@@ -907,6 +907,25 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 .detail-value { overflow-wrap: anywhere; }
 
+/* Registering a source already in Cloud Storage. Its own block under the
+   dropzone rather than beside it: they are two ways to do the same thing, and
+   side by side they read as two halves of one. */
+.gcs-row { margin-top: 14px; }
+
+.gcs-input-row { display: flex; gap: 8px; margin-top: 6px; }
+.gcs-input-row .composer-input {
+  flex: 1;
+  min-width: 0;
+  border: var(--rule-hair) solid var(--color-neutral-400);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.gcs-input-row .btn-outline { flex: none; }
+.gcs-row .setting-hint { margin-top: 6px; }
+
 /* A game's record opened inside the list rather than in the popup. Indented
    and quieter than a row of its own, so the headline above it stays the thing
    being scanned. */
