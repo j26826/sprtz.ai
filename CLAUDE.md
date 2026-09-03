@@ -628,11 +628,30 @@ moments yet", which is not the same as "I could not read them". The
 missing-index failure arrived as prose beside an empty card, and hiding it
 unconditionally would have made that unreadable.
 
+**Which card answers a question lives in `src/cards.js`, and is tested.** It
+was a chain of literal phrases, and literal phrases are brittle in the exact
+place it matters: `all games` matched "show all games" and missed "show all
+**the** games", which fell through to moments — the wrong data entirely, with
+the prose that would have explained it hidden because a card claimed the
+answer. It now reads the question as words: the plural noun, or the singular
+with a scope word like all/every/list, chooses the games list, and a question
+naming plays is about the plays whatever else it mentions ("show all moments of
+the FAG v TVB **match**").
+
+**Asking for details opens them in place.** "show all game details" is a
+request for the records; leaving each behind its own Details button answers it
+with an index. The expanded rows come from `GAME_DETAIL_ROWS`, the same list
+the popup uses, because a second list is a second thing to keep current.
+
 **Lists page rather than truncate.** The moments list used to stop at six, which
 looks like an analysis that found six; showing all two hundred would bury the
 conversation. Ten a page, with the page held on the message so scrolling back to
 an earlier answer finds it where it was left. `pageOf` clamps out-of-range pages
-rather than rendering blank.
+rather than rendering blank, and takes a page size — three when a game's record
+is open, because ten of those is a dozen rows each and a page nobody can see the
+end of is not a page. Jobs, the activity feed and the reel page too: fifty jobs
+and eighty events in one message bury the conversation as surely as two hundred
+moments did.
 
 ### The two detail widgets
 
@@ -665,7 +684,7 @@ Grounded values get their own rows in the game popup, labelled "(from search)",
 and the sources sit at the bottom of it rather than on the card. They qualify
 the grounded rows and are meaningless beside a row nobody is looking at.
 
-### web/src/moments.js, and the only web tests there are
+### web/src/moments.js and web/src/cards.js, and the only web tests there are
 
 `app.js` cannot be loaded outside a browser: it imports the Firebase SDK from a
 CDN, so `import()` in Node fails on the first line. That is why the moment
@@ -673,9 +692,14 @@ filtering lives in its own module that imports **nothing** — pure functions
 over plain objects, which `node --test web/tests` can reach. CI runs it beside
 `check.mjs`.
 
-It is worth having because the failure mode is silent and central: a word added
-carelessly to `FILTER_NOISE` empties the card the app's own suggestion chip
-opens, and nothing about that says which word did it.
+`cards.js` is there for the same reason and answers a different question:
+*which* card, rather than what goes in it.
+
+Both are worth having because the failure mode is silent and central. A word
+added carelessly to `FILTER_NOISE` empties the card the app's own suggestion
+chip opens; a phrase the routing does not recognise answers with the wrong
+data and hides the prose that would have explained it. Neither says which word
+did it.
 
 ### web/check.mjs
 

@@ -27,6 +27,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
+import { chooseCard, wantsDetail } from './cards.js';
 import { filterAsked, gameNamedIn as namedGame, selectMoments } from './moments.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
@@ -570,23 +571,24 @@ function renderSessions() {
 const PAGE_SIZE = 10;
 
 
-function pageOf(items, page) {
-  const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+function pageOf(items, page, size = PAGE_SIZE) {
+  const pages = Math.max(1, Math.ceil(items.length / size));
   const current = Math.min(Math.max(0, page || 0), pages - 1);
-  const from = current * PAGE_SIZE;
+  const from = current * size;
   return {
-    slice: items.slice(from, from + PAGE_SIZE),
+    slice: items.slice(from, from + size),
     current,
     pages,
     from: from + 1,
-    to: Math.min(from + PAGE_SIZE, items.length),
+    to: Math.min(from + size, items.length),
     total: items.length,
+    size,
   };
 }
 
 
 function pagerRow(view, index) {
-  if (view.total <= PAGE_SIZE) return '';
+  if (view.total <= view.size) return '';
   return `
     <div class="pager">
       <button class="link-btn" data-page="${index}:${view.current - 1}"
@@ -878,10 +880,13 @@ function ingestCard() {
     </div>`;
 }
 
-function reelCard() {
+function reelCard(msg, index) {
   if (!state.clips.length) return emptyCard(t('reel.none'));
   const total = state.clips.reduce((a, c) => a + (c.durationSec || 0), 0);
   const aspect = state.clips[0]?.aspect || '9:16';
+  // The bar strip stays whole — it is the shape of the reel, and a page of it
+  // would be a different reel. Only the editable rows page.
+  const view = pageOf(state.clips, msg.page);
   return `
     <div class="panel">
       <div class="panel-head">
@@ -893,9 +898,9 @@ function reelCard() {
           <div class="reel-bar" style="flex-grow:${c.durationSec || 1};
                background:${i % 2 ? 'var(--color-neutral-400)' : 'var(--color-neutral-700)'}"></div>`).join('')}
       </div>
-      ${state.clips.map((c, i) => `
+      ${view.slice.map((c, i) => `
         <div class="clip-row">
-          <div class="clip-n">${String(i + 1).padStart(2, '0')}</div>
+          <div class="clip-n">${String(view.from + i).padStart(2, '0')}</div>
           <div class="clip-label">${esc(c.title || c.hookText || 'Clip')}</div>
           <div class="stepper">
             <button class="step-btn" data-clip-shorter="${esc(c.clipId)}">&minus;</button>
@@ -904,6 +909,7 @@ function reelCard() {
           </div>
           <button class="link-btn" data-clip-play="${esc(c.clipId)}">${esc(t('reel.play'))}</button>
         </div>`).join('')}
+      ${pagerRow(view, index)}
       <div class="panel-actions">
         <button class="btn-solid" data-ask="Generate the video">${esc(t('reel.generate'))}</button>
         <button class="btn-outline" data-ask="Reframe it vertical">${esc(t('reel.reframe'))}</button>
@@ -1010,10 +1016,31 @@ function gameHeadline(g) {
 }
 
 
+/**
+ * A game's record as label-and-value rows.
+ *
+ * The same rows the popup shows, because they are the same record — a second
+ * list for the expanded view is a second thing to keep current, and the one
+ * that would quietly stop matching.
+ */
+function gameRows(g) {
+  const rows = GAME_DETAIL_ROWS
+    .map(([key, read]) => [t(key), read(g)])
+    .filter(([, value]) => value !== '' && value != null);
+  if (!rows.length) return '';
+
+  return `<div class="detail-grid detail-inline">${rows.map(([label, value]) => `
+    <div class="detail-key">${esc(label)}</div>
+    <div class="detail-value">${esc(String(value))}</div>`).join('')}</div>`;
+}
+
+
 function gamesCard(msg, index) {
   if (!state.games.length) return emptyCard(t('games.none'));
 
-  const view = pageOf(state.games, msg.page);
+  // Three at a time when the records are open: ten of them is a dozen rows
+  // each, and a page nobody can see the end of is not a page.
+  const view = pageOf(state.games, msg.page, msg.expandGames ? 3 : PAGE_SIZE);
   return `
     <div class="panel-light">
       ${view.slice.map((g) => {
@@ -1036,6 +1063,7 @@ function gamesCard(msg, index) {
                 </button>
               </div>
             </div>
+            ${msg.expandGames ? gameRows(g) : ''}
           </div>`;
       }).join('')}
       ${pagerRow(view, index)}
@@ -1176,9 +1204,10 @@ function deleteSession(sessionId) {
   }
 }
 
-function jobsCard() {
+function jobsCard(msg, index) {
   if (!state.jobs.length) return emptyCard(t('jobs.none'));
-  return `<div class="panel-light">${state.jobs.map((j) => {
+  const view = pageOf(state.jobs, msg.page);
+  return `<div class="panel-light">${view.slice.map((j) => {
     const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
     const failed = j.status === 'failed';
     const stalled = running && isStalled(j);
@@ -1217,7 +1246,7 @@ function jobsCard() {
                   data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
       </div>`;
-  }).join('')}</div>`;
+  }).join('')}${pagerRow(view, index)}</div>`;
 }
 
 function publishCard() {
@@ -1251,17 +1280,19 @@ function publishCard() {
     </div>`;
 }
 
-function activityCard() {
+function activityCard(msg, index) {
   if (!state.events.length) return emptyCard(t('activity.none'));
-  // Every event, newest first. The feed is how a long run is followed, so
-  // stopping at a dozen hides exactly the part someone scrolled back for.
-  return `<div class="panel-light">${state.events.map((e) => `
+  // Every event, newest first, a page at a time. The feed is how a long run is
+  // followed, so stopping at a dozen hides exactly the part someone scrolled
+  // back for — but eighty of them in one message buries the conversation.
+  const view = pageOf(state.events, msg.page);
+  return `<div class="panel-light">${view.slice.map((e) => `
     <div class="job">
       <div class="job-top">
         <div class="job-name" style="font-weight:400;font-size:11.5px">${esc(e.message)}</div>
         <div class="job-status" data-tone="${e.level === 'error' ? 'failed' : 'idle'}">${esc(e.stage || '')}</div>
       </div>
-    </div>`).join('')}</div>`;
+    </div>`).join('')}${pagerRow(view, index)}</div>`;
 }
 
 function actionsRow(msg) {
@@ -1301,12 +1332,12 @@ function render() {
       ${cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showIngest ? ingestCard() : ''}
-      ${m.showReel ? reelCard() : ''}
-      ${m.showJobs ? jobsCard() : ''}
+      ${m.showReel ? reelCard(m, i) : ''}
+      ${m.showJobs ? jobsCard(m, i) : ''}
       ${m.showGame ? gameCard() : ''}
       ${m.showGames ? gamesCard(m, i) : ''}
       ${m.showPublish ? publishCard() : ''}
-      ${m.showActivity ? activityCard() : ''}
+      ${m.showActivity ? activityCard(m, i) : ''}
       ${actionsRow(m)}
     </div>`).join('')
     + (state.thinking ? `
@@ -1589,30 +1620,34 @@ async function ask(text, cards = null) {
  * never renders empty — the prototype could assume its fixtures were present.
  */
 function attachCards(index, question) {
-  const q = question.toLowerCase();
   const msg = state.msgs[index];
   if (!msg) return;
 
-  // One branch wins, and the order is what decides which. A question about the
-  // match and a question about the plays inside it are asked in nearly the same
-  // words, so the more specific patterns have to come first.
-  if (/activity|event log|what happened|progress log|history/.test(q)) {
+  // Which card answers this lives in cards.js, where it is tested against the
+  // phrasings people actually type. What is left here is what each card needs
+  // once it has been chosen.
+  const card = chooseCard(question);
+
+  if (card === 'activity') {
     msg.showActivity = true;
-  } else if (/all games|list games|every game|show me the games|which games|browse games/.test(q)) {
+  } else if (card === 'games') {
     msg.showGames = true;
-  } else if (/game detail|about (the|this) (game|match)|who played|final score|which game|find (the|a) (game|match)|what was the (game|match)|the game$|game info/.test(q)) {
+    // "show all game details" asked for the records. Leaving each behind its
+    // own Details button answers with the index rather than the answer.
+    msg.expandGames = wantsDetail(question);
+  } else if (card === 'game') {
     msg.showGame = true;
     msg.showActions = true;
     msg.actions = [t('action.bestMoments'), t('action.processing')];
-  } else if (/ingest|upload|new game|new match|import|analy[sz]e a/.test(q)) {
+  } else if (card === 'ingest') {
     msg.showIngest = true;
-  } else if (/process|job|status|fail|error|still running|analys|analyz/.test(q)) {
+  } else if (card === 'jobs') {
     msg.showJobs = true;
     msg.showActions = true;
     msg.actions = [t('action.bestMoments'), t('action.ingest')];
-  } else if (/publish|post|schedule|package/.test(q)) {
+  } else if (card === 'publish') {
     msg.showPublish = true;
-  } else if (/cut|reel|montage|render|generate|reframe|vertical|shorter|tighten/.test(q)) {
+  } else if (card === 'reel') {
     msg.showReel = true;
     msg.showActions = true;
     msg.actions = [t('reel.generate'), t('reel.reframe'), t('reel.publish')];
@@ -1621,8 +1656,6 @@ function attachCards(index, question) {
     // like the analysis found six. The order is chosen here rather than baked
     // in, so the card's own toggle can change it afterwards.
     msg.showMoments = true;
-    msg.sort = /\bby time\b|chronolog|in order|match order|timeline|earliest/.test(q)
-      ? 'time' : 'score';
     msg.showActions = true;
     msg.actions = ['Cut all of these', 'Cut a 30-second short'];
 

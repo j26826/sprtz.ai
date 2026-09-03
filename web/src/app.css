@@ -907,6 +907,18 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 .detail-value { overflow-wrap: anywhere; }
 
+/* A game's record opened inside the list rather than in the popup. Indented
+   and quieter than a row of its own, so the headline above it stays the thing
+   being scanned. */
+.detail-inline {
+  border-top: var(--rule-hair) solid var(--color-neutral-300);
+  margin-top: 8px;
+  background: var(--color-neutral-100);
+}
+.detail-inline .detail-key,
+.detail-inline .detail-value { padding: 6px 12px; font-size: 11px; }
+.detail-inline > :nth-last-child(-n + 2) { border-bottom: 0; }
+
 @media (max-width: 520px) {
   .detail-grid { grid-template-columns: 1fr; }
   .detail-key { border-right: 0; padding-bottom: 0; border-bottom: 0; }
