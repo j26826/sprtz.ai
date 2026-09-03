@@ -695,8 +695,6 @@ function momentsCard(msg, index) {
       `${Math.round(m.endSec - m.startSec)}s`,
       (m.highlightScore ?? 0).toFixed(2),
     ].filter(Boolean).join(' · ');
-    const open = state.playing?.momentId === m.momentId && !state.details;
-
     // The summary is the line an editor scans by — who did what — so it takes
     // the emphasis. The type and category drop into the meta line beneath,
     // where they are still there to filter on but are not the headline.
@@ -724,7 +722,6 @@ function momentsCard(msg, index) {
               : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
           </div>
         </div>
-        ${open ? playerMarkup(m) : ''}
       </div>`;
   }).join('')}${pagerRow(view, index)}</div>`;
 }
@@ -774,7 +771,7 @@ const DETAIL_ROWS = [
 ];
 
 
-function openDetails(momentId) {
+function openDetails(momentId, range = null) {
   const m = momentById(momentId);
   if (!m) return;
 
@@ -793,7 +790,11 @@ function openDetails(momentId) {
   // watching the save are the same act here.
   $('details-player').innerHTML = playerMarkup(m);
   state.details = momentId;
-  state.playing = { momentId, start: m.startSec, end: m.endSec };
+  state.playing = {
+    momentId,
+    start: range?.start ?? m.startSec,
+    end: range?.end ?? m.endSec,
+  };
   showDetailsModal(true);
   mountPlayer();
 }
@@ -1362,7 +1363,7 @@ async function loadThumbs() {
 
   wanted.forEach((id) => state.thumbs.asked.add(id));
   try {
-    const res = await api(`/jobs/${jobId}/thumbnails`, {
+    const res = await api(`/api/jobs/${jobId}/thumbnails`, {
       method: 'POST',
       body: JSON.stringify({ moment_ids: wanted }),
     });
@@ -1423,18 +1424,20 @@ function buildPlayerEl(m) {
 /** Re-parent the live player into this render's slot, building it once. */
 async function mountPlayer() {
   const { momentId, start, end } = state.playing;
-  // The popup's slot wins when it is open. Both carry the same moment id and
-  // the transcript's comes first in document order, so without this the video
-  // would mount behind the dialog that asked for it.
-  const selector = `[data-slot="${CSS.escape(momentId)}"]`;
-  const slot = (state.details === momentId
-    ? $('details-player').querySelector(selector) : null)
-    || document.querySelector(selector);
+  // A moment plays in its details popup and nowhere else. The transcript used
+  // to hold a slot of its own under the row, which meant two elements with the
+  // same data-slot and the wrong one — the one behind the dialog — winning on
+  // document order.
+  const slot = state.details === momentId
+    ? $('details-player').querySelector(`[data-slot="${CSS.escape(momentId)}"]`)
+    : null;
   if (!slot) return;
 
   if (playerFor !== momentId) {
     destroyPlayer();
-    playerEl = buildPlayerEl(momentById(momentId) || { startSec: start, endSec: end });
+    // The range being played, not the moment's own: a clip carries its own
+    // trim, and the bar under the video is what says where it stops.
+    playerEl = buildPlayerEl({ startSec: start, endSec: end });
     playerFor = momentId;
   }
 
@@ -1507,12 +1510,6 @@ function destroyPlayer() {
   playerFor = null;
 }
 
-function playMoment(momentId) {
-  const m = momentById(momentId);
-  if (!m) return;
-  state.playing = { momentId, start: m.startSec, end: m.endSec };
-  render();
-}
 
 /* ──────────────────────────────────────────────────────────── agent ── */
 
@@ -1811,7 +1808,7 @@ document.addEventListener('click', (event) => {
     }
     return;
   }
-  if (hit.dataset.play) { playMoment(hit.dataset.play); return; }
+  if (hit.dataset.play) { openDetails(hit.dataset.play); return; }
   if (hit.dataset.closePlayer) { state.playing = null; destroyPlayer(); render(); return; }
   if (hit.dataset.details) { openDetails(hit.dataset.details); return; }
   if (hit.dataset.gameDetails) { openGameDetails(state.game); return; }
@@ -1851,8 +1848,11 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (hit.dataset.clipPlay) {
+    // Into the popup as well, with the clip's own trim rather than the
+    // moment's. Setting state.playing alone only worked while the moment's row
+    // happened to be rendered somewhere to hold the player.
     const c = state.clips.find((x) => x.clipId === hit.dataset.clipPlay);
-    if (c) { state.playing = { momentId: c.momentId, start: c.startSec, end: c.endSec }; render(); }
+    if (c) openDetails(c.momentId, { start: c.startSec, end: c.endSec });
     return;
   }
   if (hit.dataset.clipShorter || hit.dataset.clipLonger) {

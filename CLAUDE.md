@@ -614,8 +614,14 @@ A moment row and a game row are the same shape on purpose: a headline worth
 reading, the facts that qualify it underneath, and everything else behind one
 Details button into a shared popup.
 
-**The moment plays inside its own popup**, in the wider left column,
-autoplaying from the in point and stopping at the out point. The video takes
+**The moment plays inside its own popup and nowhere else**, in the wider left
+column, autoplaying from the in point and stopping at the out point. The row's
+thumbnail opens it, and so does a clip's Play in the reel — that one passing
+the clip's own trim rather than the moment's. The row used to hold a player
+slot of its own, which meant two elements carrying the same `data-slot` and the
+wrong one winning on document order; it also meant playing a clip from the reel
+did nothing at all unless that moment's row happened to be rendered somewhere
+to receive it. The video takes
 the larger share of the split: the record beside it is a two-column table of
 short values that reads fine narrow, while a 16:9 frame squeezed to half a
 dialog is the thing someone opened the popup to look at. Opening the details of a play is the point
@@ -821,6 +827,14 @@ calling each other without a VPC connector egress over the public internet, so
 internal-only 404s the very callers they exist for. They stay private through
 IAM: only the agent and API service accounts hold `run.invoker`, and every call
 carries an OIDC token.
+
+**An `api()` path missing its `/api` prefix reaches a bucket, not a 404.** The
+load balancer routes `/api/*` to the API and `/jobs/*` to the HLS bucket, so
+`api('/jobs/<id>/thumbnails')` is answered by private object storage with a
+403 — an authorisation error from a service the caller never meant to address,
+about an object that does not exist. The moment thumbnails shipped that way and
+read as a signing or IAM fault. `web/check.mjs` now fails on any `api()` call
+whose path is not under `/api/`.
 
 **Bucket CORS must list the app's own origin.** The browser PUTs the upload
 straight to GCS, so a valid signed URL still fails its preflight if the origin
