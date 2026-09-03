@@ -75,6 +75,14 @@ class SportProfile:
     # Forms of the sport, if it has them. Empty is the ordinary case.
     disciplines: tuple[Discipline, ...] = field(default_factory=tuple)
 
+    # Whether team1 and team2 name the same two sides all the way through.
+    #
+    # They do in a match and they do not in a competition: an equestrian stream
+    # is a day of rounds by different riders, so consensusing one name across
+    # the job would relabel every competitor as whoever appeared most. The
+    # per-moment reading is the only correct one there.
+    teams_are_constant: bool = True
+
     # The response shape this sport asks Gemini for. None means the general one.
     # Held as a plain type rather than imported here, so the registry stays free
     # of the schemas that depend on it.

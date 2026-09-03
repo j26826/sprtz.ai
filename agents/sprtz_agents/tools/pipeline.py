@@ -303,7 +303,11 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
 # tight poll on it is just requests spent asking the same question.
 _POLL_FIRST_SECONDS = 10
 _POLL_MAX_SECONDS = 60
-_POLL_CEILING_SECONDS = 2 * 60 * 60
+# Four hours, not two. An eight-hour recording is a real input here, and giving
+# up on an encode that is still running reports a failure for a job that then
+# turns out to have a package — `playback_ready` finds it later and the editor
+# has been told the wrong thing in between.
+_POLL_CEILING_SECONDS = 4 * 60 * 60
 
 
 async def _await_transcode(job_id: str, transcoder_job: str) -> dict:
@@ -436,15 +440,23 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
     # Who is playing does not change during a match, but reading it off a score
     # bug once per segment does not give one answer. Settle it here so every
     # record agrees, and record it on the job as the match's own fact.
-    home, away = resolve_team_names(moments)
-    moments = apply_team_names(moments, home, away)
-    if home or away:
-        await mcp_client.call_tool(
-            "catalog", "record_teams",
-            {"job_id": job_id, "home": home, "away": away},
-        )
-        await _emit(job_id, "analysis", f"Scoreboard reads {home or '?'} v {away or '?'}.",
-                    team1=home, team2=away)
+    #
+    # Only where it is one fixture. An equestrian stream is a day of rounds by
+    # different riders, so the same step would relabel every competitor as
+    # whoever appeared most — there the per-moment reading is the only correct
+    # one, and the graphic naming them is per round.
+    home, away = ("", "")
+    if profile.teams_are_constant:
+        home, away = resolve_team_names(moments)
+        moments = apply_team_names(moments, home, away)
+        if home or away:
+            await mcp_client.call_tool(
+                "catalog", "record_teams",
+                {"job_id": job_id, "home": home, "away": away},
+            )
+            await _emit(job_id, "analysis",
+                        f"Scoreboard reads {home or '?'} v {away or '?'}.",
+                        team1=home, team2=away)
 
     for failure in result.get("failures", []):
         await _emit(
@@ -505,6 +517,7 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
         fallback_title=job.get("title", ""),
         discipline=discipline_label,
         discipline_confidence=float(found_discipline.get("confidence", 0.0)),
+        teams_are_constant=profile.teams_are_constant,
     )
 
     await mcp_client.call_tool(
@@ -551,6 +564,7 @@ async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
     fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
+    teams_are_constant: bool = True,
 ) -> GameDetails | None:
     """Build and store the match-level record.
 
@@ -565,6 +579,7 @@ async def _record_game_details(
             competitions=competitions, venues=venues,
             fallback_title=fallback_title,
             discipline=discipline, discipline_confidence=discipline_confidence,
+            teams_are_constant=teams_are_constant,
         )
 
         judgement = await _judge_game(sport, moments, segment_summaries)

@@ -46,9 +46,18 @@ _ALLOWED_PROTOCOLS = "file,https,tls,crypto,tcp"
 _PROBE_HARDENING: list[str] = ["-protocol_whitelist", _ALLOWED_PROTOCOLS]
 _FFMPEG_HARDENING: list[str] = ["-nostdin", "-protocol_whitelist", _ALLOWED_PROTOCOLS]
 
-# Bounds a genuine match recording stays inside. Anything outside is either a
-# mistake or an attempt to exhaust the worker.
-MAX_DURATION_SEC = 6 * 60 * 60
+# Bounds a genuine recording stays inside. Anything outside is either a mistake
+# or an attempt to exhaust the worker.
+#
+# Ten hours, not six. A handball match is ninety minutes and six hours was
+# generous for it; an equestrian stream is a whole competition day on one fixed
+# camera, and the five real samples run 6.3 to 8.45 hours. Six rejected every
+# one of them at validation, before anything else got a chance.
+#
+# It is not free: an 8.45-hour recording is 35 analysis windows against a
+# match's 13, so roughly 8M input tokens per pass and a couple of hours of
+# Gemini. The bound is here to stop a runaway, not to price the work.
+MAX_DURATION_SEC = 10 * 60 * 60
 MAX_DIMENSION = 7680
 MAX_PIXELS = 7680 * 4320
 
