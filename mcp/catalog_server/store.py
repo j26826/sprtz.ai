@@ -116,6 +116,11 @@ def action_play_text(moment: dict[str, Any]) -> str:
         # The sentence a person would actually type when looking for this.
         moment.get("summary") or "",
         moment.get("description") or "",
+        # How it was performed. In a sport judged on form rather than on
+        # outcome, this is most of what anyone searches by — "clean take-off",
+        # "horse fighting the contact" live here and nowhere else.
+        moment.get("execution_details") or "",
+        moment.get("harmony_index") or "",
     ]
     return ". ".join(p.strip() for p in parts if p and p.strip())
 
@@ -143,6 +148,8 @@ def as_action_play(doc: dict[str, Any]) -> dict[str, Any]:
         "actionTeam": doc.get("actionTeam", ""),
         "summary": doc.get("summary", ""),
         "description": doc.get("description", ""),
+        "executionDetails": doc.get("executionDetails", ""),
+        "harmonyIndex": doc.get("harmonyIndex", ""),
         "confidenceScore": round(float(doc.get("confidence", 0.0)) * 100),
     }
 
@@ -276,6 +283,12 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict
         "ownerUid": owner_uid,
         "title": game.get("title", ""),
         "sport": game.get("sport", ""),
+        # Which form of the sport, for one that has several, and how sure the
+        # reading was. Stored as the label: it is what is displayed and what
+        # someone searches by, and the sport profile normalises it back to a
+        # code when it needs one.
+        "discipline": game.get("discipline", ""),
+        "disciplineConfidence": game.get("discipline_confidence", 0.0),
         "homeTeam": game.get("home_team", ""),
         "awayTeam": game.get("away_team", ""),
         "competition": game.get("competition", ""),
@@ -310,6 +323,8 @@ def _game_out(data: dict[str, Any]) -> dict[str, Any]:
         "jobId": data.get("jobId", ""),
         "title": data.get("title", ""),
         "sport": data.get("sport", ""),
+        "discipline": data.get("discipline", ""),
+        "disciplineConfidence": data.get("disciplineConfidence", 0.0),
         "homeTeam": data.get("homeTeam", ""),
         "awayTeam": data.get("awayTeam", ""),
         "competition": data.get("competition", ""),
@@ -689,6 +704,8 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
                 "scoreTeam1": moment.get("score_team1"),
                 "scoreTeam2": moment.get("score_team2"),
                 "actionTeam": moment.get("action_team", ""),
+                "executionDetails": moment.get("execution_details", ""),
+                "harmonyIndex": moment.get("harmony_index", ""),
                 "segmentIndexes": moment.get("segment_indexes", []),
                 "embedding": Vector(vector),
                 "createdAt": now(),
@@ -774,6 +791,8 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "score_team1": data.get("scoreTeam1"),
         "score_team2": data.get("scoreTeam2"),
         "action_team": data.get("actionTeam", ""),
+        "execution_details": data.get("executionDetails", ""),
+        "harmony_index": data.get("harmonyIndex", ""),
         "segment_indexes": data.get("segmentIndexes", []),
         "thumb_uri": data.get("thumbUri", ""),
     }

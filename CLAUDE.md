@@ -1117,8 +1117,62 @@ serves fewer regions than Cloud Run. Both default to `us-central1`.
 
 Copy `agents/sprtz_agents/sports/handball.py`, define the moment types and the
 context a model needs to read the picture, register the profile, and import it
-in `sports/__init__.py`. Nothing else changes — the agents, tools and UI all
-read the registry.
+in `sports/__init__.py`. Give it its own `action_results`, `participant_roles`
+and `scoreboard_guidance` — those were hard-coded in the prompt while handball
+was the only sport, and every one of them is wrong for another: an equestrian
+round has no Goal, no Goalkeeper and no scoreline.
+
+**One thing does not read the registry, and it is the one that matters to the
+uploader.** The API cannot import the agent package, so the upload panel's list
+is the `supported_sports` Terraform variable and the API's own default. That is
+a second source of truth and it failed as those do — equestrian was registered,
+the analysis could run it, and the panel offered only handball.
+`test_supported_sports.py` reads both files and fails when either disagrees with
+the registry.
+
+### Disciplines
+
+A sport may have forms with nothing in common but the athlete. Equestrian has
+ten: a dressage test and a reining round share a horse and nothing an editor
+cuts on.
+
+**One profile, and the discipline is detected per job.** Ten profiles would put
+"which discipline?" in the upload panel, where the person filling it in is least
+able to answer and most likely to guess — it is a question about the tack, the
+obstacles and the movement, which is to say about the footage. The system
+instruction asks for it first, every segment reports what it saw, and
+`resolve_discipline` settles it across the job.
+
+That consensus is **weighted by confidence, not counted**. An eventing broadcast
+shows all three phases, so segments legitimately disagree; counting alone lets
+four unsure glimpses of the dressage phase outvote two confident cross-country
+ones.
+
+**An unidentified discipline keeps the whole catalogue.** `types_for` returns
+everything rather than nothing for a code it does not know, because answering an
+unplaced video with an empty catalogue reports no moments in a video that plainly
+has some.
+
+The record stores the **label**, not the code — that is what is displayed and
+what someone searches by — and `discipline_by_code` normalises it back. The
+title falls back to it too: an equestrian graphic often names nobody, and
+`Jumping — CSI Aachen` is a title where the uploaded filename is not.
+
+### Fields a sport asks for
+
+`execution_details` and `harmony_index` exist because equestrian is judged on
+how a movement was performed rather than on whether it scored. They live on
+`EquestrianMoment`, a **separate response schema**, not as optional fields on
+the general one: what a schema asks for is part of the prompt, so putting them
+everywhere would have a handball analysis writing paragraphs about a jump shot's
+balance for nobody to read. `SportProfile.segment_schema` names it; `None` means
+the general shape.
+
+Both are embedded. In a sport judged on form they carry most of what anyone
+searches by — "clean take-off", "horse fighting the contact" are in neither the
+label nor the summary. **The vector index itself is unchanged**: the width is
+the same and nothing new is filtered or ordered on, so there is no new Firestore
+index to declare.
 
 ## Known gaps
 

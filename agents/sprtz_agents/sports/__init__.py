@@ -6,8 +6,10 @@ handball-specific.
 """
 
 # Importing the module is what registers the profile, so this is not dead.
+from sprtz_agents.sports import equestrian as _equestrian  # noqa: F401
 from sprtz_agents.sports import handball as _handball  # noqa: F401
 from sprtz_agents.sports.registry import (
+    Discipline,
     MomentType,
     SportProfile,
     get_profile,
@@ -16,6 +18,7 @@ from sprtz_agents.sports.registry import (
 )
 
 __all__ = [
+    "Discipline",
     "MomentType",
     "SportProfile",
     "get_profile",

@@ -474,6 +474,20 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
                     level="warning")
         return {"status": "cancelled", "job_id": job_id, "moments": len(moments)}
 
+    # Which form of the sport this turned out to be. Stored as the label rather
+    # than the code, because that is what is displayed and searched, and the
+    # profile normalises it back when it needs the code.
+    found_discipline = result.get("discipline") or {}
+    found = profile.discipline_by_code(found_discipline.get("code", ""))
+    discipline_label = found.label if found else ""
+    if discipline_label:
+        await _emit(
+            job_id, "analysis",
+            f"Identified as {discipline_label} "
+            f"({round(float(found_discipline.get('confidence', 0.0)) * 100)}% confident).",
+            discipline=discipline_label,
+        )
+
     persisted = await _persist_moments(job_id, moments)
     await _drop_segments(job_id)
     # After the moments are saved, because the thumbnail is recorded against a
@@ -489,6 +503,8 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
         competitions=result.get("competitions", []),
         venues=result.get("venues", []),
         fallback_title=job.get("title", ""),
+        discipline=discipline_label,
+        discipline_confidence=float(found_discipline.get("confidence", 0.0)),
     )
 
     await mcp_client.call_tool(
@@ -534,7 +550,7 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
 async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
-    fallback_title: str = "",
+    fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
 ) -> GameDetails | None:
     """Build and store the match-level record.
 
@@ -548,6 +564,7 @@ async def _record_game_details(
             segment_summaries=segment_summaries,
             competitions=competitions, venues=venues,
             fallback_title=fallback_title,
+            discipline=discipline, discipline_confidence=discipline_confidence,
         )
 
         judgement = await _judge_game(sport, moments, segment_summaries)

@@ -49,6 +49,6 @@ async def client_config() -> dict:
         "environment": settings.environment,
         "project_id": settings.project_id,
         "max_upload_bytes": settings.max_upload_bytes,
-        "supported_sports": ["handball"],
+        "supported_sports": settings.supported_sports,
         "federated_providers": settings.federated_providers,
     }

@@ -167,7 +167,7 @@ async def _analyse_one(
         system_instruction=build_system_instruction(profile, metadata_language),
         temperature=0.2,
         response_mime_type="application/json",
-        response_schema=SegmentAnalysis,
+        response_schema=profile.segment_schema or SegmentAnalysis,
         # A 15-minute window can legitimately contain 30+ moments.
         max_output_tokens=32768,
         # Without a thinking budget the model returns every moment at the same
@@ -208,6 +208,7 @@ async def _analyse_one(
             logger.exception("segment %s analysis failed", plan.index)
             return plan, None, f"{type(exc).__name__}: {exc}"
 
+    schema = profile.segment_schema or SegmentAnalysis
     parsed = getattr(response, "parsed", None)
     if isinstance(parsed, SegmentAnalysis):
         return plan, parsed, None
@@ -216,7 +217,7 @@ async def _analyse_one(
     if not text:
         return plan, None, "Model returned an empty response."
     try:
-        return plan, SegmentAnalysis.model_validate_json(text), None
+        return plan, schema.model_validate_json(text), None
     except Exception as exc:  # noqa: BLE001
         return plan, None, f"Unparseable response: {exc}"
 
@@ -299,7 +300,15 @@ async def analyse_segments(
         # the caller settles them the same way it settles the team names.
         "competitions": [a.competition for _, a in analyses if a.competition.strip()],
         "venues": [a.venue for _, a in analyses if a.venue.strip()],
+        # Settled here rather than by the caller: it is one fact about the whole
+        # job, and it is what the moment catalogue was filtered by.
+        "discipline": _discipline_of(analyses),
     }
+
+
+def _discipline_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> dict:
+    code, confidence = resolve_discipline([a for _, a in analyses])
+    return {"code": code, "confidence": confidence}
 
 
 # --- Merge --------------------------------------------------------------------
@@ -375,6 +384,11 @@ def _to_absolute(
         score_team1=detected.score_team1,
         score_team2=detected.score_team2,
         action_team=detected.action_team.strip(),
+        # Only the sports that ask for these report them. getattr rather than a
+        # field on DetectedMoment, because a response schema is part of the
+        # prompt and handball is not asked for them.
+        execution_details=getattr(detected, "execution_details", "").strip(),
+        harmony_index=getattr(detected, "harmony_index", "").strip(),
         segment_indexes=[plan.index],
     )
 
@@ -397,6 +411,38 @@ def resolve_team_names(moments: list[Moment]) -> tuple[str, str]:
         home.most_common(1)[0][0] if home else "",
         away.most_common(1)[0][0] if away else "",
     )
+
+
+def resolve_discipline(analyses: list[SegmentAnalysis]) -> tuple[str, float]:
+    """The discipline the whole job shows, agreed across its segments.
+
+    Same reasoning as team names, and a stronger case for it: a video does not
+    change discipline halfway through, but one segment can easily be wrong about
+    it — a warm-up over poles inside an eventing broadcast reads as showjumping,
+    and the dressage phase of the same event reads as dressage. Weighting each
+    reading by how sure it was keeps a confident majority from being outvoted by
+    hesitant guesses.
+
+    Returns the code and the mean confidence of the segments that chose it, so a
+    discipline nothing was sure of is recorded as one nothing was sure of.
+    """
+    from collections import defaultdict
+
+    weight: dict[str, float] = defaultdict(float)
+    scores: dict[str, list[float]] = defaultdict(list)
+    for analysis in analyses:
+        code = (getattr(analysis, "discipline", "") or "").strip().lower()
+        if not code:
+            continue
+        confidence = float(getattr(analysis, "discipline_confidence", 0.0) or 0.0)
+        weight[code] += confidence
+        scores[code].append(confidence)
+
+    if not weight:
+        return "", 0.0
+
+    winner = max(weight, key=lambda code: (weight[code], len(scores[code])))
+    return winner, round(sum(scores[winner]) / len(scores[winner]), 3)
 
 
 def apply_team_names(moments: list[Moment], home: str, away: str) -> list[Moment]:

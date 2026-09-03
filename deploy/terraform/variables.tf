@@ -199,6 +199,16 @@ variable "rerank_overfetch" {
   default     = 4
 }
 
+variable "supported_sports" {
+  type        = list(string)
+  description = <<-EOT
+    Sports the upload panel offers, as registered in the agent's sport registry
+    (agents/sprtz_agents/sports/). A sport missing here is a sport the analysis
+    can run and nobody can select, which is how equestrian shipped invisible.
+  EOT
+  default     = ["handball", "equestrian"]
+}
+
 variable "google_oauth_client_id" {
   type        = string
   description = <<-EOT

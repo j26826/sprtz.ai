@@ -100,6 +100,10 @@ export function momentText(m) {
   return titleKey([
     m.momentType, m.label, m.category, m.actionResult, m.participantRole,
     m.participant, m.actionTeam, m.summary, m.isGoal ? 'goal' : '',
+    // A sport judged on form puts most of its searchable words here: "clean
+    // take-off", "horse fighting the contact" are in neither the label nor the
+    // summary.
+    m.executionDetails, m.harmonyIndex,
   ].join(' '));
 }
 
