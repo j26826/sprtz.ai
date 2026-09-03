@@ -60,6 +60,11 @@ export function stem(word) {
 const HALVES = [[/\b(?:1st|first) half\b/, 1], [/\b(?:2nd|second) half\b/, 2]];
 
 
+// Match order rather than best first. "in order" and "by time" are how it gets
+// asked for; the card's own toggle is how it gets changed afterwards.
+const ASKS_FOR_TIME = /\bby time\b|\bchronolog|\bin order\b|\bmatch order\b|\btimeline\b|\bearliest\b|\bin sequence\b/;
+
+
 /**
  * What a question narrows the list to: a kind, a half of the match, or neither.
  *
@@ -79,9 +84,14 @@ export function filterAsked(question, namedTitle = '') {
     }
   }
 
+  // Parsed here rather than beside the card, so one reading of the question
+  // produces everything the list needs. The words this looks for are all in
+  // FILTER_NOISE, so asking for an order never also asks for a kind.
+  const sort = ASKS_FOR_TIME.test(text) ? 'time' : 'score';
+
   const keep = (word) => word.length > 2 && !FILTER_NOISE.has(word);
   const terms = [...new Set(text.split(' '))].filter(keep).map(stem).filter(keep);
-  return { terms, half };
+  return { terms, half, sort };
 }
 
 
