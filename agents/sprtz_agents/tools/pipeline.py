@@ -880,7 +880,8 @@ THUMB_SHARE = 0.12
 THUMB_BATCH = 10
 
 
-async def _thumbnail_moments(job_id: str, gcs_uri: str, moments: list[Moment]) -> int:
+async def _thumbnail_moments(job_id: str, gcs_uri: str, moments: list[Moment],
+                             in_run: bool = True) -> int:
     """Cut a still for every moment and record it against the moment.
 
     The frame is the first I-frame at or after the moment's peak — the decisive
@@ -898,11 +899,13 @@ async def _thumbnail_moments(job_id: str, gcs_uri: str, moments: list[Moment]) -
 
     # Re-analysing mints new moment ids, so the previous run's files are not
     # overwritten by this one's — they would just accumulate under a job that no
-    # longer refers to them.
-    try:
-        await mcp_client.call_tool("media", "delete_moment_thumbnails", {"job_id": job_id})
-    except Exception:
-        logger.warning("could not clear old thumbnails for %s", job_id, exc_info=True)
+    # longer refers to them. Filling gaps in an existing run is the exception:
+    # there the files still standing are the ones being kept.
+    if in_run:
+        try:
+            await mcp_client.call_tool("media", "delete_moment_thumbnails", {"job_id": job_id})
+        except Exception:
+            logger.warning("could not clear old thumbnails for %s", job_id, exc_info=True)
 
     batches = [moments[i : i + THUMB_BATCH] for i in range(0, len(moments), THUMB_BATCH)]
     await _emit(job_id, "analysis", f"Cutting thumbnails for {len(moments)} moments.",
@@ -937,8 +940,11 @@ async def _thumbnail_moments(job_id: str, gcs_uri: str, moments: list[Moment]) -
             # a failed analysis.
             logger.warning("thumbnail batch %d failed for job %s", done, job_id, exc_info=True)
 
-        await _progress(job_id, "analysis",
-                        (1 - THUMB_SHARE) + THUMB_SHARE * done / len(batches))
+        # Only inside the run. Filling gaps on a finished job would set its
+        # stage back to "analysis", and the strip would say it is analysing.
+        if in_run:
+            await _progress(job_id, "analysis",
+                            (1 - THUMB_SHARE) + THUMB_SHARE * done / len(batches))
 
     missing = len(moments) - saved
     await _emit(
@@ -1030,6 +1036,61 @@ async def _cancelled(job_id: str) -> bool:
         # A failed check must not stop a run that nobody asked to stop.
         logger.warning("could not check cancellation for %s", job_id, exc_info=True)
         return False
+
+
+async def generate_thumbnails(job_id: str) -> dict:
+    """Cut the still image for every moment in a match that has none.
+
+    Use this when a match's moments show no picture — an analysis that ran
+    before thumbnails existed, or one where the stills failed. Cutting them is
+    minutes of range reads; re-analysing to get them would be an hour spent on
+    the wrong thing, and would replace moments the editor may already have
+    worked from.
+
+    Args:
+        job_id: Identifier of the job.
+
+    Returns:
+        dict saying how many moments needed a still and how many now have one.
+    """
+    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+    if job.get("status") == "error":
+        return job
+
+    gcs_uri = (job.get("source") or {}).get("gcsUri")
+    if not gcs_uri:
+        return {"status": "error", "job_id": job_id,
+                "error": f"Job {job_id} has no source video."}
+
+    # list_moments rather than list_action_plays: the ActionPlay projection is
+    # the export shape and does not carry the thumbnail, which is what decides
+    # whether a moment needs one.
+    listing = await mcp_client.call_tool(
+        "catalog", "list_moments", {"job_id": job_id, "limit": 1000, "min_score": 0.0},
+    )
+    raw = listing.get("moments", [])
+    if not raw:
+        return {"status": "empty", "job_id": job_id,
+                "message": "This match has no moments to illustrate."}
+
+    # Only the ones without a picture. Re-cutting the whole match to add the
+    # twenty that failed is minutes of reads nobody asked for.
+    missing = [Moment.model_validate(m) for m in raw if not m.get("thumb_uri")]
+    if not missing:
+        return {"status": "success", "job_id": job_id, "moments": len(raw),
+                "needed": 0, "thumbnails_saved": 0,
+                "message": "Every moment already has a thumbnail."}
+
+    # Not part of a run: the moments that already have a picture keep it, and
+    # the job's stage is whatever it finished as.
+    saved = await _thumbnail_moments(job_id, gcs_uri, missing, in_run=False)
+    return {
+        "status": "success",
+        "job_id": job_id,
+        "moments": len(raw),
+        "needed": len(missing),
+        "thumbnails_saved": saved,
+    }
 
 
 async def get_game_details(job_id: str) -> dict:
