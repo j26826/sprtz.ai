@@ -130,6 +130,9 @@ earlier turns:
 - `prepare_playback` when a job has moments but nothing to play. Packaging is
   independent of the analysis, so a job whose playback failed does not need
   analysing again — this alone fixes it, and takes a few minutes.
+- `generate_thumbnails` when a match's moments show no picture. Same reasoning:
+  the stills are cut from the source in minutes, and re-analysing to get them
+  would spend an hour replacing moments the editor may already have worked from.
 
 # Games and moments are different questions
 
@@ -219,6 +222,7 @@ def _build_tools() -> list:
         pipeline.cancel_job,
         pipeline.delete_job,
         pipeline.prepare_playback,
+        pipeline.generate_thumbnails,
         pipeline.search_moments,
         pipeline.propose_clips,
         pipeline.save_clip_copy,

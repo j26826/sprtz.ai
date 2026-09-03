@@ -201,6 +201,14 @@ different play. A peak inside the file's last GOP has no keyframe after it, and
 there the answer is an exact frame rather than no picture, so `keyframe_thumbnail`
 returns False instead of raising and the caller falls back to `still_frame`.
 
+`generate_thumbnails` is a root-agent tool as well as part of the analysis, for
+the same reason `prepare_playback` is: a match analysed before the stills
+existed needs minutes of range reads, not an hour of Gemini that would also
+replace moments the editor has already worked from. It cuts only what is
+missing, does not clear the prefix — the surviving files are the ones being
+kept — and reports no progress, because setting a finished job's stage back to
+`analysis` would make the strip say it is analysing.
+
 They are cut ten at a time from the pipeline rather than all at once, the same
 reasoning as the analysis windows: a single request for two hundred would run
 for minutes, report nothing while it did, and name no particular moment when it
