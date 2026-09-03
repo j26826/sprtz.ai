@@ -977,6 +977,21 @@ expire an hour into the deployment. `header_provider` is a synchronous callable
 ADK invokes before each listing and each call; tokens are cached per audience
 for 45 minutes so it is not a metadata round trip per tool call.
 
+**A stored fact must not be a parameter a model fills in.** `analyze_match`
+took the sport as a required argument. With one sport registered a model could
+guess it safely; the day a second one existed it correctly stopped guessing and
+asked — *"What sport is being played in the video?"* — inside a `SequentialAgent`
+with nobody to answer. The stage made no tool call, and clips, captions and
+publish all ran successfully on zero moments and marked the job complete. The
+sport is read off the job now, the stage instructions say plainly that a
+question is the end of the run rather than a pause, and `inspect_source` returns
+the sport so the stages after it inherit the fact instead of asking for it.
+
+**A run that analysed nothing is not a finished run.** "0 of 0 clips ready to
+publish" reads as a match with no highlights in it. `finalize_job` marks the job
+`failed` with a reason when there are no clips *and* no moments — a quiet match
+still only needs attention, because that is a real outcome.
+
 **Nothing retries a run that dies.** A deploy replaces the Agent Runtime engine
 and kills whatever it was doing. Progress reporting dies with it, so the job
 keeps the status it had and reads as running for ever. The editor shows a

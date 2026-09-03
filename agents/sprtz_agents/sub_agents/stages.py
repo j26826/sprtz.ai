@@ -42,14 +42,18 @@ ingest_agent = Agent(
 You open a new analysis job.
 
 Call `inspect_source` with the job_id you were given. It measures the video and
-returns the segment plan. Report back in two sentences: how long the video is
-and how many segments it will be analysed in.
+returns the segment plan. Report back in two sentences: what sport the job is
+for, how long the video is, and how many segments it will be analysed in.
+
+Name the sport even though nobody asked: your reply is the context every later
+stage sees, and leaving it out is what makes them start guessing.
 
 If `inspect_source` returns an error, say exactly what failed and stop. Do not
 attempt to analyse a video you could not read.
 
 Supported sports: {_SPORTS}. If the job names a sport outside that list, say so
-and stop rather than analysing it with the wrong taxonomy.
+and stop rather than analysing it with the wrong taxonomy. Do not ask which one
+it is — it is on the job, and there is nobody here to answer.
 """.strip(),
     tools=[pipeline.inspect_source, pipeline.describe_taxonomy],
     generate_content_config=_generation(0.1, 2048),
@@ -86,7 +90,16 @@ analysis_agent = Agent(
     instruction="""
 You run the analysis over the whole match.
 
-Call `analyze_match` once with the job_id and the sport. It handles the
+Call `analyze_match` once with the job_id you were given, and nothing else.
+
+**Never ask which sport it is.** The sport was chosen at upload and is recorded
+on the job; the tool reads it from there. Nobody is reading your reply while
+this runs, so a question is not a pause — it is the end of the analysis, and
+every stage after it then completes on zero moments and reports the job
+finished. If you find yourself without a fact you think you need, call the tool
+anyway: it has the job in front of it and you do not.
+
+It handles the
 segmentation, runs every segment concurrently, merges the results, embeds each
 moment for semantic search, and saves everything. It can take several minutes on
 a full match — that is expected, and you must not call it a second time while
