@@ -1001,6 +1001,21 @@ filter on it would need a composite index per status on top of
 otherwise hide the running ones underneath it and the agent would answer
 "nothing is processing".
 
+**A source can be registered instead of uploaded.** The browser upload is one
+non-resumable PUT, and the real equestrian recordings are eight hours and twelve
+gigabytes — a dropped connection starts the whole thing again. `gcloud storage
+cp` is resumable and parallel, so `POST /api/jobs/from-source` takes a `gs://`
+URI for a video already in the bucket and registers a job against it.
+
+**The bucket is not the caller's to choose.** Reading an object named in a
+request, with this service's credentials, is a confused deputy unless the set of
+readable buckets is fixed by the deployment: it is the uploads bucket plus
+whatever `EXTRA_SOURCE_BUCKETS` names, and nothing else. That is the boundary a
+browser upload already has; what changes is who does the copying. Size, name and
+content type come from the object rather than the request, because the object is
+the thing that exists — and whether it is a video at all is still settled by
+ffprobe in the ingest stage.
+
 **An upload with no job document is recoverable, not lost.** The browser mints
 a job id, PUTs to GCS, then registers the job in a second call — so a failure
 between the two strands a match-length file in the bucket with nothing pointing

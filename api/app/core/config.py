@@ -41,6 +41,20 @@ class Settings:
         ]
     )
 
+    # Buckets a caller may name a source in, beyond the uploads bucket.
+    #
+    # Registering a job from a gs:// URI makes this service read an object the
+    # caller chose, with this service's credentials. That is a confused deputy
+    # unless the set of readable buckets is decided here rather than in the
+    # request, so the default is the deployment's own uploads bucket and
+    # nothing else — the same boundary a browser upload already has.
+    extra_source_buckets: list[str] = field(
+        default_factory=lambda: [
+            b.strip() for b in os.environ.get("EXTRA_SOURCE_BUCKETS", "").split(",")
+            if b.strip()
+        ]
+    )
+
     uploads_bucket: str = field(default_factory=lambda: os.environ.get("UPLOADS_BUCKET", ""))
     media_bucket: str = field(default_factory=lambda: os.environ.get("MEDIA_BUCKET", ""))
     hls_bucket: str = field(default_factory=lambda: os.environ.get("HLS_BUCKET", ""))
@@ -89,6 +103,11 @@ class Settings:
     @property
     def is_local(self) -> bool:
         return self.environment == "local"
+
+    @property
+    def source_buckets(self) -> set[str]:
+        """Every bucket a job's source may be read from."""
+        return {b for b in (self.uploads_bucket, *self.extra_source_buckets) if b}
 
 
 @lru_cache(maxsize=1)
