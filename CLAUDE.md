@@ -481,11 +481,25 @@ the tokens that differ rather than copying a file that then drifts.
 from a theme that sets a token to one that does not would leave the old value
 behind.
 
-`skyline-dark` is the second: the Scanline palette on the Modernist structure.
-Near-black cool ground, a violet accent, IBM Plex. The zero radius, the 2px
-rules and the flush-left labels stay, because those are the product's shape
-rather than its colour — rounding them would mean editing `app.css`, at which
-point it is a second stylesheet and the overlay model is gone.
+`skyline-dark` is the second: near-black cool ground, a violet accent, IBM
+Plex, 14px cards and 8px pills on hairlines rather than 2px rules.
+
+**Structure is a theme's business as much as its palette is.** The radii come
+from `ds/styles.css`, which ships them at 0; `app.css` names them everywhere it
+draws a box, so setting them does something instead of being ignored. Rule
+weight had no token at all, so `--rule` and `--rule-hair` are defined in
+`app.css`'s own `:root` at today's 2px and 1px — the design system has no
+concept of a border width, and putting them in the vendored file would be a
+local edit that drifts from upstream. Modernist keeps its square corners and
+its 2px rules by leaving all of them alone, which is what an empty override
+means.
+
+Two things deliberately do **not** follow the theme. The focus ring stays 2px:
+it is drawn outside the box rather than being part of it, and a 1px focus ring
+is worse than a 2px one. And a container that rounds also clips — a row's own
+background or bottom rule is square, so without `overflow: hidden` it draws
+over the corner it is meant to sit inside, which shows up as a notch on exactly
+one row of a list.
 
 **The ramps are read by step, not by lightness.** Each rung of the neutral and
 accent scales has a fixed job in `app.css`, and a theme answers the job rather
@@ -554,6 +568,31 @@ a card that failed to render, and the two have very different answers: "No
 moments yet" is information, a blank space is a bug report. `emptyCard` says
 which.
 
+**A question that names a match is about that match.** "Show all moments of FAG
+v TVB — DAIKIN HBL" is answered by selecting that job first, not by listing
+whichever match happened to be open — a name is in the question precisely
+because the editor means a different one. The browser resolves it against
+`state.games`, which it already holds, and the agent resolves it with
+`find_games`, which matches the title text before it searches by meaning.
+
+**A name is what a vector search is worst at.** "FAG v TVB — DAIKIN HBL" is two
+abbreviations and a sponsor: its embedding sits beside every other fixture in
+the same league, so `knn_search_games` answers with a plausible neighbour rather
+than the match asked for. `match_games_by_title` compares the text instead —
+letters and digits only, since titles are composed with an em dash and typed
+back with a hyphen — and answers exactly or not at all, which is the right
+failure for a name. Longest title wins, so a fixture whose title is a prefix of
+another's cannot answer for it, and a one-word name is not a match at all. It
+reads the collection through a field mask: this scans every game, and the
+768-float vectors are almost all of the bytes.
+
+**Moments are ordered by score or by time**, and the card says which. Score
+answers "the best moments"; match order answers "in order" and is how the log
+reads. The order lives on the message rather than in the stored ids, so the
+toggle re-sorts an answer given ten turns ago, and changing it returns to page
+one — page four of a ranked list is not page four of the same moments in match
+order.
+
 **A card's answer is not written out again in prose.** "Show me the best
 moments" came back as a card of all 346 and a paragraph re-typing the first ten,
 timecodes and all: the same answer twice, the truncated copy first. The message
@@ -575,8 +614,11 @@ A moment row and a game row are the same shape on purpose: a headline worth
 reading, the facts that qualify it underneath, and everything else behind one
 Details button into a shared popup.
 
-**The moment plays inside its own popup**, left column, autoplaying from the in
-point and stopping at the out point. Opening the details of a play is the point
+**The moment plays inside its own popup**, in the wider left column,
+autoplaying from the in point and stopping at the out point. The video takes
+the larger share of the split: the record beside it is a two-column table of
+short values that reads fine narrow, while a 16:9 frame squeezed to half a
+dialog is the thing someone opened the popup to look at. Opening the details of a play is the point
 at which someone wants to see it, and the facts are what they are checking it
 against — reading "double save" and watching the save are the same act. The two
 share one dialog, so opening a game after a moment clears the player column and

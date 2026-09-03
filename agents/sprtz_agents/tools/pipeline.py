@@ -1123,15 +1123,28 @@ async def find_games(query: str, limit: int = 5) -> dict:
         limit: Most matches to return.
 
     Returns:
-        dict with the matching games, most relevant first.
+        dict with the matching games, most relevant first, and how they were
+        found — by name or by meaning.
     """
+    # A named fixture first. "FAG v TVB — DAIKIN HBL" is abbreviations and a
+    # sponsor, so its embedding sits beside every other fixture in the league
+    # and meaning-search answers with a plausible neighbour rather than the
+    # match that was asked for. Comparing the text answers it exactly or not at
+    # all, which is the right failure for a name.
+    named = await mcp_client.call_tool(
+        "catalog", "match_games_by_title", {"query": query, "limit": limit},
+    )
+    if named.get("status") != "error" and named.get("games"):
+        return {"status": "success", "games": named["games"],
+                "count": named.get("count", 0), "matched": "title"}
+
     result = await mcp_client.call_tool(
         "catalog", "knn_search_games", {"query": query, "limit": limit},
     )
     if result.get("status") == "error":
         return result
     return {"status": "success", "games": result.get("games", []),
-            "count": result.get("count", 0)}
+            "count": result.get("count", 0), "matched": "meaning"}
 
 
 async def list_action_plays(job_id: str, limit: int = 500) -> dict:

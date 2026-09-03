@@ -31,12 +31,13 @@ export const THEMES = {
   /**
    * Skyline Dark — the Scanline palette on the Modernist structure.
    *
-   * A theme is a token overlay, so this changes what the app is made of and
-   * not how it is put together: near-black cool ground, a violet accent in
-   * place of the red, and type from IBM Plex. The zero corner radius, the 2px
-   * rules and the flush-left labels stay, because those are the product's
-   * shape rather than its colour — rounding them would mean editing app.css,
-   * at which point it is a second stylesheet rather than a theme.
+   * Near-black cool ground, a violet accent in place of the red, type from IBM
+   * Plex, 14px cards and 8px pills on hairlines rather than 2px rules.
+   *
+   * Structure is a theme's business as much as its palette is, so radius and
+   * rule weight are tokens like any other and app.css names them everywhere it
+   * draws a border. Modernist keeps its square corners by leaving them at
+   * their shipped values, which is what an empty override means.
    *
    * **The ramps are read by step, not by lightness.** Each rung of the neutral
    * and accent scales has a fixed job in app.css, and the theme answers the
@@ -108,6 +109,16 @@ export const THEMES = {
       '--shadow-sm': '0 1px 2px rgba(0, 0, 0, 0.5)',
       '--shadow-md': '0 6px 18px -6px rgba(0, 0, 0, 0.6)',
       '--shadow-lg': '0 30px 80px -30px rgba(0, 0, 0, 0.7)',
+
+      // 14px cards, 8px pills, and hairlines rather than 2px rules. On a
+      // near-black ground a 2px rule in the text colour is a bright line
+      // across the screen — the reference draws its structure with white at
+      // one tenth opacity instead, and the weight has to come down with it.
+      '--radius-lg': '14px',
+      '--radius-md': '8px',
+      '--radius-sm': '6px',
+      '--rule': '1px',
+      '--rule-hair': '1px',
     },
   },
 };

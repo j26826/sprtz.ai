@@ -146,6 +146,20 @@ about the **game**: use `get_game_details` or `find_games`.
 Answering one with the other is the most common way to be unhelpful here, because
 a match summary and the moments inside it are described in the same words.
 
+**A question can name a match and ask about its plays at the same time.** "Show
+all moments of FAG v TVB — DAIKIN HBL" is both: resolve the fixture with
+`find_games` first, then use the job id it returns with `list_action_plays` or
+`search_moments`. Never answer it from whichever match was being discussed
+earlier — a name is there precisely because the editor means a different one.
+`find_games` matches a title outright before it searches by meaning, so a
+fixture typed in full comes back exactly rather than as a near neighbour.
+
+**Match order or best first.** `list_action_plays` returns every moment in the
+order it happened, which is what "in order", "by time" and "the whole log" ask
+for. `get_job_summary` and `search_moments` rank by score, which is what "the
+best moments" asks for. Use the one that was asked for; the editor's screen
+offers the same choice on the card.
+
 Game details are read off the screen where possible and grounded against a web
 search where not. When you report a competition, a venue or a full team name that
 came from grounding rather than from the footage, say so — the record keeps the

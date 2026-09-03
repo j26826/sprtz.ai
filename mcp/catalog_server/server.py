@@ -341,6 +341,27 @@ def knn_search_games(query: str, owner_uid: str, limit: int = 5) -> dict:
 
 
 @mcp.tool
+def match_games_by_title(query: str, limit: int = 5) -> dict:
+    """Find games a question names outright, by comparing the text of the title.
+
+    Use this before knn_search_games when the question contains what looks like
+    a fixture — "moments of FAG v TVB — DAIKIN HBL". A name is what a vector
+    search is worst at: abbreviations and a sponsor sit near every other
+    fixture in the same league, so meaning-search answers with a plausible
+    neighbour instead of the match that was asked for.
+
+    Args:
+        query: The editor's question, or the title itself.
+        limit: Most games to return.
+    """
+    try:
+        games = store.match_games_by_title(query, limit)
+        return {"status": "success", "games": games, "count": len(games)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, query=query)
+
+
+@mcp.tool
 def knn_search_moments(query: str, job_id: str, limit: int, owner_uid: str = "",
                        rerank: bool = True) -> dict:
     """Find moments whose meaning matches a plain-language query.
