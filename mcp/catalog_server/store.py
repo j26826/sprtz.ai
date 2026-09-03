@@ -636,6 +636,49 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
     return len(moments)
 
 
+def record_moment_thumbnails(job_id: str, thumbnails: dict[str, str]) -> int:
+    """Attach a thumbnail URI to each named moment.
+
+    A patch rather than part of `upsert_moments`, because the picture is cut
+    after the moments exist — the frame is taken at a peak that only the saved
+    record knows. `update` rather than `set` for the same reason: this must
+    touch one field and leave the embedding and the ActionPlay alone.
+
+    A moment that has since been deleted is skipped rather than recreated as a
+    document holding nothing but a thumbnail.
+    """
+    if not thumbnails:
+        return 0
+
+    from google.api_core.exceptions import NotFound
+
+    collection = job_ref(job_id).collection("moments")
+    wanted = {mid: uri for mid, uri in thumbnails.items() if mid and uri}
+    if not wanted:
+        return 0
+
+    batch = db().batch()
+    for moment_id, uri in wanted.items():
+        batch.update(collection.document(moment_id), {"thumbUri": uri})
+
+    try:
+        batch.commit()
+        saved = len(wanted)
+    except NotFound:
+        # A batch is all or nothing, so one moment deleted between the analysis
+        # and the cut would cost every thumbnail in the request. Retry singly.
+        saved = 0
+        for moment_id, uri in wanted.items():
+            try:
+                collection.document(moment_id).update({"thumbUri": uri})
+                saved += 1
+            except NotFound:
+                logger.info("moment %s is gone; its thumbnail is orphaned", moment_id)
+
+    job_ref(job_id).update({"updatedAt": now()})
+    return saved
+
+
 def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
     """Firestore document -> the snake_case shape the agents use.
 
@@ -668,6 +711,7 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "score_team2": data.get("scoreTeam2"),
         "action_team": data.get("actionTeam", ""),
         "segment_indexes": data.get("segmentIndexes", []),
+        "thumb_uri": data.get("thumbUri", ""),
     }
 
 

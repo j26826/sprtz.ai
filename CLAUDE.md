@@ -185,6 +185,37 @@ prompt — they describe the response shape, which is identical for every segmen
 so they cache and cost the short prompt nothing. The segment prompt had 305
 characters of headroom against `test_segment_prompt_stays_short`.
 
+### One still per moment
+
+Every moment gets a PNG, cut at its **peak** — not its in point, which is
+deliberately a second or two of run-up and shows the play about to happen rather
+than the play.
+
+The frame is the **first I-frame at or after the peak** (`-ss` before `-i`, then
+`-skip_frame nokey`). A keyframe is a whole picture the encoder already chose as
+a reference, and it costs one decode instead of a GOP of them, which is the
+difference that matters when this runs a couple of hundred times per match. At
+or *after* is deliberate too: input `-ss` alone lands on the keyframe *before*
+the timestamp, which can be a GOP earlier — several seconds of handball, and a
+different play. A peak inside the file's last GOP has no keyframe after it, and
+there the answer is an exact frame rather than no picture, so `keyframe_thumbnail`
+returns False instead of raising and the caller falls back to `still_frame`.
+
+They are cut ten at a time from the pipeline rather than all at once, the same
+reasoning as the analysis windows: a single request for two hundred would run
+for minutes, report nothing while it did, and name no particular moment when it
+failed.
+
+**Served by signed URL, not through the CDN.** The media bucket is private and
+an `<img>` carries no Authorization header, so the picture needs a URL that is
+its own credential. The CDN's signed cookie would have been cheaper — one cookie
+for all of them — but it is minted by `/playback`, which only exists for a job
+that has been packaged, and moments exist as soon as the analysis has run. A
+thumbnail that appeared only after an encode would be missing for precisely the
+job someone is waiting on. Signing is a round trip to IAM per URL, so the editor
+asks for the page it is showing rather than for the match, and `POST
+/api/jobs/{id}/thumbnails` signs them in parallel.
+
 ### Game details, and grounding
 
 Each job also gets a **GameDetails** record: sport, home and away team,
@@ -259,6 +290,12 @@ happened in instead of ending the batch.
 
 Segment completion is what moves the bar during analysis, counted rather than
 indexed because segments finish out of order.
+
+Thumbnails take the last twelve percent of the same band, for the same reason
+the cut takes the first quarter: three countable things happen inside one stage,
+and a stage that reports nothing while it works reads as a dead run. The three
+slices tile the band exactly, which is what `TestTheAnalysisBandIsShared`
+checks — a gap makes the bar jump and an overlap makes it go backwards.
 
 **Progress only goes forward.** Playback and analysis run concurrently and own
 different bands — 5-20 and 20-80 — so whichever finishes last writes last, and
@@ -353,6 +390,25 @@ That works because the **CDN is served from the app's own hostname**: the load
 balancer routes `/jobs/*` to the HLS bucket, so the cookie is same-origin. On
 separate `*.run.app` hostnames it would be impossible — `run.app` is on the
 Public Suffix List, so no cookie can span two services.
+
+**The `Set-Cookie` header is built by hand, and must stay that way.**
+`response.set_cookie` puts the value through `http.cookies`, whose legal
+character set excludes `=`; a value containing one is wrapped in double quotes.
+A Cloud CDN cookie is four `=`-separated fields, so it was quoted every time,
+and Cloud CDN does not strip the quotes. The browser stored a valid cookie, sent
+it on every request, and got 403 for the playlist and each of the thousands of
+segments — while DevTools showed the cookie present, sent and unexpired.
+
+That is why the search went to signing keys, bucket IAM, the certificate and the
+Public Suffix List: a hand-signed `curl` returned 200 and so cleared everything
+except the one thing that was wrong, because `curl` sent the value unquoted.
+`test_starlette_would_have_quoted_it` pins the standard library's behaviour
+beside the assertion, so the check is not just "the helper does what it does".
+
+A cookie set with `Domain=` and a host-only cookie of the same name are two
+cookies; the browser sends both, and the older sorts first. A release that
+changes the scoping therefore leaves a copy that can keep answering for the
+correct one until it expires, so `/playback` expires the domain-scoped one.
 
 Reviewing a moment is a seek to its in point with a stop at its out point — that
 is what replaces a timeline.
@@ -455,6 +511,15 @@ a card that failed to render, and the two have very different answers: "No
 moments yet" is information, a blank space is a bug report. `emptyCard` says
 which.
 
+**A card's answer is not written out again in prose.** "Show me the best
+moments" came back as a card of all 346 and a paragraph re-typing the first ten,
+timecodes and all: the same answer twice, the truncated copy first. The message
+text is hidden when its card carries the answer, and the agent is told not to
+write it — *only* when the card has content, because an empty card says "no
+moments yet", which is not the same as "I could not read them". The
+missing-index failure arrived as prose beside an empty card, and hiding it
+unconditionally would have made that unreadable.
+
 **Lists page rather than truncate.** The moments list used to stop at six, which
 looks like an analysis that found six; showing all two hundred would bury the
 conversation. Ten a page, with the page held on the message so scrolling back to
@@ -465,7 +530,17 @@ rather than rendering blank.
 
 A moment row and a game row are the same shape on purpose: a headline worth
 reading, the facts that qualify it underneath, and everything else behind one
-Details button into a shared two-column popup. What differs is that a moment has
+Details button into a shared popup.
+
+**The moment plays inside its own popup**, left column, autoplaying from the in
+point and stopping at the out point. Opening the details of a play is the point
+at which someone wants to see it, and the facts are what they are checking it
+against — reading "double save" and watching the save are the same act. The two
+share one dialog, so opening a game after a moment clears the player column and
+collapses the grid; without that a game record would inherit a video it has
+nothing to do with, still playing. `mountPlayer` prefers the popup's slot,
+because the transcript's carries the same moment id and comes first in document
+order. What differs is that a moment has
 a thumbnail to play and a game does not, so they have separate grids — reusing
 `.moment-row` for a game squeezes the headline into the 72px thumb column.
 

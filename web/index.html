@@ -90,12 +90,16 @@
 </div>
 
 <div class="modal hidden" id="details">
-  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="details-title">
+  <div class="modal-card modal-card-wide" role="dialog" aria-modal="true"
+       aria-labelledby="details-title">
     <div class="modal-head">
       <div class="modal-title" id="details-title"></div>
       <button class="link-btn" id="close-details" data-i18n="settings.close">Close</button>
     </div>
-    <div class="detail-grid" id="details-body"></div>
+    <div class="detail-split" id="details-split">
+      <div class="detail-player" id="details-player"></div>
+      <div class="detail-grid" id="details-body"></div>
+    </div>
   </div>
 </div>
 

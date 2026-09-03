@@ -392,7 +392,8 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
     )
 
     async def segment_done(done: int, total: int) -> None:
-        await _progress(job_id, "analysis", CUT_SHARE + (1 - CUT_SHARE) * done / total)
+        span = 1 - CUT_SHARE - THUMB_SHARE
+        await _progress(job_id, "analysis", CUT_SHARE + span * done / total)
         await _emit(job_id, "analysis", f"Analysed segment {done} of {total}.",
                     segments_done=done, segments_total=total)
 
@@ -475,6 +476,9 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
 
     persisted = await _persist_moments(job_id, moments)
     await _drop_segments(job_id)
+    # After the moments are saved, because the thumbnail is recorded against a
+    # moment that has to exist to carry it.
+    thumbnails = await _thumbnail_moments(job_id, gcs_uri, moments)
     await _progress(job_id, "analysis", 1.0)
 
     await _record_game_details(
@@ -507,6 +511,7 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
         "sport": sport,
         "moments_found": len(moments),
         "moments_saved": persisted,
+        "thumbnails_saved": thumbnails,
         "segments_analysed": result["segments_analysed"],
         "segments_planned": result["segments_planned"],
         "failed_segments": result.get("failures", []),
@@ -862,6 +867,88 @@ async def delete_job(job_id: str) -> dict:
 # nothing to say. Cutting is a countable operation; giving it the first quarter
 # means the bar moves from the moment the run starts.
 CUT_SHARE = 0.25
+
+# The tail of the same band, for the same reason: cutting a still per moment is
+# a countable operation over a couple of hundred items, so it can say where it
+# is. Twelve percent of the analysis band is roughly what it costs — one range
+# read each against an hour of Gemini calls.
+THUMB_SHARE = 0.12
+
+# How many moments one thumbnail request covers. Each is its own range read of
+# the source, so a request for all of them would run for minutes, report nothing
+# while it did, and name no particular moment when it failed.
+THUMB_BATCH = 10
+
+
+async def _thumbnail_moments(job_id: str, gcs_uri: str, moments: list[Moment]) -> int:
+    """Cut a still for every moment and record it against the moment.
+
+    The frame is the first I-frame at or after the moment's peak — the decisive
+    frame the analysis named, rather than its in point, which is deliberately a
+    second or two of run-up and shows the play about to happen rather than the
+    play.
+
+    Never fatal. A moment with no picture is still a moment, and the editor's
+    list falls back to the placeholder it used before any of this existed;
+    failing an hour of analysis over a still would be the wrong trade by a wide
+    margin.
+    """
+    if not moments:
+        return 0
+
+    # Re-analysing mints new moment ids, so the previous run's files are not
+    # overwritten by this one's — they would just accumulate under a job that no
+    # longer refers to them.
+    try:
+        await mcp_client.call_tool("media", "delete_moment_thumbnails", {"job_id": job_id})
+    except Exception:
+        logger.warning("could not clear old thumbnails for %s", job_id, exc_info=True)
+
+    batches = [moments[i : i + THUMB_BATCH] for i in range(0, len(moments), THUMB_BATCH)]
+    await _emit(job_id, "analysis", f"Cutting thumbnails for {len(moments)} moments.",
+                thumbnails=len(moments))
+
+    saved = 0
+    for done, chunk in enumerate(batches, start=1):
+        try:
+            result = await mcp_client.call_tool(
+                "media", "generate_moment_thumbnails",
+                {
+                    "gcs_uri": gcs_uri,
+                    "job_id": job_id,
+                    "moments": [
+                        {"moment_id": m.moment_id, "at_sec": m.peak_sec} for m in chunk
+                    ],
+                },
+            )
+            written = {
+                t["moment_id"]: t["gcs_uri"]
+                for t in (result.get("thumbnails") or [])
+                if t.get("moment_id") and t.get("gcs_uri")
+            }
+            if written:
+                recorded = await mcp_client.call_tool(
+                    "catalog", "record_moment_thumbnails",
+                    {"job_id": job_id, "thumbnails": written},
+                )
+                saved += int(recorded.get("saved", 0))
+        except Exception:
+            # One batch that would not cut is ten moments without a picture, not
+            # a failed analysis.
+            logger.warning("thumbnail batch %d failed for job %s", done, job_id, exc_info=True)
+
+        await _progress(job_id, "analysis",
+                        (1 - THUMB_SHARE) + THUMB_SHARE * done / len(batches))
+
+    missing = len(moments) - saved
+    await _emit(
+        job_id, "analysis",
+        f"Thumbnails ready for {saved} of {len(moments)} moments."
+        + (f" {missing} could not be read." if missing else ""),
+        level="warning" if missing else "info",
+        thumbnails_saved=saved, thumbnails_missing=missing,
+    )
+    return saved
 
 
 async def _cut_segments(job_id: str, gcs_uri: str, duration: float) -> dict[int, str]:

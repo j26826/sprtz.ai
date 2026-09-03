@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import re
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from google.auth.transport import requests as google_requests
 from google.cloud import storage
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from app.core import cdn, clients
 from app.core.auth import CallerIdentity, current_user
@@ -348,6 +350,87 @@ async def list_moments(
     return await clients.call_mcp(
         "catalog", "list_moments", {"job_id": job_id, "limit": limit, "min_score": min_score}
     )
+
+
+class ThumbnailRequest(BaseModel):
+    # One page of the editor's moments list at a time. Every URL is its own
+    # signBlob round trip, so an unbounded request would be a page load waiting
+    # on hundreds of them.
+    moment_ids: list[str] = Field(min_length=1, max_length=50)
+
+
+# A moment id is a path segment here, and the object it names sits under a
+# prefix this service builds. Anything outside this set is refused rather than
+# rewritten: a rewritten id would sign a URL for the wrong object and hand back
+# a picture belonging to another moment.
+_MOMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
+
+# Long enough to browse a match's moments without re-signing, short enough that
+# a link that escapes the session stops working the same day.
+_THUMBNAIL_TTL = datetime.timedelta(hours=6)
+
+
+@router.post("/{job_id}/thumbnails")
+async def moment_thumbnails(
+    job_id: str,
+    body: ThumbnailRequest,
+    user: CallerIdentity = Depends(current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Sign read URLs for a page of moment thumbnails.
+
+    The bucket is private and an `<img>` carries no Authorization header, so the
+    picture cannot be fetched the way the rest of the API is. A signed URL is
+    the whole credential, which is exactly what an `<img src>` needs.
+
+    Not the CDN's signed cookie, which authorises playback: that one is minted
+    by `/playback` and so exists only for a job that has been packaged, while
+    moments and their stills exist as soon as the analysis has run. A thumbnail
+    that appeared only after an encode would be missing for precisely the job
+    someone is waiting on.
+    """
+    await _load_job(job_id, user)
+    if not settings.media_bucket:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Media storage is not configured.",
+        )
+
+    wanted = [mid for mid in dict.fromkeys(body.moment_ids) if _MOMENT_ID.match(mid)]
+    if not wanted:
+        return {"job_id": job_id, "thumbnails": {}, "expires_at": None}
+
+    bucket = _storage_client().bucket(settings.media_bucket)
+    token = _signing_token()
+
+    def sign(moment_id: str) -> str:
+        return bucket.blob(f"jobs/{job_id}/moments/{moment_id}.png").generate_signed_url(
+            version="v4",
+            expiration=_THUMBNAIL_TTL,
+            method="GET",
+            service_account_email=settings.signer_service_account or None,
+            access_token=token,
+        )
+
+    try:
+        # In parallel, and in threads: signing is a blocking round trip to IAM
+        # per URL, so a page of ten signed in series is ten round trips of
+        # latency on the event loop for one list of pictures.
+        urls = await asyncio.gather(
+            *(run_in_threadpool(sign, moment_id) for moment_id in wanted)
+        )
+    except Exception as exc:
+        logger.exception("could not sign thumbnail URLs for job %s", job_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not sign thumbnail URLs.",
+        ) from exc
+
+    return {
+        "job_id": job_id,
+        "thumbnails": dict(zip(wanted, urls, strict=True)),
+        "expires_at": datetime.datetime.now(datetime.UTC) + _THUMBNAIL_TTL,
+    }
 
 
 @router.get("/{job_id}/clips")

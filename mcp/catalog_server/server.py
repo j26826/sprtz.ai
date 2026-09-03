@@ -244,6 +244,21 @@ def upsert_moments(job_id: str, moments: list[dict]) -> dict:
 
 
 @mcp.tool
+def record_moment_thumbnails(job_id: str, thumbnails: dict) -> dict:
+    """Attach the thumbnail written for each moment to its record.
+
+    Args:
+        job_id: Identifier of the job.
+        thumbnails: moment_id -> gs:// URI of the moment's thumbnail.
+    """
+    try:
+        saved = store.record_moment_thumbnails(job_id, thumbnails)
+        return {"status": "success", "job_id": job_id, "saved": saved}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def list_moments(job_id: str, limit: int, min_score: float) -> dict:
     """List a job's key moments, highest scoring first.
 
