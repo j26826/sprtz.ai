@@ -193,6 +193,11 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
     return {
         "status": "success",
         "job_id": job_id,
+        # Returned so the stage that reports it can say it, and so the stages
+        # after it inherit the fact rather than asking for it. The analysis
+        # stage once stopped and asked which sport this was, in a pipeline with
+        # nobody to answer.
+        "sport": job.get("sport", ""),
         "gcs_uri": gcs_uri,
         "media": probe,
         "segment_count": len(segments),
@@ -346,7 +351,7 @@ async def _await_transcode(job_id: str, transcoder_job: str) -> dict:
 
 
 @stage("analysis")
-async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> dict:
+async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "") -> dict:
     """Analyse the whole match and save the key moments it finds.
 
     Splits the video into segments, sends each to Gemini concurrently, merges the
@@ -355,12 +360,30 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
 
     Args:
         job_id: Identifier of the job to analyse.
-        sport: Sport played in the video, for example "handball".
+        sport: Leave this empty. The sport is recorded on the job at upload and
+            is read from there; it is only accepted at all so an older caller
+            still works.
 
     Returns:
         dict summarising how many moments were found and the strongest ones.
     """
     settings = get_settings()
+
+    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+
+    # The sport belongs to the job, not to the conversation. It was a required
+    # argument, and with one sport registered a model could safely guess it;
+    # with two it correctly stopped guessing and asked instead — "What sport is
+    # being played in the video?" — in a pipeline with nobody to answer. The
+    # run then continued through every later stage on zero moments and reported
+    # itself finished. A stored fact must not be a parameter a model fills in.
+    sport = (job.get("sport") or sport or "").strip()
+    if not sport:
+        return {
+            "status": "error",
+            "error": f"Job {job_id} does not say what sport it is.",
+            "supported_sports": list_sports(),
+        }
 
     try:
         profile = get_profile(sport)
@@ -371,7 +394,6 @@ async def analyze_match(job_id: str, sport: str, tool_context: ToolContext) -> d
             "supported_sports": list_sports(),
         }
 
-    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     gcs_uri = (job.get("source") or {}).get("gcsUri")
     duration = float((job.get("media") or {}).get("durationSec") or 0.0)
 
@@ -1376,6 +1398,27 @@ async def finalize_job(job_id: str) -> dict:
 
     ready = len(clips) - len(problems)
     status = "ready" if ready else "needs_attention"
+
+    # Nothing at all is a different outcome from nothing publishable. A run
+    # whose analysis never happened finished every later stage successfully and
+    # reported "0 of 0 clips ready", which reads as a match with no highlights
+    # in it rather than as an analysis that did not run.
+    counts = (await mcp_client.call_tool(
+        "catalog", "get_job", {"job_id": job_id})).get("counts") or {}
+    analysed = int(counts.get("moments") or 0)
+    if not clips and not analysed:
+        reason = (
+            "The analysis stage produced no moments, so there was nothing to cut. "
+            "Re-run it; if it happens again the segment analysis is failing rather "
+            "than the match being quiet."
+        )
+        await mcp_client.call_tool("catalog", "update_job_status", {
+            "job_id": job_id, "status": "failed", "stage": "complete",
+            "progress": 100, "error": reason,
+        })
+        await _emit(job_id, "publish", reason, level="error")
+        return {"status": "error", "job_id": job_id, "error": reason,
+                "clips": 0, "moments": 0}
     # The run is over either way, so the bar is full either way — a job that
     # needs attention is finished, not stuck at 95%.
 
