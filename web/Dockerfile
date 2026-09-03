@@ -4,17 +4,18 @@ RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
 
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY index.html /usr/share/nginx/html/index.html
-COPY src/app.js /usr/share/nginx/html/app.js
-COPY src/app.css /usr/share/nginx/html/app.css
-COPY src/i18n.js /usr/share/nginx/html/i18n.js
-COPY src/settings.js /usr/share/nginx/html/settings.js
-COPY src/sessions.js /usr/share/nginx/html/sessions.js
-# Brand wordmark and app icon. Served from the app's own origin so they are
-# covered by the same cache and CSP as everything else.
-COPY src/assets/ /usr/share/nginx/html/assets/
-# The Modernist design system, vendored. It is the source of truth for every
-# colour, space and radius the app uses.
-COPY src/ds/ /usr/share/nginx/html/ds/
+
+# The whole of src/, not a list of files. The app is ES modules served as
+# written, so a module that is not copied is a bare `import` answered with 404:
+# app.js never runs, and the screen is blank with nothing naming the missing
+# file. A per-file list is a second place to remember, and adding moments.js
+# proved it is the place that gets forgotten.
+#
+# This lands src/assets/ at /assets/ and src/ds/ at /ds/, which is where the
+# nginx cache rules and the brand markup expect them. src/ holds nothing that
+# is not meant to be served: the app has no build step, so what is written is
+# what ships.
+COPY src/ /usr/share/nginx/html/
 COPY entrypoint.sh /entrypoint.sh
 
 # nginx writes the generated config.js and its temp dirs at runtime.

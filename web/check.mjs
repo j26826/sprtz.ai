@@ -158,6 +158,23 @@ for (const source of [app, html]) {
   }
 }
 
+/* ── every module imported is a module that exists ────────────────────────── */
+
+// A relative import that resolves to nothing is a 404 on a bare `import`: the
+// script never runs and the screen is blank, with the console naming a URL
+// rather than the file that asked for it. This catches a typo; the Dockerfile
+// copying src/ wholesale is what stops a real file being left out of the image.
+for (const name of ['src/app.js', 'src/settings.js', 'src/sessions.js', 'src/i18n.js',
+  'src/moments.js']) {
+  const source = read(name);
+  for (const [, spec] of source.matchAll(/\bfrom\s+'(\.[^']+)'/g)) {
+    const resolved = new URL(spec, new URL(name, ROOT));
+    if (!existsSync(resolved)) {
+      fail(`${name} imports '${spec}', which does not exist`);
+    }
+  }
+}
+
 /* ── every api() call is addressed to the API ─────────────────────────────── */
 
 // The load balancer routes /api/* to the API and /jobs/* to the HLS bucket, so
