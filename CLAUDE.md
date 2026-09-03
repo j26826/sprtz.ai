@@ -481,6 +481,41 @@ the tokens that differ rather than copying a file that then drifts.
 from a theme that sets a token to one that does not would leave the old value
 behind.
 
+`skyline-dark` is the second: the Scanline palette on the Modernist structure.
+Near-black cool ground, a violet accent, IBM Plex. The zero radius, the 2px
+rules and the flush-left labels stay, because those are the product's shape
+rather than its colour — rounding them would mean editing `app.css`, at which
+point it is a second stylesheet and the overlay model is gone.
+
+**The ramps are read by step, not by lightness.** Each rung of the neutral and
+accent scales has a fixed job in `app.css`, and a theme answers the job rather
+than preserving the order: neutral 100 is a surface, 300-500 are rules, 600-800
+are text, and 900 is the ground a picture sits on — so 900 is *dark* in a dark
+theme while 800 is nearly white. Sorting them into a monotonic ramp would put a
+white background behind every video. Same for the accent: 100-300 are hover
+tints, 700-900 are the accent as text.
+
+A theme also carries **the wordmark and the fonts its type tokens name**. The
+logo carries its own colour rather than taking the accent, so a dark theme
+cannot tint it — it swaps the file, and `web/check.mjs` fails if a theme names
+one that is not in `assets/`. `--font-body: 'IBM Plex Sans'` with nothing
+fetching IBM Plex is a token that quietly means `system-ui`: the theme looks
+applied, reads wrong, and nothing says why, so `applyTheme` maintains one
+`<link>` whose href it rewrites.
+
+**Four literals in `app.css`, and they are one exception.** White on the video
+ground and white on the accent: both of those surfaces are dark under every
+theme, so their foreground does not follow the page. `--color-bg` was written
+there and worked only while the page happened to be light — it inverted with
+it, which is how a dark theme finds them. The letterbox matte is the same
+argument at full strength.
+
+**Failure is not the accent.** They are both red in the Modernist palette and
+nothing depended on the difference until a theme moved the accent to violet, at
+which point a failed job printed in it reads as a highlight. The `failed` tones
+and the two error panels use the `accent-2` ramp, which is near-identical to
+`accent` in the light theme and red in the dark one.
+
 ### The language rule in the prompt
 
 Prose is translated; observations are not. `description`, `evidence` and

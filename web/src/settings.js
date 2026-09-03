@@ -22,9 +22,93 @@ const STORAGE_KEY = 'sportscut.settings';
 export const THEMES = {
   'metro-light': {
     name: 'Metro Light',
+    logo: '/assets/logo-full-black.png',
     // No overrides: this is the design system's own palette. A theme that
     // restated the tokens here would be a second source of truth for them.
     tokens: {},
+  },
+
+  /**
+   * Skyline Dark — the Scanline palette on the Modernist structure.
+   *
+   * A theme is a token overlay, so this changes what the app is made of and
+   * not how it is put together: near-black cool ground, a violet accent in
+   * place of the red, and type from IBM Plex. The zero corner radius, the 2px
+   * rules and the flush-left labels stay, because those are the product's
+   * shape rather than its colour — rounding them would mean editing app.css,
+   * at which point it is a second stylesheet rather than a theme.
+   *
+   * **The ramps are read by step, not by lightness.** Each rung of the neutral
+   * and accent scales has a fixed job in app.css, and the theme answers the
+   * job rather than preserving the order: 100 is a surface, 300-500 are rules,
+   * 600-800 are text, and 900 is the ground a picture sits on — so 900 is dark
+   * here while 800 is nearly white. Sorting these into a monotonic ramp would
+   * put a white background behind every video.
+   */
+  'skyline-dark': {
+    name: 'Skyline Dark',
+    // The wordmark is drawn in dark ink and disappears on this ground.
+    logo: '/assets/icon-full-white.png',
+    fontUrl: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800'
+      + '&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap',
+    tokens: {
+      '--color-bg': '#0a0b0f',
+      '--color-surface': '#14161f',
+      '--color-text': '#f3f4f7',
+      // The darker end of the reference's own accent gradient, not the
+      // #7c6cff base. Solid buttons put white on this, and white on #7c6cff is
+      // 3.9:1 where this is 4.8:1 — the base stays as accent-500, which is
+      // where the ramp wants it and where nothing carries text.
+      '--color-accent': '#6a5cf0',
+      // Danger, kept separate from the accent. In the Modernist palette the
+      // two are both red and nothing depended on the difference; here the
+      // accent is violet, and a failed job printed in it reads as a highlight.
+      '--color-accent-2': '#ff6b6b',
+      '--color-divider': 'rgba(255, 255, 255, 0.18)',
+
+      // 100 surface · 300-500 rules · 600-800 text · 900 the video ground.
+      '--color-neutral-100': '#14161f',
+      '--color-neutral-200': '#1b1e2a',
+      '--color-neutral-300': 'rgba(255, 255, 255, 0.10)',
+      '--color-neutral-400': 'rgba(255, 255, 255, 0.18)',
+      '--color-neutral-500': 'rgba(255, 255, 255, 0.26)',
+      '--color-neutral-600': '#7d8294',
+      '--color-neutral-700': '#9ca1b3',
+      '--color-neutral-800': '#d5d8e2',
+      '--color-neutral-900': '#0e0f15',
+
+      // 100-300 are tints behind hover and pressed states; 700-900 are the
+      // accent as text, which has to be light enough to read on the ground.
+      '--color-accent-100': 'rgba(124, 108, 255, 0.14)',
+      '--color-accent-200': 'rgba(124, 108, 255, 0.22)',
+      '--color-accent-300': 'rgba(124, 108, 255, 0.32)',
+      '--color-accent-400': '#6a5cf0',
+      '--color-accent-500': '#7c6cff',
+      '--color-accent-600': '#8f7fff',
+      '--color-accent-700': '#b3adff',
+      '--color-accent-800': '#c9c2ff',
+      '--color-accent-900': '#ded9ff',
+
+      '--color-accent-2-100': 'rgba(255, 107, 107, 0.13)',
+      '--color-accent-2-200': 'rgba(255, 107, 107, 0.20)',
+      '--color-accent-2-300': 'rgba(255, 107, 107, 0.30)',
+      '--color-accent-2-400': '#e85f5f',
+      '--color-accent-2-500': '#ff6b6b',
+      '--color-accent-2-600': '#ff8080',
+      '--color-accent-2-700': '#ff9b9b',
+      '--color-accent-2-800': '#ffbcbc',
+      '--color-accent-2-900': '#ffd9d9',
+
+      '--font-heading': "'Bricolage Grotesque', 'Archivo', system-ui, sans-serif",
+      '--font-heading-weight': '700',
+      '--font-body': "'IBM Plex Sans', 'Archivo', system-ui, sans-serif",
+
+      // Ink-tinted shadows are invisible on a dark ground; depth here is
+      // ambient black under the element rather than a tint over it.
+      '--shadow-sm': '0 1px 2px rgba(0, 0, 0, 0.5)',
+      '--shadow-md': '0 6px 18px -6px rgba(0, 0, 0, 0.6)',
+      '--shadow-lg': '0 30px 80px -30px rgba(0, 0, 0, 0.7)',
+    },
   },
 };
 
@@ -81,7 +165,7 @@ export function saveSettings(patch) {
   return { ...current };
 }
 
-/** Paint a theme by writing its overrides onto the document root. */
+/** Paint a theme: its tokens, the fonts they name, and the wordmark. */
 export function applyTheme(themeId) {
   const theme = THEMES[themeId] || THEMES[DEFAULTS.theme];
   const root = document.documentElement;
@@ -97,6 +181,47 @@ export function applyTheme(themeId) {
   }
   for (const [token, value] of Object.entries(theme.tokens)) {
     root.style.setProperty(token, value);
+  }
+
+  applyThemeFont(theme.fontUrl || '');
+  applyThemeLogo(theme.logo || THEMES[DEFAULTS.theme].logo);
+}
+
+
+/**
+ * Load the webfont a theme's type tokens name.
+ *
+ * `--font-body: 'IBM Plex Sans'` with nothing fetching IBM Plex is a token
+ * that quietly means system-ui — the theme looks applied, reads wrong, and
+ * nothing says why. One <link> whose href is rewritten, rather than one per
+ * theme: switching back and forth would otherwise stack them up.
+ */
+function applyThemeFont(url) {
+  let link = document.getElementById('theme-font');
+  if (!url) {
+    link?.remove();
+    return;
+  }
+  if (!link) {
+    link = document.createElement('link');
+    link.id = 'theme-font';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+  }
+  if (link.href !== url) link.href = url;
+}
+
+
+/**
+ * Swap the wordmark for one that can be seen on this theme's ground.
+ *
+ * The logo carries its own colour rather than taking the accent, so a dark
+ * theme cannot tint it — it needs the other file. An <img> rather than a
+ * background image, so it keeps its alt text.
+ */
+function applyThemeLogo(src) {
+  for (const img of document.querySelectorAll('.brand-logo, .signin-logo')) {
+    if (img.getAttribute('src') !== src) img.setAttribute('src', src);
   }
 }
 
