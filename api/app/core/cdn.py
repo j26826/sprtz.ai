@@ -60,6 +60,53 @@ def sign_cookie(
     return f"{to_sign}:Signature={_b64url(signature)}"
 
 
+def cookie_header(
+    *,
+    name: str,
+    value: str,
+    path: str,
+    max_age: int,
+    domain: str = "",
+) -> str:
+    """The ``Set-Cookie`` line for a signed cookie, built by hand.
+
+    Deliberately not ``response.set_cookie``. Starlette puts the value through
+    ``http.cookies``, whose legal-character set excludes ``=``; a value carrying
+    one is wrapped in double quotes. A Cloud CDN cookie is four ``=``-separated
+    fields, so it is *always* quoted, and the browser then stores and sends back
+
+        Cloud-CDN-Cookie="URLPrefix=...:Expires=...:KeyName=...:Signature=..."
+
+    quotes included. Cloud CDN cannot verify that, so every playlist and every
+    segment answers 403 — while DevTools shows the cookie present, sent, and
+    unexpired, which points the investigation at everything except the value.
+
+    RFC 6265 permits the quoted form and expects the recipient to strip the
+    quotes; Cloud CDN does not, and it is the only reader of this cookie.
+    """
+    parts = [f"{name}={value}", f"Path={path}", f"Max-Age={max_age}"]
+    if domain:
+        parts.insert(2, f"Domain={domain}")
+    parts += ["Secure", "HttpOnly", "SameSite=Lax"]
+    return "; ".join(parts)
+
+
+def expire_cookie_header(*, name: str, path: str, domain: str) -> str:
+    """A ``Set-Cookie`` that removes a domain-scoped copy of ``name``.
+
+    A cookie set with ``Domain=`` and the host-only cookie of the same name are
+    two different cookies, and the browser sends both. Where they differ only in
+    an attribute the CDN never sees, the one the CDN reads is whichever the
+    browser lists first — the older one. So a release that changes the scoping
+    leaves a copy behind that can keep answering for the correct one until it
+    expires on its own, hours later.
+    """
+    return (
+        f"{name}=; Domain={domain}; Path={path}; Max-Age=0; "
+        "Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax"
+    )
+
+
 def playback(
     *,
     cdn_base_url: str,

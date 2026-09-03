@@ -65,3 +65,70 @@ def test_unconfigured_signing_raises_rather_than_returning_a_dead_url():
         with pytest.raises(RuntimeError):
             cdn.playback(**base)
 
+
+
+class TestSetCookieHeader:
+    """The header is built by hand because the standard library breaks it.
+
+    `http.cookies` excludes "=" from the characters legal in a cookie value, so
+    it quotes anything containing one — and every Cloud CDN cookie contains
+    four. Cloud CDN does not strip those quotes, so the browser stores a valid
+    cookie, sends it on every request, and gets 403 for the playlist and every
+    segment. That reads as a signing or a permissions problem, which is where
+    the time goes.
+    """
+
+    def _header(self, **overrides):
+        kwargs = dict(name=cdn.COOKIE_NAME, value=cdn.sign_cookie(
+            url_prefix="https://app.example/jobs/j1/", key_name="k1",
+            key_value=KEY, expires_at=1900000000,
+        ), path="/jobs/j1/", max_age=3600)
+        kwargs.update(overrides)
+        return cdn.cookie_header(**kwargs)
+
+    def test_the_value_is_not_quoted(self):
+        header = self._header()
+        assert '="URLPrefix' not in header, header
+        assert '"' not in header, header
+        assert header.startswith(f"{cdn.COOKIE_NAME}=URLPrefix="), header
+
+    def test_starlette_would_have_quoted_it(self):
+        # The check that gives the assertion above its meaning: without it the
+        # test passes against a helper nobody needed.
+        import http.cookies
+
+        jar = http.cookies.SimpleCookie()
+        jar[cdn.COOKIE_NAME] = cdn.sign_cookie(
+            url_prefix="https://app.example/jobs/j1/", key_name="k1",
+            key_value=KEY, expires_at=1900000000,
+        )
+        assert '="URLPrefix' in jar.output(header="").strip()
+
+    def test_the_signature_survives_intact(self):
+        value = cdn.sign_cookie(url_prefix="https://app.example/jobs/j1/", key_name="k1",
+                                key_value=KEY, expires_at=1900000000)
+        sent = self._header(value=value).split("; ")[0].split("=", 1)[1]
+        assert sent == value
+
+    def test_it_is_scoped_and_hardened(self):
+        header = self._header()
+        assert "Path=/jobs/j1/" in header
+        assert "Max-Age=3600" in header
+        assert "Secure" in header and "HttpOnly" in header and "SameSite=Lax" in header
+
+    def test_no_domain_by_default(self):
+        assert "Domain=" not in self._header()
+
+    def test_a_configured_domain_is_carried(self):
+        assert "Domain=cdn.example" in self._header(domain="cdn.example")
+
+    def test_expiring_the_domain_copy_targets_the_domain_one(self):
+        # Deleting a cookie means matching its name, path and domain. A
+        # host-only cookie and a Domain= cookie of the same name are two
+        # cookies, and the browser sends both.
+        header = cdn.expire_cookie_header(
+            name=cdn.COOKIE_NAME, path="/jobs/j1/", domain="app.example")
+        assert header.startswith(f"{cdn.COOKIE_NAME}=;")
+        assert "Domain=app.example" in header
+        assert "Path=/jobs/j1/" in header
+        assert "Max-Age=0" in header
