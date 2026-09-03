@@ -145,6 +145,11 @@ steps:
         npm --prefix web ci --silent --no-fund --no-audit \
           || npm --prefix web install --silent --no-fund --no-audit
         node web/check.mjs
+        # Behaviour, not shape: which moments a question asks for. app.js
+        # cannot be loaded outside a browser — it imports the Firebase SDK from
+        # a CDN — so the logic worth testing lives in src/moments.js, which
+        # imports nothing.
+        node --test 'web/tests/*.test.mjs'
 
   - id: build-web
     name: gcr.io/cloud-builders/docker

@@ -586,6 +586,32 @@ another's cannot answer for it, and a one-word name is not a match at all. It
 reads the collection through a field mask: this scans every game, and the
 768-float vectors are almost all of the bytes.
 
+**The moments card filters on what was asked for.** It used to answer every
+question with every moment, so "show all goals" and "show me the best moments"
+produced the same 346 rows — which reads as a filter that ran and matched
+everything rather than one that never existed. `src/moments.js` narrows the
+list by kind and by half of the match.
+
+The vocabulary is **the taxonomy's, not a list kept here**: the words matched
+against are the moment's own class, category, result, participant role and
+summary, so "penalties" finds `7-Metre Penalty` because that is what the sport
+profile calls it. Every term must match, with any-term as a fallback — "wing
+shot" is one kind of moment, and matching either word made it mean "shot",
+which is how asking for wing shots returned jump shots; "penalties and
+suspensions" is the case that needs the fallback, since no moment is both.
+
+**A word the taxonomy does not use shows everything and says so.** An empty
+card would claim the analysis found nothing when the moments are right there
+and it is the word that is wrong. The head row distinguishes the three states:
+narrowed (with a count and a Show all), nothing matched, or no filter at all.
+
+**Halves are the match, not the clock.** The upload carries whatever was
+recorded before throw-off — the first goal of one of these matches is at
+29:47 — so a fixed 30:00 would put the entire first half into the second. The
+split is the midpoint of the span the analysis actually found. "First" only
+means a half when the word `half` follows it, or a taxonomy containing a
+`First Wave` could never be searched.
+
 **Moments are ordered by score or by time**, and the card says which. Score
 answers "the best moments"; match order answers "in order" and is how the log
 reads. The order lives on the message rather than in the stored ids, so the
@@ -638,6 +664,18 @@ a thumbnail to play and a game does not, so they have separate grids — reusing
 Grounded values get their own rows in the game popup, labelled "(from search)",
 and the sources sit at the bottom of it rather than on the card. They qualify
 the grounded rows and are meaningless beside a row nobody is looking at.
+
+### web/src/moments.js, and the only web tests there are
+
+`app.js` cannot be loaded outside a browser: it imports the Firebase SDK from a
+CDN, so `import()` in Node fails on the first line. That is why the moment
+filtering lives in its own module that imports **nothing** — pure functions
+over plain objects, which `node --test web/tests` can reach. CI runs it beside
+`check.mjs`.
+
+It is worth having because the failure mode is silent and central: a word added
+carelessly to `FILTER_NOISE` empties the card the app's own suggestion chip
+opens, and nothing about that says which word did it.
 
 ### web/check.mjs
 

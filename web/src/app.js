@@ -27,6 +27,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
+import { filterAsked, gameNamedIn as namedGame, selectMoments } from './moments.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
 } from './settings.js';
@@ -603,56 +604,14 @@ function emptyCard(message) {
 }
 
 
-/**
- * Normalise a title enough to recognise it in a sentence.
- *
- * Titles are composed in code — "FAG v TVB — DAIKIN HBL" — and retyped by hand
- * into the composer, where the em dash becomes a hyphen and the spacing drifts.
- * Case, punctuation and runs of whitespace are all noise for this comparison;
- * the letters and digits are not.
- */
-function titleKey(text) {
-  return String(text ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-
-/**
- * The match a question names, if it names one this desk has.
- *
- * "Show all moments of FAG v TVB — DAIKIN HBL" is about a specific game, and
- * answering it with whichever match happens to be selected is worse than
- * saying nothing. Matched against the whole games list rather than by asking
- * the agent: the titles are already in the browser, and an exact name is
- * exactly what a vector search is worst at.
- *
- * The longest match wins, so "FAG v TVB — DAIKIN HBL" is not answered by a
- * different fixture whose title is a prefix of it.
- */
+/** The match a question names, resolved against the titles already loaded. */
 function gameNamedIn(question) {
-  const asked = titleKey(question);
-  if (!asked) return null;
-
-  return state.games
-    .map((g) => ({ game: g, key: titleKey(gameHeadline(g)) }))
-    // Two words is not a name. "the game" would otherwise match one.
-    .filter(({ key }) => key.split(' ').length > 1 && asked.includes(key))
-    .sort((a, b) => b.key.length - a.key.length)[0]?.game || null;
+  return namedGame(question, state.games, gameHeadline);
 }
 
 
-const MOMENT_SORTS = {
-  // Highest scoring first: the answer to "show me the best moments".
-  score: (a, b) => (b.highlightScore ?? 0) - (a.highlightScore ?? 0),
-  // Match order: the answer to "in order", and how the log reads.
-  time: (a, b) => (a.startSec ?? 0) - (b.startSec ?? 0),
-};
-
-
 /**
- * The moments a message is about, in the order it asked for.
+ * The moments a message is about: which ones, and in what order.
  *
  * Ids are held on the message so scrolling back to an earlier answer finds
  * what it said. A question naming another match has no ids yet — selectJob's
@@ -660,19 +619,47 @@ const MOMENT_SORTS = {
  * while that match is still the open one.
  */
 function momentsFor(msg) {
-  const list = msg.momentIds
+  const all = msg.momentIds
     ? msg.momentIds.map(momentById).filter(Boolean)
     : (!msg.jobId || msg.jobId === state.jobId ? [...state.moments] : []);
-  return list.sort(MOMENT_SORTS[msg.sort] || MOMENT_SORTS.score);
+
+  return selectMoments(all, {
+    terms: msg.showAll ? [] : (msg.terms || []),
+    half: msg.showAll ? null : msg.half,
+    sort: msg.sort,
+  });
 }
 
 
-function sortRow(msg, index) {
-  if (!msg.showMoments) return '';
-  const sort = msg.sort === 'time' ? 'time' : 'score';
+/**
+ * What the list is showing, and how it is ordered.
+ *
+ * The filter has to be visible or it cannot be trusted: 42 rows where there
+ * were 346 is indistinguishable from an analysis that found 42, and a word the
+ * taxonomy does not use silently doing nothing is worse still.
+ */
+function momentsHead(view, index) {
+  const sort = view.sort === 'time' ? 'time' : 'score';
+  const asked = [
+    ...view.terms,
+    ...(view.half ? [t(`moments.half.${view.half}`)] : []),
+  ].join(', ');
+
+  let title = `<div class="panel-head-title">${esc(t('moments.sortBy'))}</div>`;
+  if (view.narrowed) {
+    title = `
+      <div class="panel-head-title">
+        ${esc(t('moments.filtered'))} ${esc(asked)}
+        · ${view.list.length} ${esc(t('pager.of'))} ${view.total}
+        <button class="link-btn" data-show-all="${index}">${esc(t('moments.showAll'))}</button>
+      </div>`;
+  } else if (view.missed) {
+    title = `<div class="panel-head-title">${esc(t('moments.noMatch'))} ${esc(asked)}</div>`;
+  }
+
   return `
     <div class="panel-head">
-      <div class="panel-head-title">${esc(t('moments.sortBy'))}</div>
+      ${title}
       <div class="panel-head-meta">
         ${['score', 'time'].map((key) => `
           <button class="link-btn" data-sort="${index}:${key}"
@@ -683,11 +670,11 @@ function sortRow(msg, index) {
 
 
 function momentsCard(msg, index) {
-  const list = momentsFor(msg);
-  if (!list.length) return emptyCard(t('moments.none'));
+  const found = momentsFor(msg);
+  if (!found.list.length) return emptyCard(t('moments.none'));
 
-  const view = pageOf(list, msg.page);
-  return `<div class="panel-light">${sortRow(msg, index)}${view.slice.map((m) => {
+  const view = pageOf(found.list, msg.page);
+  return `<div class="panel-light">${momentsHead({ ...found, sort: msg.sort }, index)}${view.slice.map((m) => {
     const clip = state.clips.find((c) => c.momentId === m.momentId);
     const meta = [
       m.label || m.momentType,
@@ -1299,7 +1286,7 @@ function actionsRow(msg) {
  * have made that unreadable.
  */
 function cardAnswersIt(m) {
-  if (m.showMoments) return momentsFor(m).length > 0;
+  if (m.showMoments) return momentsFor(m).list.length > 0;
   if (m.showGames) return state.games.length > 0;
   if (m.showGame) return Boolean(state.game);
   return false;
@@ -1644,6 +1631,10 @@ function attachCards(index, question) {
     // snapshotted — there are none yet — and the card reads the live list until
     // they arrive.
     const named = gameNamedIn(question);
+    // "show every penalty" asked for penalties. Without this the card answered
+    // every question with every moment, which is the same answer as no filter
+    // at all and looks like the filter ran and found everything.
+    Object.assign(msg, filterAsked(question, named ? gameHeadline(named) : ''));
     if (named && (named.jobId || named.id) !== state.jobId) {
       msg.jobId = named.jobId || named.id;
       msg.momentIds = null;
@@ -1791,7 +1782,7 @@ document.addEventListener('click', (event) => {
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
     + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
-    + '[data-open-game],[data-page],[data-sort]');
+    + '[data-open-game],[data-page],[data-sort],[data-show-all]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -1814,6 +1805,12 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.gameDetails) { openGameDetails(state.game); return; }
   if (hit.dataset.openGame) {
     openGameDetails(state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame));
+    return;
+  }
+  if (hit.dataset.showAll) {
+    const msg = state.msgs[Number(hit.dataset.showAll)];
+    if (msg) { msg.showAll = true; msg.page = 0; }
+    render();
     return;
   }
   if (hit.dataset.sort) {
