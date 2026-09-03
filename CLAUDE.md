@@ -1173,6 +1173,28 @@ what someone searches by — and `discipline_by_code` normalises it back. The
 title falls back to it too: an equestrian graphic often names nobody, and
 `Jumping — CSI Aachen` is a title where the uploaded filename is not.
 
+### An equestrian recording is a competition day
+
+The five real samples are 6.3-8.45 hours and 7-12.6 GB each: **one fixed camera
+on a ring for a whole day**, many competitors in sequence, promotional films cut
+in between classes, and long stretches of empty arena. Not a broadcast of one
+round, which is what the record's shape assumed.
+
+Three things follow, and all three were wrong before the footage was looked at:
+
+- **`MAX_DURATION_SEC` was six hours** and rejected every one of them at
+  validation, before anything else ran. It is ten now. Not free: 8.45 hours is
+  35 analysis windows against a match's 13, so roughly 8M input tokens a pass.
+- **`teams_are_constant` is False.** Consensusing `team1` across the job would
+  relabel every competitor as whoever had the longest go. The per-moment reading
+  is the only correct one, because the graphic naming them changes every round.
+  The game record leaves the teams empty and is titled from the discipline and
+  the competition instead.
+- **The graphic is a lower third, not a score bug.** Rider, horse, nation, a
+  time or a fault count — and often nothing at all. The horse is half the
+  competitor, so `participant` is the pair as printed; `team2` stays empty,
+  because a name there reads as a fixture between a rider and their own horse.
+
 ### Fields a sport asks for
 
 `execution_details` and `harmony_index` exist because equestrian is judged on

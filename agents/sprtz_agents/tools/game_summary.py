@@ -166,10 +166,14 @@ def assemble(
     fallback_title: str = "",
     discipline: str = "",
     discipline_confidence: float = 0.0,
+    teams_are_constant: bool = True,
 ) -> GameDetails:
     """Put the record together: facts from the observations, judgements from the model."""
-    home_team = most_common_reading([m.team1 for m in moments])
-    away_team = most_common_reading([m.team2 for m in moments])
+    # A competition is not a fixture. Where the names change every round, the
+    # most frequent one is not "the home team", it is whoever had the longest
+    # go — so the record says nothing rather than saying that.
+    home_team = most_common_reading([m.team1 for m in moments]) if teams_are_constant else ""
+    away_team = most_common_reading([m.team2 for m in moments]) if teams_are_constant else ""
     final_score, home, away = final_score_from(moments)
     judgement = judgement or {}
 

@@ -166,3 +166,93 @@ class TestTheResponseShape:
         assert profile.segment_schema is EquestrianSegmentAnalysis
         # Handball uses the general one, which is what None means.
         assert get_profile("handball").segment_schema is None
+
+
+class TestAWholeCompetitionDay:
+    """What the real recordings turned out to be.
+
+    Five samples, 6.3 to 8.45 hours each, 7 to 12.6 GB: a fixed camera on one
+    ring for a whole day, many competitors in sequence, promotional films cut in
+    between classes, and long stretches of empty arena. Not a broadcast of one
+    round, which is what the record's shape had assumed.
+    """
+
+    def test_a_competitor_is_not_consensused_across_the_day(self, profile):
+        # Every round has a different rider. Taking the most frequent reading
+        # would relabel all of them as whoever had the longest go.
+        assert profile.teams_are_constant is False
+        assert get_profile("handball").teams_are_constant is True
+
+    def test_the_game_record_leaves_the_teams_empty(self):
+        from sprtz_agents.schemas import Moment
+        from sprtz_agents.tools.game_summary import assemble
+
+        def _round(rider: str, at: float) -> Moment:
+            return Moment(
+                moment_id=f"m{at}", job_id="j", moment_type="clear_jump",
+                category="obstacle", label="Clear Jump", start_sec=at,
+                end_sec=at + 6, peak_sec=at + 3, confidence=0.9, excitement=0.7,
+                highlight_score=0.8, description="A clear round", team1=rider,
+            )
+
+        # Three rounds, one rider going twice. "Whoever appeared most" is not
+        # the home team; it is not a fact about the recording at all.
+        game = assemble(
+            job_id="j", sport="equestrian",
+            moments=[_round("Rider A", 100), _round("Rider A", 400), _round("Rider B", 900)],
+            segment_summaries=[], competitions=["Dublin"], venues=[],
+            discipline="Jumping", teams_are_constant=False,
+        )
+        assert game.home_team == ""
+        assert game.away_team == ""
+        # And it is still named, because the discipline and the competition are
+        # facts about the whole recording even when nobody is.
+        assert game.title == "Jumping — Dublin"
+
+    def test_the_moments_keep_their_own_readings(self):
+        # Skipping the consensus must not also blank what each round showed.
+        from sprtz_agents.schemas import Moment
+        from sprtz_agents.tools.analysis import apply_team_names
+
+        moments = [
+            Moment(moment_id="a", job_id="j", moment_type="clear_jump",
+                   category="obstacle", label="Clear Jump", start_sec=1, end_sec=7,
+                   peak_sec=4, confidence=0.9, excitement=0.7, highlight_score=0.8,
+                   description="", team1="Rider A"),
+        ]
+        # apply_team_names is simply not called for this sport; the reading
+        # survives untouched.
+        assert moments[0].team1 == "Rider A"
+        assert apply_team_names(moments, "", "")[0].team1 == "Rider A"
+
+
+class TestTheRecordingsFit:
+    def test_eight_and_a_half_hours_is_accepted(self):
+        # All five samples were rejected at validation before anything else ran:
+        # the cap was six hours, written when a handball match was the only
+        # input anyone had.
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "mcp"))
+        from media_server import ffmpeg_ops
+
+        longest = 8.45 * 3600
+        assert ffmpeg_ops.MAX_DURATION_SEC > longest
+        assert ffmpeg_ops.validate({
+            "duration_sec": longest, "width": 1920, "height": 1080,
+            "video_codec": "h264", "audio_codec": "aac", "fps": 25.0,
+        }) == []
+
+    def test_a_runaway_is_still_bounded(self):
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "mcp"))
+        from media_server import ffmpeg_ops
+
+        reasons = ffmpeg_ops.validate({
+            "duration_sec": 24 * 3600, "width": 1920, "height": 1080,
+            "video_codec": "h264", "audio_codec": "aac", "fps": 25.0,
+        })
+        assert any("exceeds" in r for r in reasons)

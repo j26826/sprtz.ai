@@ -755,12 +755,18 @@ saddle has a horn and is ridden one-handed on a slack rein; an English saddle is
 ridden with contact in both hands. Adaptive reins, a modified saddle or a rider
 carrying two whips indicate para-dressage rather than dressage.
 
-Broadcast conventions:
-- Graphics usually show the competitor's number or name, and then a fault count
-  and an elapsed time (jumping, eventing), a percentage (dressage), or a heart
-  rate and a hold time (endurance). Read whatever is there; it is not a scoreline.
-- Rounds are often replayed immediately, in slow motion and from another angle.
-- Commentary rises on a clear round, a fall, a knockdown and a big movement.
+What these recordings usually are:
+- A whole competition day on one fixed camera, not a cut broadcast. Expect many
+  different competitors in sequence, each with their own round, and long stretches
+  where the arena is empty between them.
+- A graphic naming the competitor is common but not universal. When it is there
+  it is a lower third with the rider, the horse, a nation and a time or a fault
+  count; when it is not, nobody in the footage is named at all.
+- Promotional and sponsor films are cut into the stream between classes: branded
+  montages, facility tours, rider interviews. They are not competition footage.
+- Replays and second angles appear on the produced streams and never on the
+  single-camera ones.
+- Commentary, where there is any, rises on a clear round, a fall and a knockdown.
   Treat it as supporting evidence, never as the only evidence.
 
 The horse is the athlete as much as the human is. Where you describe form,
@@ -773,6 +779,11 @@ EQUESTRIAN_EXCLUSIONS = (
     "Warm-up and collecting-ring footage, presentations, prize-givings and interviews.",
     "Studio and punditry segments, advertising breaks and channel idents.",
     "Ordinary travel between obstacles or movements with nothing happening in it.",
+    "The empty arena between competitors. These recordings are hours of a fixed camera "
+    "on a ring, and most of that time nothing is on course. Report nothing rather than "
+    "finding something in it.",
+    "Course walks, the ground crew resetting fences, and the competitor entering or "
+    "leaving the ring before their round begins.",
     "Crowd, sponsor-board and groom cutaways that are not attached to a specific action.",
     "Any judgement about a horse's welfare, soundness or treatment. Report what is visibly "
     "happening and leave the verdict to the officials who are there.",
@@ -799,21 +810,28 @@ EQUESTRIAN = register_profile(
             "Horse-Rider Pair", "Horse-Driver Pair", "Vaulter", "Lunger",
             "Horse", "Groom", "Official",
         ),
+        teams_are_constant=False,
         scoreboard_guidance="""\
-A round has one competitor, so there is no scoreline to read.
+A round has one competitor and there is no scoreline to read. The graphic is \
+usually a lower third naming that round's competitor, and it changes with every \
+one — nothing here holds for the whole recording.
 
-- Put the on-screen graphic's text in `scoreboard` exactly as printed — number, \
-name, faults, time, percentage, heart rate, whatever it shows.
-- `team1` is the competitor as the graphic names them: the rider, the driver, the \
-vaulter, or the horse if that is what is shown. Copy it as printed. Leave `team2` \
-empty; there is no opponent on course.
+- Put the graphic's text in `scoreboard` exactly as printed: rider, horse, \
+nation, start number, elapsed time, faults, percentage, whatever it shows.
+- `participant` is the pair that performed the action, written as the graphic \
+names them — "Seamus Hughes Kennedy / HK Fury". The horse is half of the \
+competitor, not scenery.
+- `team1` is that round's competitor as printed. Leave `team2` empty: there is \
+no opponent on course, and a name there would read as a fixture between the \
+rider and their own horse.
 - Leave `score_team1` and `score_team2` null. A fault count and an elapsed time \
-are not a score between two sides, and putting them there would make a round look \
-like a match.
+are not a score between two sides, and putting them there would make a round \
+look like a match.
 - `action_team` is the nation or team when the graphic names one, and empty \
-otherwise. Never infer it from the flag on a jump or the language of the \
-commentary.
-- Never write a rider's or a horse's name you did not read on screen or hear said. \
-An invented name is worse than an empty field, because an editor will publish it.""",
+otherwise. Never infer it from a flag on a jump or from the commentary's accent.
+- Never write a rider's or a horse's name you did not read on screen or hear \
+said. Many of these recordings carry no graphic at all, and an empty field is \
+the correct answer there — an invented name is worse, because an editor will \
+publish it.""",
     )
 )
