@@ -63,6 +63,8 @@ const state = {
   playing: null,          // { momentId, start, end }
   upload: { file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '' },
   pendingUploads: [],     // uploaded to GCS but never registered as a job
+  thumbs: { urls: {}, asked: new Set() },  // momentId -> signed URL for its still
+  details: null,          // the moment whose popup is open, and playing inside it
   unsubscribe: [],
 };
 
@@ -449,6 +451,8 @@ function selectJob(jobId) {
   state.game = null;
   state.events = [];
   state.playing = null;
+  // Signed per job and per moment id, so nothing here survives the switch.
+  state.thumbs = { urls: {}, asked: new Set() };
   playbackUrl = null;
   destroyPlayer();
 
@@ -614,7 +618,7 @@ function momentsCard(msg, index) {
       `${Math.round(m.endSec - m.startSec)}s`,
       (m.highlightScore ?? 0).toFixed(2),
     ].filter(Boolean).join(' · ');
-    const open = state.playing?.momentId === m.momentId;
+    const open = state.playing?.momentId === m.momentId && !state.details;
 
     // The summary is the line an editor scans by — who did what — so it takes
     // the emphasis. The type and category drop into the meta line beneath,
@@ -624,8 +628,11 @@ function momentsCard(msg, index) {
     return `
       <div class="row">
         <div class="moment-row">
-          <button class="thumb" data-play="${esc(m.momentId)}" title="${esc(t('moment.play'))}">
-            <span class="thumb-stripes"></span>
+          <button class="thumb" data-play="${esc(m.momentId)}" title="${esc(t('moment.play'))}"
+                  ${m.thumbUri && !state.thumbs.urls[m.momentId] ? `data-thumb="${esc(m.momentId)}"` : ''}>
+            ${state.thumbs.urls[m.momentId]
+              ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
+              : '<span class="thumb-stripes"></span>'}
             <span class="thumb-clock">${clock(m.startSec)}</span>
           </button>
           <div style="min-width:0">
@@ -702,12 +709,43 @@ function openDetails(momentId) {
   $('details-body').innerHTML = rows.map(([label, value]) => `
     <div class="detail-key">${esc(label)}</div>
     <div class="detail-value">${esc(String(value))}</div>`).join('');
+
+  // The moment plays beside its record rather than instead of it. Opening the
+  // details of a play is the point at which someone wants to see it, and the
+  // facts are what they are checking it against — reading "double save" and
+  // watching the save are the same act here.
+  $('details-player').innerHTML = playerMarkup(m);
+  state.details = momentId;
+  state.playing = { momentId, start: m.startSec, end: m.endSec };
+  showDetailsModal(true);
+  mountPlayer();
+}
+
+
+/**
+ * Show the popup, with or without its player column.
+ *
+ * A game record has no moment to play, and an empty column would be a black
+ * bar down half the dialog. The class is toggled rather than left to
+ * `:empty`, so the grid collapses to the one column that has content.
+ */
+function showDetailsModal(withPlayer) {
+  $('details-split').classList.toggle('solo', !withPlayer);
   $('details').classList.remove('hidden');
 }
 
 
 function closeDetails() {
   $('details').classList.add('hidden');
+  $('details-player').innerHTML = '';
+  if (state.details) {
+    // The player lived in the popup, so closing the popup stops it. Leaving it
+    // running would be audio from a dialog that is no longer on screen.
+    state.details = null;
+    state.playing = null;
+    destroyPlayer();
+    render();
+  }
 }
 
 function ingestCard() {
@@ -994,7 +1032,17 @@ function openGameDetails(game) {
   $('details-body').innerHTML = rows.map(([label, value]) => `
     <div class="detail-key">${esc(label)}</div>
     <div class="detail-value">${esc(String(value))}</div>`).join('') + sources;
-  $('details').classList.remove('hidden');
+
+  // The two share one dialog, so a game opened after a moment would otherwise
+  // inherit that moment's video — playing, beside a record it has nothing to
+  // do with.
+  $('details-player').innerHTML = '';
+  if (state.details) {
+    state.details = null;
+    state.playing = null;
+    destroyPlayer();
+  }
+  showDetailsModal(false);
 }
 
 
@@ -1159,12 +1207,33 @@ function actionsRow(msg) {
 
 /* ────────────────────────────────────────────────────────── render ── */
 
+/**
+ * Whether a message's card already answers it, so the prose is a second copy.
+ *
+ * "Show me the best moments" comes back as a card of every moment and a
+ * paragraph re-typing the first ten of them, timecodes and all — the same
+ * answer twice, the worse one first, and hundreds of tokens spent writing out
+ * what the screen is already showing.
+ *
+ * Only when the card has something in it. An empty card says "no moments yet",
+ * which is not the same as "I could not read them": the missing-index failure
+ * arrived as prose beside an empty card, and hiding it unconditionally would
+ * have made that unreadable.
+ */
+function cardAnswersIt(m) {
+  if (m.showMoments) return (m.momentIds || []).some((id) => momentById(id));
+  if (m.showGames) return state.games.length > 0;
+  if (m.showGame) return Boolean(state.game);
+  return false;
+}
+
+
 function render() {
   renderSessions();
   $('transcript').innerHTML = state.msgs.map((m, i) => `
     <div class="msg ${m.who === 'agent' ? 'msg-agent' : ''}">
       <div class="msg-label">${m.who === 'agent' ? 'Agent' : 'You'}</div>
-      <div class="msg-text">${esc(m.text)}</div>
+      ${cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showIngest ? ingestCard() : ''}
       ${m.showReel ? reelCard() : ''}
@@ -1188,6 +1257,46 @@ function render() {
   ].map((s) => `<button class="chip" data-ask="${esc(s)}">${esc(s)}</button>`).join('');
 
   if (state.playing) mountPlayer();
+  loadThumbs();
+}
+
+
+/**
+ * Sign the stills for the moments currently on screen.
+ *
+ * The media bucket is private and an <img> carries no Authorization header, so
+ * the picture needs a URL that is its own credential. Signing is a round trip
+ * to IAM per URL, which is why this asks for the page being looked at rather
+ * than for the two hundred moments a match has.
+ *
+ * `asked` is marked before the request goes out. render() is what calls this,
+ * and this calls render() when the URLs land — without that mark the two would
+ * chase each other, and a failure would retry for ever.
+ */
+async function loadThumbs() {
+  const jobId = state.jobId;
+  if (!jobId || !state.user) return;
+
+  const wanted = [...document.querySelectorAll('[data-thumb]')]
+    .map((el) => el.dataset.thumb)
+    .filter((id) => id && !state.thumbs.asked.has(id))
+    .slice(0, 50);
+  if (!wanted.length) return;
+
+  wanted.forEach((id) => state.thumbs.asked.add(id));
+  try {
+    const res = await api(`/jobs/${jobId}/thumbnails`, {
+      method: 'POST',
+      body: JSON.stringify({ moment_ids: wanted }),
+    });
+    if (state.jobId !== jobId) return;   // the editor opened another match meanwhile
+    Object.assign(state.thumbs.urls, res.thumbnails || {});
+    render();
+  } catch (err) {
+    // A still that will not sign is a placeholder, which is what the row showed
+    // before any of this existed. It is not worth an error in the transcript.
+    console.warn('could not sign moment thumbnails', err);
+  }
 }
 
 /* ───────────────────────────────────────────────── inline playback ── */
@@ -1237,7 +1346,13 @@ function buildPlayerEl(m) {
 /** Re-parent the live player into this render's slot, building it once. */
 async function mountPlayer() {
   const { momentId, start, end } = state.playing;
-  const slot = document.querySelector(`[data-slot="${CSS.escape(momentId)}"]`);
+  // The popup's slot wins when it is open. Both carry the same moment id and
+  // the transcript's comes first in document order, so without this the video
+  // would mount behind the dialog that asked for it.
+  const selector = `[data-slot="${CSS.escape(momentId)}"]`;
+  const slot = (state.details === momentId
+    ? $('details-player').querySelector(selector) : null)
+    || document.querySelector(selector);
   if (!slot) return;
 
   if (playerFor !== momentId) {

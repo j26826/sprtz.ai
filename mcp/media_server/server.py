@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import uuid
 from pathlib import Path
@@ -371,6 +372,116 @@ def generate_poster(gcs_uri: str, job_id: str) -> dict:
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
     finally:
         _cleanup(work)
+
+
+# Moment ids are minted upstream from a model's output, and this one becomes a
+# path segment. Anything outside the set below is replaced rather than rejected,
+# because a thumbnail is not worth failing a run over — but a "moment id" of
+# "../../poster" must not be able to name an object outside this job's prefix.
+_SAFE_ID = re.compile(r"[^A-Za-z0-9_-]+")
+
+# Wide enough for the editor's 72px thumbnail column at three times the density,
+# which is all this picture is ever shown at. A frame at source resolution would
+# be a megabyte of PNG per moment for no visible difference.
+THUMBNAIL_WIDTH = 320
+
+
+@mcp.tool
+def generate_moment_thumbnails(gcs_uri: str, job_id: str, moments: list[dict]) -> dict:
+    """Write one PNG per moment, taken at the moment's peak.
+
+    The frame is the first I-frame at or after the peak. That is a whole picture
+    the encoder already chose as a reference, and it costs one decode instead of
+    a GOP of them — which is the difference that matters when this runs a couple
+    of hundred times for one match.
+
+    Called with a handful of moments at a time rather than all of them: a match
+    has hundreds, each is its own range read, and one request holding all of
+    them would run for minutes, report nothing while it did, and name no
+    particular moment when it failed.
+
+    Args:
+        gcs_uri: gs:// URI of the source video.
+        job_id: Job the moments belong to.
+        moments: [{"moment_id": "...", "at_sec": 2835.0}, ...].
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+
+    work = _scratch()
+    written: list[dict] = []
+    failures: list[dict] = []
+    try:
+        token = gcs.bearer_token()
+        source_url = gcs.https_url(gcs_uri)
+
+        for moment in moments:
+            moment_id = str(moment.get("moment_id") or "")
+            safe_id = _SAFE_ID.sub("_", moment_id)[:120]
+            at_sec = max(0.0, float(moment.get("at_sec") or 0.0))
+            if not safe_id:
+                failures.append({"moment_id": moment_id, "error": "empty moment_id"})
+                continue
+
+            local = work / f"{safe_id}.png"
+            try:
+                on_keyframe = ffmpeg_ops.keyframe_thumbnail(
+                    source_url, local, at_sec,
+                    width=THUMBNAIL_WIDTH, bearer_token=token,
+                )
+                if not on_keyframe:
+                    # A peak in the file's last GOP has no keyframe after it.
+                    # An exact frame is a worse still and a much better answer
+                    # than a blank square.
+                    ffmpeg_ops.still_frame(
+                        source_url, local, at_sec,
+                        width=THUMBNAIL_WIDTH, bearer_token=token,
+                    )
+
+                uri = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/moments/{safe_id}.png"
+                gcs.upload(local, uri, content_type="image/png",
+                           cache_control="public, max-age=86400")
+                local.unlink(missing_ok=True)
+                written.append({"moment_id": moment_id, "gcs_uri": uri,
+                                "at_sec": at_sec, "on_keyframe": on_keyframe})
+            except Exception as exc:  # noqa: BLE001
+                # One unreadable frame is one missing thumbnail, not a failed
+                # batch: the other moments in this request are still worth
+                # having, and the moment itself is still a moment.
+                logger.warning("thumbnail failed for %s at %.3fs: %s", moment_id, at_sec, exc)
+                failures.append({"moment_id": moment_id,
+                                 "error": f"{type(exc).__name__}: {exc}"})
+
+        return {"status": "success", "job_id": job_id, "thumbnails": written,
+                "count": len(written), "failures": failures}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("generate_moment_thumbnails failed for %s", gcs_uri)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}",
+                "job_id": job_id, "thumbnails": written, "failures": failures}
+    finally:
+        _cleanup(work)
+
+
+@mcp.tool
+def delete_moment_thumbnails(job_id: str) -> dict:
+    """Remove a job's moment thumbnails.
+
+    Re-analysing mints new moment ids, so last run's PNGs are not overwritten by
+    this one's — they simply stay, named after moments that no longer exist.
+    Clearing the prefix first is the same reasoning as the encode clearing the
+    HLS prefix before packaging.
+
+    Args:
+        job_id: Job whose thumbnails to remove.
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+    try:
+        counts = gcs.delete_prefix(MEDIA_BUCKET, f"jobs/{job_id}/moments/")
+        return {"status": "success", "job_id": job_id, **counts}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not delete moment thumbnails for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
 
 
 @mcp.tool

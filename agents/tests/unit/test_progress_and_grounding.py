@@ -7,8 +7,16 @@ so the next person to add a stage sees what the weights mean.
 
 from __future__ import annotations
 
+import pytest
+
 from sprtz_agents.tools import grounding
-from sprtz_agents.tools.pipeline import STAGE_ORDER, STAGE_SPANS, stage_progress
+from sprtz_agents.tools.pipeline import (
+    CUT_SHARE,
+    STAGE_ORDER,
+    STAGE_SPANS,
+    THUMB_SHARE,
+    stage_progress,
+)
 
 
 class TestStageWeights:
@@ -38,6 +46,42 @@ class TestStageWeights:
 
     def test_an_unknown_stage_does_not_crash_the_bar(self):
         assert stage_progress("nonsense", 0.5) == 0
+
+
+class TestTheAnalysisBandIsShared:
+    """Three countable things happen inside one stage, in this order: the match
+    is cut into windows, the windows are analysed, and a still is taken for each
+    moment found. Each owns a slice, because a stage that reports nothing while
+    it works reads as a dead run — and was reported as one."""
+
+    def _fraction(self, name: str, done: int, total: int) -> float:
+        if name == "cut":
+            return CUT_SHARE * done / total
+        if name == "segments":
+            return CUT_SHARE + (1 - CUT_SHARE - THUMB_SHARE) * done / total
+        return (1 - THUMB_SHARE) + THUMB_SHARE * done / total
+
+    def test_the_three_slices_fill_the_band_exactly(self):
+        assert self._fraction("cut", 0, 13) == 0.0
+        assert self._fraction("thumbs", 13, 13) == 1.0
+
+    def test_they_hand_over_without_a_gap_or_a_jump_back(self):
+        assert self._fraction("cut", 13, 13) == self._fraction("segments", 0, 13)
+        assert self._fraction("segments", 13, 13) == pytest.approx(
+            self._fraction("thumbs", 0, 20))
+
+    def test_the_bar_only_goes_forward_across_all_three(self):
+        readings = (
+            [self._fraction("cut", n, 13) for n in range(14)]
+            + [self._fraction("segments", n, 13) for n in range(14)]
+            + [self._fraction("thumbs", n, 20) for n in range(21)]
+        )
+        assert readings == sorted(readings)
+
+    def test_the_segments_still_own_most_of_the_band(self):
+        # They are the hour. Cutting is minutes and the stills are minutes, so
+        # giving either of them a large share would park the bar again.
+        assert 1 - CUT_SHARE - THUMB_SHARE > 0.5
 
 
 class TestGroundedAnswers:

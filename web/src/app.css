@@ -802,6 +802,45 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .sessions { display: none; }
 }
 
+/* Details popup: the moment on the left, its record on the right.
+
+   Opening the details of a play is the point at which someone wants to see it,
+   so the two sit side by side rather than the facts replacing the footage. The
+   card is wider than the settings dialog for that reason — 520px of video and
+   a two-column table beside it is neither. */
+.modal-card-wide { width: min(940px, 100%); }
+
+.detail-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+}
+
+.detail-player {
+  border-right: 2px solid var(--color-text);
+  background: var(--color-neutral-900);
+}
+
+/* A game record has nothing to play, so it gets the whole width rather than a
+   black column where a video would be. */
+.detail-split.solo { grid-template-columns: 1fr; }
+.detail-split.solo .detail-player { display: none; }
+
+/* Sticky against the card's own scroll, so a long record scrolls past a video
+   that stays where it is. The column stretches to the row height by default,
+   which is what gives this somewhere to stick. */
+.detail-player .player-slot { position: sticky; top: 0; }
+
+/* Below this the two would each be too narrow to read, so they stack: the
+   video first, because it is what was asked for. */
+@media (max-width: 760px) {
+  .detail-split { grid-template-columns: 1fr; }
+  .detail-player {
+    border-right: 0;
+    border-bottom: 2px solid var(--color-text);
+  }
+  .detail-player .player-slot { position: static; }
+}
+
 /* Moment details */
 .moment-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 

@@ -226,6 +226,59 @@ def thumbnail(source: str | Path, dest: Path, at_sec: float, width: int = 640,
     ], timeout=600)
 
 
+def keyframe_thumbnail(source: str | Path, dest: Path, at_sec: float, width: int = 320,
+                       bearer_token: str | None = None) -> bool:
+    """Write the first I-frame at or after ``at_sec``. Returns whether there was one.
+
+    ``-skip_frame nokey`` makes the decoder throw away everything that is not a
+    keyframe, so the first frame to survive the seek is the first I-frame at or
+    after the timestamp. Two reasons that is the frame worth keeping: it is
+    whole — an inter frame decoded out of a range read carries whatever the
+    encoder chose not to resend — and it costs one decode rather than a GOP of
+    them, which matters when this runs once per moment across a match.
+
+    It reads at or *after* the peak deliberately. Input ``-ss`` seeks to the
+    keyframe before the timestamp, which can be a GOP earlier — several seconds
+    of handball, and a different play. Landing late by a fraction of a GOP shows
+    the moment; landing early by one shows the build-up to it.
+
+    A peak inside the file's last GOP has no keyframe after it, and there the
+    answer is an exact frame rather than no picture at all, so this returns
+    False instead of raising and the caller falls back.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src = str(source)
+    try:
+        _run([
+            "ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
+            *(http_input_args(src, bearer_token) if src.startswith("http") else []),
+            "-ss", f"{at_sec:.3f}", "-skip_frame", "nokey", "-i", src,
+            "-frames:v", "1", "-vf", f"scale={width}:-2", str(dest),
+        ], timeout=300)
+    except (FfmpegError, subprocess.TimeoutExpired):
+        logger.warning("no keyframe at or after %.3fs in %s", at_sec, src)
+        return False
+    return dest.exists() and dest.stat().st_size > 0
+
+
+def still_frame(source: str | Path, dest: Path, at_sec: float, width: int = 320,
+                bearer_token: str | None = None) -> None:
+    """Write the frame at exactly ``at_sec``, decoding from the keyframe before it.
+
+    The fallback for :func:`keyframe_thumbnail`, and separate from
+    :func:`thumbnail` because that one carries ``-q:v`` for JPEG and this writes
+    PNG, where the flag means nothing.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src = str(source)
+    _run([
+        "ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
+        *(http_input_args(src, bearer_token) if src.startswith("http") else []),
+        "-ss", f"{at_sec:.3f}", "-i", src,
+        "-frames:v", "1", "-vf", f"scale={width}:-2", str(dest),
+    ], timeout=300)
+
+
 def burn_text(source: Path, dest: Path, text: str, duration_sec: float = 1.5) -> None:
     """Burn a hook line over the opening of a clip."""
     safe = text.replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'")
