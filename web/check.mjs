@@ -13,7 +13,7 @@
  * Run with: node web/check.mjs
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 const ROOT = new URL('./', import.meta.url);
 const read = (name) => readFileSync(new URL(name, ROOT), 'utf8');
@@ -164,8 +164,14 @@ for (const source of [app, html]) {
 // script never runs and the screen is blank, with the console naming a URL
 // rather than the file that asked for it. This catches a typo; the Dockerfile
 // copying src/ wholesale is what stops a real file being left out of the image.
-for (const name of ['src/app.js', 'src/settings.js', 'src/sessions.js', 'src/i18n.js',
-  'src/moments.js']) {
+// Discovered rather than listed. A named list is a second place to remember
+// when a module is added, and that is the place that gets forgotten — the same
+// mistake the Dockerfile made by copying files one by one.
+const modules = readdirSync(new URL('src/', ROOT))
+  .filter((f) => f.endsWith('.js'))
+  .map((f) => `src/${f}`);
+
+for (const name of modules) {
   const source = read(name);
   for (const [, spec] of source.matchAll(/\bfrom\s+'(\.[^']+)'/g)) {
     const resolved = new URL(spec, new URL(name, ROOT));

@@ -154,6 +154,11 @@ earlier — a name is there precisely because the editor means a different one.
 `find_games` matches a title outright before it searches by meaning, so a
 fixture typed in full comes back exactly rather than as a near neighbour.
 
+**Browsing is not searching.** "Show all handball games", "show all equestrian
+game details" are a request to see the list narrowed to a sport or a discipline,
+and the editor's screen answers them directly. `find_games` is for finding *a*
+particular match by name or by description; do not use it to enumerate a sport.
+
 **Match order or best first.** `list_action_plays` returns every moment in the
 order it happened, which is what "in order", "by time" and "the whole log" ask
 for. `get_job_summary` and `search_moments` rank by score, which is what "the
