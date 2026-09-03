@@ -13,7 +13,7 @@
  * Run with: node web/check.mjs
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const ROOT = new URL('./', import.meta.url);
 const read = (name) => readFileSync(new URL(name, ROOT), 'utf8');
@@ -155,6 +155,19 @@ for (const source of [app, html]) {
 
     fail(`a <button> with ${attrs.join(' ') || `id="${id}"`} has no handler: `
       + 'it is not in the click selector and nothing binds it directly');
+  }
+}
+
+/* ── every theme's wordmark is a file that is actually there ──────────────── */
+
+// The logo carries its own colour, so a dark theme swaps the file rather than
+// tinting it. A path that 404s is a missing image with nothing naming the
+// cause — the same class of failure as a t() key that does not resolve.
+const settings = read('src/settings.js');
+for (const [, src] of settings.matchAll(/logo: '([^']+)'/g)) {
+  const file = src.replace(/^\//, 'src/');
+  if (!existsSync(new URL(file, ROOT))) {
+    fail(`settings.js names the logo ${src}, which web/${file} does not exist for`);
   }
 }
 
