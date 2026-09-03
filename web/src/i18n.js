@@ -17,7 +17,7 @@ const BASE = 'en-GB';
 const STRINGS = {
   'en-GB': {
     'lang.name': 'English (UK)',
-    'player.forbidden': 'The CDN refused this stream. The playback cookie was set but did not come back with the request — check that cookies are allowed for this site.',
+    'player.forbidden': 'The CDN refused this stream. Reload the page to renew the playback cookie; if it keeps happening, the package may need preparing again.',
     'pager.previous': 'Previous',
     'pager.next': 'Next',
     'pager.of': 'of',
@@ -186,7 +186,7 @@ const STRINGS = {
 
   de: {
     'lang.name': 'Deutsch',
-    'player.forbidden': 'Das CDN hat den Stream abgelehnt. Das Wiedergabe-Cookie wurde gesetzt, aber nicht mitgesendet — prüfen Sie, ob Cookies für diese Seite erlaubt sind.',
+    'player.forbidden': 'Das CDN hat den Stream abgelehnt. Laden Sie die Seite neu, um das Wiedergabe-Cookie zu erneuern; bleibt es dabei, muss das Paket neu erstellt werden.',
     'pager.previous': 'Zurück',
     'pager.next': 'Weiter',
     'pager.of': 'von',
@@ -338,7 +338,7 @@ const STRINGS = {
 
   it: {
     'lang.name': 'Italiano',
-    'player.forbidden': 'La CDN ha rifiutato lo stream. Il cookie di riproduzione è stato impostato ma non è stato inviato — controlla che i cookie siano consentiti per questo sito.',
+    'player.forbidden': 'La CDN ha rifiutato lo stream. Ricarica la pagina per rinnovare il cookie di riproduzione; se persiste, il pacchetto va ricreato.',
     'pager.previous': 'Precedente',
     'pager.next': 'Successivo',
     'pager.of': 'di',
@@ -488,7 +488,7 @@ const STRINGS = {
 
   fr: {
     'lang.name': 'Français',
-    'player.forbidden': 'Le CDN a refusé ce flux. Le cookie de lecture a bien été défini mais n’a pas été renvoyé — vérifiez que les cookies sont autorisés pour ce site.',
+    'player.forbidden': 'Le CDN a refusé ce flux. Rechargez la page pour renouveler le cookie de lecture ; si cela persiste, le package doit être régénéré.',
     'pager.previous': 'Précédent',
     'pager.next': 'Suivant',
     'pager.of': 'sur',
@@ -642,7 +642,7 @@ const STRINGS = {
 
   es: {
     'lang.name': 'Español',
-    'player.forbidden': 'La CDN rechazó el stream. La cookie de reproducción se estableció pero no se envió — comprueba que las cookies estén permitidas para este sitio.',
+    'player.forbidden': 'La CDN rechazó el stream. Recarga la página para renovar la cookie de reproducción; si continúa, hay que volver a preparar el paquete.',
     'pager.previous': 'Anterior',
     'pager.next': 'Siguiente',
     'pager.of': 'de',

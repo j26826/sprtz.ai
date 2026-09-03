@@ -8,7 +8,7 @@ import re
 import uuid
 
 import google.auth
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from google.auth.transport import requests as google_requests
 from google.cloud import storage
 from pydantic import BaseModel, Field
@@ -258,6 +258,7 @@ async def get_job(job_id: str, user: CallerIdentity = Depends(current_user)) -> 
 @router.get("/{job_id}/playback")
 async def get_playback(
     job_id: str,
+    request: Request,
     response: Response,
     user: CallerIdentity = Depends(current_user),
     settings: Settings = Depends(get_settings),
@@ -296,22 +297,33 @@ async def get_playback(
 
     # Path-scoped to the job so several jobs can hold valid cookies at once,
     # despite Cloud CDN fixing the cookie's name.
+    #
     # Host-only: no Domain attribute. The load balancer serves the CDN from this
-    # same hostname, so a Domain widens the cookie for no benefit — and an
-    # attribute a browser refuses is an attribute that loses the whole cookie,
-    # which surfaces as an opaque 403 inside the player rather than as anything
-    # about cookies. cdn_cookie_domain is still read, for a deployment that
-    # genuinely serves the CDN from a sibling host.
-    response.set_cookie(
-        key=signed["cookie_name"],
+    # same hostname, so a Domain widens the cookie for no benefit.
+    # cdn_cookie_domain is still read, for a deployment that genuinely serves
+    # the CDN from a sibling host.
+    #
+    # The header is built rather than set through response.set_cookie, which
+    # would quote the value — see cdn.cookie_header. That quoting is what made
+    # every playlist 403 with the cookie visibly present in the request.
+    response.headers.append("set-cookie", cdn.cookie_header(
+        name=signed["cookie_name"],
         value=signed["cookie_value"],
-        domain=settings.cdn_cookie_domain or None,
         path=signed["cookie_path"],
         max_age=settings.cdn_signed_url_ttl,
-        secure=True,
-        httponly=True,
-        samesite="lax",
-    )
+        domain=settings.cdn_cookie_domain,
+    ))
+
+    # Clear the domain-scoped copy an earlier release left, which the browser
+    # sends alongside this one and which Cloud CDN may read instead. Only when
+    # this deployment does not want one: otherwise it would delete the cookie
+    # just set.
+    if not settings.cdn_cookie_domain and request.url.hostname:
+        response.headers.append("set-cookie", cdn.expire_cookie_header(
+            name=signed["cookie_name"],
+            path=signed["cookie_path"],
+            domain=request.url.hostname,
+        ))
 
     return {
         "job_id": job_id,
