@@ -158,6 +158,19 @@ for (const source of [app, html]) {
   }
 }
 
+/* ── every api() call is addressed to the API ─────────────────────────────── */
+
+// The load balancer routes /api/* to the API and /jobs/* to the HLS bucket, so
+// a path missing its /api prefix does not 404 — it reaches a private bucket and
+// comes back 403, which reads as an authorisation problem in a completely
+// different service. That is how the moment thumbnails shipped unable to load.
+for (const [, path] of app.matchAll(/\bapi\(\s*[`'"]([^`'"]+)/g)) {
+  if (!path.startsWith('/api/')) {
+    fail(`app.js calls api('${path}'), which is not under /api/ — `
+      + 'the load balancer sends that to a bucket, not to the API');
+  }
+}
+
 /* ── every theme's wordmark is a file that is actually there ──────────────── */
 
 // The logo carries its own colour, so a dark theme swaps the file rather than
