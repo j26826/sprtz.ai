@@ -737,6 +737,10 @@ function playerMarkup(m) {
 const DETAIL_ROWS = [
   ['moment.summary', (m) => m.summary],
   ['moment.description', (m) => m.description],
+  // Form rather than outcome. Empty for a sport that is judged on whether it
+  // went in; for equestrian it is most of what the record says.
+  ['moment.executionDetails', (m) => m.executionDetails],
+  ['moment.harmony', (m) => m.harmonyIndex],
   ['moment.class', (m) => m.label || m.momentType],
   ['moment.category', (m) => m.category],
   ['moment.result', (m) => m.actionResult],
@@ -990,6 +994,13 @@ function stageStrip(job) {
 const GAME_DETAIL_ROWS = [
   ['game.title', (g) => g.title],
   ['game.sport', (g) => g.sport],
+  // With how sure the reading was, because it was read off the footage rather
+  // than declared at upload. "Jumping" alone hides that it was a judgement.
+  ['game.discipline', (g) => (g.discipline
+    ? (g.disciplineConfidence
+      ? `${g.discipline} (${Math.round(g.disciplineConfidence * 100)}%)`
+      : g.discipline)
+    : '')],
   ['game.homeTeam', (g) => g.homeTeam],
   ['game.awayTeam', (g) => g.awayTeam],
   ['game.competition', (g) => g.competition],
@@ -1046,6 +1057,7 @@ function gamesCard(msg, index) {
       ${view.slice.map((g) => {
         const meta = [
           g.sport,
+          g.discipline,
           g.competition || g.groundedCompetition,
           g.finalScore,
           g.mood,

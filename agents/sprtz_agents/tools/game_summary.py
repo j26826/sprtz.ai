@@ -130,7 +130,8 @@ def judgement_prompt(sport: str, digest: str) -> str:
     return _JUDGEMENT_PROMPT.format(sport=sport, digest=digest)
 
 
-def compose_title(*, home: str, away: str, competition: str, fallback: str) -> str:
+def compose_title(*, home: str, away: str, competition: str, fallback: str,
+                  discipline: str = "") -> str:
     """Name the match from what was actually read.
 
     Composed here rather than asked of a model, for the same reason the rest of
@@ -146,6 +147,10 @@ def compose_title(*, home: str, away: str, competition: str, fallback: str) -> s
     if home or away:
         known = home or away
         return f"{known} — {competition}" if competition else known
+    # An equestrian round often names nobody: the graphic carries a number and a
+    # time. "Jumping — CSI Aachen" is a title; the uploaded filename is not.
+    if discipline:
+        return f"{discipline} — {competition}" if competition else discipline
     return competition or fallback
 
 
@@ -159,6 +164,8 @@ def assemble(
     venues: list[str],
     judgement: dict | None = None,
     fallback_title: str = "",
+    discipline: str = "",
+    discipline_confidence: float = 0.0,
 ) -> GameDetails:
     """Put the record together: facts from the observations, judgements from the model."""
     home_team = most_common_reading([m.team1 for m in moments])
@@ -171,9 +178,12 @@ def assemble(
     return GameDetails(
         job_id=job_id,
         sport=sport,
+        discipline=discipline,
+        discipline_confidence=discipline_confidence,
         title=compose_title(
             home=home_team, away=away_team,
             competition=competition, fallback=fallback_title,
+            discipline=discipline,
         ),
         home_team=home_team,
         away_team=away_team,
@@ -200,6 +210,10 @@ def embed_text(game: GameDetails) -> str:
     parts = [
         game.title,
         game.sport,
+        # "the dressage test", "that reining round" — for a sport with
+        # disciplines, the discipline is the word someone searches by, and it is
+        # not in the teams or the venue.
+        game.discipline.replace("_", " "),
         game.home_team,
         game.away_team,
         f"{game.home_team} v {game.away_team}" if game.home_team and game.away_team else "",

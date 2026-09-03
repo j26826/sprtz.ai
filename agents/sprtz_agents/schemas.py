@@ -244,6 +244,63 @@ class SegmentAnalysis(BaseModel):
     )
 
 
+class EquestrianMoment(DetectedMoment):
+    """A moment in a sport judged on how a movement was performed.
+
+    Two fields more than the general shape, and a separate model rather than
+    optional fields on it: what a response schema asks for is part of the
+    prompt, so adding these to every sport would have a handball analysis
+    writing paragraphs about a jump shot's balance for nobody to read.
+    """
+
+    execution_details: str = Field(
+        default="",
+        description=(
+            "What the bodies are actually doing: form, balance, trajectory, the "
+            "line taken, where the weight is. Describe the horse as much as the "
+            "human — the horse is the athlete here too."
+        ),
+    )
+    harmony_index: str = Field(
+        default="",
+        description=(
+            "One clause on the visible communication between horse and human: how "
+            "fluid it looked, whether the aids were invisible or obvious, whether "
+            "the horse was with the rider or against them. A note, not a number."
+        ),
+    )
+
+
+class EquestrianSegmentAnalysis(SegmentAnalysis):
+    """A segment of equestrian footage, which also says what it is.
+
+    The discipline is read off the footage rather than declared at upload,
+    because the tack, the obstacles and the movement are what say so and the
+    person uploading may not know. Every segment answers, and the readings are
+    consensused across the job the same way team names are — a discipline does
+    not change halfway through a video, but one segment's view of it can be
+    wrong.
+    """
+
+    moments: list[EquestrianMoment] = Field(default_factory=list)
+    discipline: str = Field(
+        default="",
+        description=(
+            "Which discipline this footage shows, using the code exactly as given "
+            "in the catalogue. Empty if the footage genuinely does not settle it."
+        ),
+    )
+    discipline_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How sure you are of the discipline. Low is a useful answer; a wrong "
+            "discipline stated confidently filters out everything that follows."
+        ),
+    )
+
+
 class Moment(BaseModel):
     """A merged, absolute-timestamped moment as persisted to Firestore."""
 
@@ -273,6 +330,12 @@ class Moment(BaseModel):
     score_team1: int | None = None
     score_team2: int | None = None
     action_team: str = ""
+    # Judgements about form. Equestrian asks for them because the discipline is
+    # judged on how a movement was performed rather than on whether it scored;
+    # handball leaves them empty, which is why they default rather than being
+    # required.
+    execution_details: str = ""
+    harmony_index: str = ""
     segment_indexes: list[int] = Field(
         default_factory=list,
         description="Segments this moment was seen in. More than one means it was merged.",
@@ -306,6 +369,8 @@ class Moment(BaseModel):
             "actionTeam": self.action_team,
             "summary": self.summary,
             "description": self.description,
+            "executionDetails": self.execution_details,
+            "harmonyIndex": self.harmony_index,
             "confidenceScore": round(self.confidence * 100),
         }
 
@@ -323,6 +388,13 @@ class GameDetails(BaseModel):
 
     job_id: str
     sport: str
+    # Which form of the sport this footage shows, for a sport that has several.
+    # Read off the tack, the obstacles and the movement rather than declared at
+    # upload, so it carries how sure the reading was: an equestrian video the
+    # analysis could not place is a real outcome, and pretending otherwise
+    # filters a whole match into the wrong vocabulary.
+    discipline: str = ""
+    discipline_confidence: float = 0.0
     title: str = Field(
         default="",
         description=(

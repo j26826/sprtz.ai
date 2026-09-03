@@ -315,6 +315,15 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "FEDERATED_PROVIDERS"
         value = var.google_oauth_client_id != "" ? "google.com" : ""
       }
+      # The sports the upload panel offers. The agent's registry is the real
+      # source of truth and this service cannot import it, so the list is set
+      # here — where a deployment's configuration lives — rather than being a
+      # second copy in the code. A test in the agents suite fails if the API's
+      # default and the registry ever disagree.
+      env {
+        name  = "SUPPORTED_SPORTS"
+        value = join(",", var.supported_sports)
+      }
 
       startup_probe {
         http_get {

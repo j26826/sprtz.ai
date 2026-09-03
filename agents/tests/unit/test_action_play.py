@@ -56,8 +56,17 @@ class TestShape:
             "type", "timeOffsetStart", "timeOffsetEnd", "actionCategory",
             "actionClass", "actionResult", "participant", "participantRole",
             "team1", "team2", "scoreTeam1", "scoreTeam2", "actionTeam",
-            "summary", "description", "confidenceScore",
+            "summary", "description", "executionDetails", "harmonyIndex",
+            "confidenceScore",
         }
+
+    def test_form_fields_are_empty_for_a_sport_that_does_not_judge_it(self):
+        # Handball asks whether it went in, not how it looked. The fields are on
+        # the shape because equestrian needs them; they stay empty here rather
+        # than being filled with something nobody asked for.
+        play = _moment().as_action_play()
+        assert play["executionDetails"] == ""
+        assert play["harmonyIndex"] == ""
 
     def test_the_type_is_constant(self):
         assert _moment().as_action_play()["type"] == "ActionPlay"

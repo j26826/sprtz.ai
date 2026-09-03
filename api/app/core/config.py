@@ -24,6 +24,23 @@ class Settings:
         ]
     )
 
+    # The sports the upload panel offers. The agent's sport registry is the real
+    # source of truth, but this service cannot import it — the agent runs on
+    # Agent Runtime and is packaged separately — so the list is a deployment
+    # setting instead of a duplicate hard-coded here.
+    #
+    # It went wrong the way a second source of truth does: equestrian was
+    # registered, the analysis could run it, and the panel still offered only
+    # handball. `test_supported_sports.py` in the agents suite reads this file
+    # and fails when the default and the registry disagree.
+    supported_sports: list[str] = field(
+        default_factory=lambda: [
+            s.strip() for s in
+            os.environ.get("SUPPORTED_SPORTS", "handball,equestrian").split(",")
+            if s.strip()
+        ]
+    )
+
     uploads_bucket: str = field(default_factory=lambda: os.environ.get("UPLOADS_BUCKET", ""))
     media_bucket: str = field(default_factory=lambda: os.environ.get("MEDIA_BUCKET", ""))
     hls_bucket: str = field(default_factory=lambda: os.environ.get("HLS_BUCKET", ""))

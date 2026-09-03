@@ -54,7 +54,7 @@ that is two seconds late costs them the shot.
 
 {language_rule}
 
-# Moment catalogue
+{discipline_step}# Moment catalogue
 
 Report only these. Use each code exactly as written.
 
@@ -68,40 +68,23 @@ Report only these. Use each code exactly as written.
 
 Alongside the classification, report what the action *was*:
 
-- `action_result` — how it ends, in a word or two: Goal, Save, Miss, Block, Foul, \
-Turnover, Card, Timeout, Penalty. Leave it empty when the action does not resolve \
-on camera.
+- `action_result` — how it ends, in a word or two: {action_results}. Leave it \
+empty when the action does not resolve on camera.
 - `participant` — who does it, **only when you can actually read it**: a shirt \
 number, or a name shown on screen or spoken by the commentary. Write it as \
 `#7 red`, or `unknown`. Never infer a name from the competition, the kit or the \
 context — an invented name is worse than an empty field, because an editor will \
 publish it.
-- `participant_role` — Attacker, Defender, Goalkeeper, Pivot, Wing, Back, Referee \
-or Coach.
+- `participant_role` — {participant_roles}.
 - `summary` — one sentence naming who did what and how it ended, in the order a \
 commentator would say it: "#12 blue saves the seven-metre and turns the rebound \
 over the bar." This is not a shorter `description`. The description says what the \
 picture shows; the summary says what happened, and it is the line an editor \
 scans a list by.
 
-# Reading the score bug
+# Reading the on-screen graphic
 
-`team1`, `team2`, `score_team1` and `score_team2` come from the on-screen score \
-graphic and nowhere else. Copy the names exactly as printed, abbreviations \
-included: `team1` is the first or left-hand side, `team2` the second.
-
-- If the bug is not legible in this clip, leave the names empty and the scores \
-null. Do not carry a score forward from an earlier moment, and do not work one \
-out from the goals you have counted — a score you calculated is a score nobody \
-displayed.
-- `null` and `0` are different answers. Nil is a real score; unreadable is not a \
-score at all.
-- `action_team` is the side the action belongs to, named the same way as the bug \
-so it matches `team1` or `team2`. If the bug is not legible use the shirt colour. \
-Leave it empty when no side owns the action, such as a referee decision.
-- Never infer who is playing from the competition, the venue, the kit or the \
-commentary's turn of phrase. An empty field is correct; a guessed one is a team \
-that never played.
+{scoreboard_guidance}
 
 Report `competition` and `venue` for the clip as a whole, and only when a caption, \
 a graphic or the commentary actually names one. Leave them empty otherwise — do \
@@ -169,16 +152,70 @@ def _mmss(seconds: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+def _entry(m) -> str:
+    entry = f"**`{m.code}` — {m.label}.** {m.description}"
+    if m.cues:
+        entry += " Look for: " + "; ".join(m.cues) + "."
+    return entry
+
+
 def _format_catalogue(profile: SportProfile) -> str:
+    """Grouped by category, or by discipline for a sport that has them.
+
+    A dressage test and a showjumping round share nothing an editor cuts on, so
+    listing their moments together under "Obstacle" and "Flatwork" would hide
+    the one distinction that decides which half of the catalogue applies.
+    """
     lines: list[str] = []
+
+    if profile.disciplines:
+        for discipline in profile.disciplines:
+            types = [m for m in profile.moment_types if m.discipline == discipline.code]
+            if not types:
+                continue
+            lines.append(f"\n## {discipline.label}\n")
+            lines += [_entry(m) for m in types]
+        shared = [m for m in profile.moment_types if not m.discipline]
+        if shared:
+            lines.append("\n## Any discipline\n")
+            lines += [_entry(m) for m in shared]
+        return "\n".join(lines).strip()
+
     for category in profile.categories:
         lines.append(f"\n## {category.replace('_', ' ').title()}\n")
-        for m in (t for t in profile.moment_types if t.category == category):
-            entry = f"**`{m.code}` — {m.label}.** {m.description}"
-            if m.cues:
-                entry += " Look for: " + "; ".join(m.cues) + "."
-            lines.append(entry)
+        lines += [_entry(m) for m in profile.moment_types if m.category == category]
     return "\n".join(lines).strip()
+
+
+_DISCIPLINE_STEP = """\
+# First, identify the discipline
+
+Before you look for anything else, work out which form of this sport the footage \
+shows. Judge it on the tack, the rider's attire, the obstacles and the way the \
+horse moves — not on the commentary, which often names a competition rather than \
+a discipline.
+
+{disciplines}
+
+Report your answer in `discipline`, using the code exactly as written, and how \
+sure you are in `discipline_confidence`.
+
+Then use **only the moments listed under that discipline** below. A sliding stop \
+does not happen in a dressage test, and reporting one means you have identified \
+the wrong discipline rather than found a rare movement.
+
+If the footage genuinely does not settle it, say so with a low \
+`discipline_confidence` and report the moments you are confident of. A wrong \
+discipline stated confidently is worse than an uncertain one, because everything \
+downstream is filtered by it.
+
+"""
+
+
+def _format_disciplines(profile: SportProfile) -> str:
+    return "\n".join(
+        f"- **`{d.code}` — {d.label}.** {d.cues}." for d in profile.disciplines
+    )
 
 
 def _format_exclusions(profile: SportProfile) -> str:
@@ -198,12 +235,22 @@ def build_system_instruction(profile: SportProfile, metadata_language: str = "en
     running the same instruction.
     """
     language = METADATA_LANGUAGES.get(metadata_language, METADATA_LANGUAGES["en"])
+    step = (
+        _DISCIPLINE_STEP.format(disciplines=_format_disciplines(profile))
+        if profile.disciplines else ""
+    )
     return _SYSTEM.format(
         display_name=profile.display_name,
         context=profile.context.strip(),
         language_rule=_LANGUAGE_RULE.format(language=language),
+        discipline_step=step,
         catalogue=_format_catalogue(profile),
         exclusions=_format_exclusions(profile),
+        action_results=", ".join(profile.action_results) or "a word or two of your own",
+        participant_roles=(
+            ", ".join(profile.participant_roles) or "the role the performer is playing"
+        ),
+        scoreboard_guidance=profile.scoreboard_guidance.strip(),
     )
 
 
