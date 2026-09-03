@@ -13,8 +13,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  FILTER_NOISE, filterAsked, gameNamedIn, halfSplit, selectMoments, stem,
-} from '../src/moments.js';
+  FILTER_NOISE, filterAsked, gameNamedIn, halfSplit, selectGames,
+  selectMoments, stem,
+} from '../src/search.js';
 
 const moment = (id, over = {}) => {
   const m = {
@@ -213,5 +214,77 @@ describe('the pieces', () => {
       'suspension', 'break', 'steal', 'card', 'timeout']) {
       assert.ok(!FILTER_NOISE.has(word), `${word} must stay searchable`);
     }
+  });
+});
+
+
+describe('filtering the games list by sport', () => {
+  // What the analysis wrote: a sport, and for equestrian a discipline it read
+  // off the footage. The filter matches those rather than a list kept in the UI,
+  // so a sport added tomorrow is searchable the day it is added.
+  const DESK = [
+    { jobId: 'h1', sport: 'handball', title: 'FAG v TVB — DAIKIN HBL',
+      competition: 'DAIKIN HBL', homeTeam: 'FAG', awayTeam: 'TVB' },
+    { jobId: 'h2', sport: 'handball', title: 'TBV v LEI — DAIKIN HBL',
+      competition: 'DAIKIN HBL', homeTeam: 'TBV', awayTeam: 'LEI' },
+    { jobId: 'e1', sport: 'equestrian', discipline: 'Jumping',
+      title: 'Jumping — CSI Aachen', competition: 'CSI Aachen' },
+    { jobId: 'e2', sport: 'equestrian', discipline: 'Dressage',
+      title: 'Dressage — CDI Aachen', competition: 'CDI Aachen' },
+    { jobId: 'e3', sport: 'equestrian', discipline: 'Para-Dressage',
+      title: 'Para-Dressage — CPEDI Aachen', competition: 'CPEDI Aachen' },
+  ];
+
+  const ask = (question) => selectGames(DESK, filterAsked(question));
+  const ids = (r) => r.list.map((g) => g.jobId);
+
+  it('show all handball games', () => {
+    assert.deepEqual(ids(ask('show all handball games')), ['h1', 'h2']);
+  });
+
+  it('show all handball game details', () => {
+    // "details" says how to show the list, not what to put in it. Treating it
+    // as a term would match nothing and show everything.
+    assert.deepEqual(ids(ask('show all handball game details')), ['h1', 'h2']);
+  });
+
+  it('show all equestrian games', () => {
+    assert.deepEqual(ids(ask('show all equestrian games')), ['e1', 'e2', 'e3']);
+  });
+
+  it('show all equestrian game details', () => {
+    assert.deepEqual(ids(ask('show all equestrian game details')), ['e1', 'e2', 'e3']);
+  });
+
+  it('narrows to a discipline the same way', () => {
+    // Nothing here knows what a discipline is; it matches because the analysis
+    // wrote "Dressage" onto the record.
+    assert.deepEqual(ids(ask('show all dressage games')), ['e2', 'e3']);
+    assert.deepEqual(ids(ask('show all para dressage games')), ['e3']);
+  });
+
+  it('finds a competition, a team and a venue too', () => {
+    assert.deepEqual(ids(ask('games at CSI Aachen')), ['e1']);
+    assert.deepEqual(ids(ask('every game TBV played')), ['h2']);
+  });
+
+  it('a plain request for the list is not a filter', () => {
+    const r = ask('show all games');
+    assert.equal(r.list.length, DESK.length);
+    assert.equal(r.narrowed, false);
+    assert.equal(r.missed, false);
+  });
+
+  it('a sport nobody has shows everything and says it matched nothing', () => {
+    // An empty card would claim there are no games when there are five.
+    const r = ask('show all polo games');
+    assert.equal(r.list.length, DESK.length);
+    assert.equal(r.missed, true);
+  });
+
+  it('does not reorder the caller\'s array', () => {
+    const given = [...DESK];
+    selectGames(given, { terms: ['handball'] });
+    assert.deepEqual(given.map((g) => g.jobId), DESK.map((g) => g.jobId));
   });
 });

@@ -23,6 +23,13 @@ const routes = (cases) => {
 
 describe('every game on the desk', () => {
   routes({
+    // Naming a sport is still a request for the games list; the list narrows
+    // itself afterwards.
+    'show all handball games': 'games',
+    'show all handball game details': 'games',
+    'show all equestrian games': 'games',
+    'show all equestrian game details': 'games',
+    'show all dressage games': 'games',
     // An exact-phrase list matched "all games" and missed the rest: one extra
     // word, or the noun in the singular, was enough to fall through to moments.
     'show all games': 'games',

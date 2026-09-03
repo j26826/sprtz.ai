@@ -586,7 +586,7 @@ another's cannot answer for it, and a one-word name is not a match at all. It
 reads the collection through a field mask: this scans every game, and the
 768-float vectors are almost all of the bytes.
 
-**The moments card filters on what was asked for.** It used to answer every
+**Both lists filter on what was asked for.** It used to answer every
 question with every moment, so "show all goals" and "show me the best moments"
 produced the same 346 rows — which reads as a filter that ran and matched
 everything rather than one that never existed. `src/moments.js` narrows the
@@ -600,8 +600,19 @@ shot" is one kind of moment, and matching either word made it mean "shot",
 which is how asking for wing shots returned jump shots; "penalties and
 suspensions" is the case that needs the fallback, since no moment is both.
 
-**A word the taxonomy does not use shows everything and says so.** An empty
-card would claim the analysis found nothing when the moments are right there
+The games list works the same way and against the same kind of words: "show all
+handball games" matches the sport the analysis recorded, "show all dressage
+games" the discipline it read off the footage. Neither is a list kept in the UI,
+so a sport added tomorrow is searchable the day it is added.
+
+**Words that say *how* to show a list are not words about its contents.**
+"details", "full", "summary" and the like are noise, and so are the names of the
+axes — `sport`, `discipline`, `type` — because a record holds `handball`, not
+the word "sport". Without that, "show all equestrian game details" searches for
+"details", matches nothing, and shows everything.
+
+**A word the vocabulary does not use shows everything and says so.** An empty
+card would claim the analysis found nothing when the records are right there
 and it is the word that is wrong. The head row distinguishes the three states:
 narrowed (with a count and a Show all), nothing matched, or no filter at all.
 
@@ -684,13 +695,17 @@ Grounded values get their own rows in the game popup, labelled "(from search)",
 and the sources sit at the bottom of it rather than on the card. They qualify
 the grounded rows and are meaningless beside a row nobody is looking at.
 
-### web/src/moments.js and web/src/cards.js, and the only web tests there are
+### web/src/search.js and web/src/cards.js, and the only web tests there are
 
 `app.js` cannot be loaded outside a browser: it imports the Firebase SDK from a
-CDN, so `import()` in Node fails on the first line. That is why the moment
-filtering lives in its own module that imports **nothing** — pure functions
-over plain objects, which `node --test web/tests` can reach. CI runs it beside
-`check.mjs`.
+CDN, so `import()` in Node fails on the first line. That is why choosing what a
+question asked for lives in its own module that imports **nothing** — pure
+functions over plain objects, which `node --test web/tests` can reach. CI runs
+it beside `check.mjs`.
+
+It is `search.js` rather than `moments.js` because it answers for both lists:
+the moments in a match and the games on the desk are filtered by the same
+every-then-any term matching over each record's own words.
 
 `cards.js` is there for the same reason and answers a different question:
 *which* card, rather than what goes in it.

@@ -28,7 +28,9 @@ import {
 
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
 import { chooseCard, wantsDetail } from './cards.js';
-import { filterAsked, gameNamedIn as namedGame, selectMoments } from './moments.js';
+import {
+  filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
+} from './search.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
 } from './settings.js';
@@ -640,28 +642,47 @@ function momentsFor(msg) {
  * were 346 is indistinguishable from an analysis that found 42, and a word the
  * taxonomy does not use silently doing nothing is worse still.
  */
-function momentsHead(view, index) {
-  const sort = view.sort === 'time' ? 'time' : 'score';
+/**
+ * What a filtered list is showing, in the three states it can be in.
+ *
+ * Narrowed, nothing matched, or no filter at all. The distinction has to be on
+ * screen or the filter cannot be trusted: 2 rows where there were 40 is
+ * indistinguishable from a desk with 2 games, and a word the vocabulary does
+ * not use silently doing nothing is worse still.
+ */
+function filterTitle(view, index, fallback) {
   const asked = [
     ...view.terms,
     ...(view.half ? [t(`moments.half.${view.half}`)] : []),
   ].join(', ');
 
-  let title = `<div class="panel-head-title">${esc(t('moments.sortBy'))}</div>`;
   if (view.narrowed) {
-    title = `
+    return `
       <div class="panel-head-title">
-        ${esc(t('moments.filtered'))} ${esc(asked)}
+        ${esc(t('list.filtered'))} ${esc(asked)}
         · ${view.list.length} ${esc(t('pager.of'))} ${view.total}
-        <button class="link-btn" data-show-all="${index}">${esc(t('moments.showAll'))}</button>
+        <button class="link-btn" data-show-all="${index}">${esc(t('list.showAll'))}</button>
       </div>`;
-  } else if (view.missed) {
-    title = `<div class="panel-head-title">${esc(t('moments.noMatch'))} ${esc(asked)}</div>`;
   }
+  if (view.missed) {
+    return `<div class="panel-head-title">${esc(t('list.noMatch'))} ${esc(asked)}</div>`;
+  }
+  return `<div class="panel-head-title">${esc(fallback)}</div>`;
+}
 
+
+/** The games list's head. No sort toggle: a desk of matches has one order. */
+function filterHead(view, index) {
+  if (!view.narrowed && !view.missed) return '';
+  return `<div class="panel-head">${filterTitle(view, index, '')}</div>`;
+}
+
+
+function momentsHead(view, index) {
+  const sort = view.sort === 'time' ? 'time' : 'score';
   return `
     <div class="panel-head">
-      ${title}
+      ${filterTitle(view, index, t('moments.sortBy'))}
       <div class="panel-head-meta">
         ${['score', 'time'].map((key) => `
           <button class="link-btn" data-sort="${index}:${key}"

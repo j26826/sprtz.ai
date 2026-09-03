@@ -1,5 +1,5 @@
 /**
- * Choosing and ordering the moments a question asked for.
+ * Choosing and ordering the things a question asked for — moments, and games.
  *
  * Its own module, and one with no imports, for two reasons. The logic is worth
  * testing — a stopword added carelessly empties the card that the app's own
@@ -7,12 +7,13 @@
  * because it imports the Firebase SDK from a CDN. Everything here is a pure
  * function over plain objects, so `node --test` can reach it.
  *
- * This is a text filter over the moments already loaded, not a search. That is
- * the right tool here: it is instant, it is exact about what it did, and the
- * words it matches are the moment's own class, category, result and summary —
- * so it answers in the sport taxonomy's vocabulary rather than in one
- * hard-coded here. "Wing Shot" and "7-Metre Penalty" are what the analysis
- * wrote; "wing shots" and "penalties" are what an editor types.
+ * These are text filters over what is already loaded, not searches. That is the
+ * right tool here: they are instant, they are exact about what they did, and
+ * the words they match are the record's own — the moment's class, category and
+ * result, the game's sport, discipline and competition. So they answer in the
+ * taxonomy's vocabulary rather than in one hard-coded here. "Wing Shot",
+ * "7-Metre Penalty" and "Para-Dressage" are what the analysis wrote; "wing
+ * shots", "penalties" and "para dressage" are what an editor types.
  */
 
 /** Letters and digits only. Everything else is punctuation drift. */
@@ -44,6 +45,14 @@ export const FILTER_NOISE = new Set([
   'exciting', 'strongest', 'biggest',
   'sort', 'order', 'time', 'score', 'rank', 'ranked', 'chronological',
   'his', 'her', 'their', 'its', 'you', 'your', 'out', 'about', 'into',
+  // How to show a list, not what to put in it. "show all equestrian game
+  // details" asks for equestrian; "details" is an instruction to the card.
+  'detail', 'details', 'full', 'everything', 'summary', 'summarise',
+  'summarize', 'info', 'information', 'record', 'records',
+  // The axis rather than the value. A game's sport field holds "handball", not
+  // the word "sport", so "games by sport handball" must search for handball.
+  'sport', 'sports', 'discipline', 'disciplines', 'type', 'types',
+  'profile', 'profiles', 'category', 'categories', 'kind', 'kinds',
 ]);
 
 
@@ -96,6 +105,24 @@ export function filterAsked(question, namedTitle = '') {
 
 
 /** Everything about a moment that a word in a question could be naming. */
+/**
+ * Narrow a list to the records every term names, then to any of them.
+ *
+ * Every-then-any is the whole trick. "wing shot" is one kind of moment, and
+ * matching either word makes it every shot in the match — which is how asking
+ * for wing shots returned jump shots. "penalties and suspensions" is the other
+ * case: two kinds, no record is both, and there any is the answer.
+ */
+export function matchTerms(items, terms, textOf) {
+  if (!terms.length) return items;
+  const text = new Map(items.map((item) => [item, textOf(item)]));
+  const every = items.filter((i) => terms.every((term) => text.get(i).includes(term)));
+  return every.length
+    ? every
+    : items.filter((i) => terms.some((term) => text.get(i).includes(term)));
+}
+
+
 export function momentText(m) {
   return titleKey([
     m.momentType, m.label, m.category, m.actionResult, m.participantRole,
@@ -144,19 +171,7 @@ export const MOMENT_SORTS = {
  * there. `missed` is how the card tells the difference.
  */
 export function selectMoments(all, { terms = [], half = null, sort = 'score' } = {}) {
-  // Every word, then any word as a fallback. "wing shot" is one kind of
-  // moment, and matching either word makes it every shot in the match — which
-  // is how asking for wing shots returned jump shots. "penalties and
-  // suspensions" is the other case: two kinds, no moment is both, and there
-  // any is the answer.
-  let withTerms = all;
-  if (terms.length) {
-    const text = new Map(all.map((m) => [m, momentText(m)]));
-    const every = all.filter((m) => terms.every((term) => text.get(m).includes(term)));
-    withTerms = every.length
-      ? every
-      : all.filter((m) => terms.some((term) => text.get(m).includes(term)));
-  }
+  const withTerms = matchTerms(all, terms, momentText);
 
   const split = half ? halfSplit(all) : null;
   const inHalf = (m) => {
@@ -197,4 +212,43 @@ export function gameNamedIn(question, games, headline) {
     .map((game) => ({ game, key: titleKey(headline(game)) }))
     .filter(({ key }) => key.split(' ').length > 1 && asked.includes(key))
     .sort((a, b) => b.key.length - a.key.length)[0]?.game || null;
+}
+
+
+/** Everything about a game that a word in a question could be naming. */
+export function gameText(g) {
+  return titleKey([
+    g.sport, g.discipline, g.title,
+    g.homeTeam, g.awayTeam, g.groundedHomeTeam, g.groundedAwayTeam,
+    g.competition, g.groundedCompetition, g.venue, g.groundedVenue,
+    g.eventOutcome, g.mood, g.sentiment, g.summary,
+    // The final score is left out for the same reason a moment's scoreline is:
+    // "24-23" as text matches nothing anyone would type, and a bare number
+    // dilutes the words that do.
+  ].join(' '));
+}
+
+
+/**
+ * The games a question asked for.
+ *
+ * "Show all handball games" and "show all equestrian game details" both name a
+ * sport, and the list used to answer either with every game on the desk — which
+ * reads as a filter that ran and matched everything. The words matched are the
+ * record's own, so a discipline works the same way a sport does: "show all
+ * dressage games" finds them because that is what the analysis wrote.
+ *
+ * Same contract as selectMoments, including the important one: a filter that
+ * matches nothing shows everything and says so, because an empty card would
+ * claim there are no games when there are.
+ */
+export function selectGames(all, { terms = [] } = {}) {
+  const hits = terms.length ? matchTerms(all, terms, gameText) : [];
+  return {
+    list: hits.length ? hits : all,
+    total: all.length,
+    terms,
+    narrowed: hits.length > 0 && hits.length < all.length,
+    missed: Boolean(terms.length) && hits.length === 0 && all.length > 0,
+  };
 }
