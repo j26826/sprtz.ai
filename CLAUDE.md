@@ -1,8 +1,9 @@
-# Sportscut — working notes
+# Arenos — working notes
 
 An agentic SaaS that watches a full sports match and proposes short-form clips
-for TikTok, Instagram Reels and YouTube Shorts. Handball first; the sport
-taxonomy is pluggable.
+for TikTok, Instagram Reels and YouTube Shorts. Handball and equestrian today;
+the sport taxonomy is pluggable. Rebranded from Sportscut onto the Arenos
+design system — see the Brand and UI sections below.
 
 Read `docs/ARCHITECTURE.md` for *why* the pieces fit together. This file is for
 working *in* the repo: conventions, commands, and the things that have already
@@ -22,7 +23,7 @@ mcp/         MCP tool servers (private Cloud Run)
   media_server/                  Transcoder API for HLS; ffmpeg: probe, cut, reframe, burn-in
   catalog_server/                Firestore, embeddings, KNN + Gemini rerank
 api/         FastAPI behind IAP: signed uploads, signed CDN URLs, agent SSE proxy
-web/         Sportscut editor SPA (chat-first, Modernist design system)
+web/         Arenos editor SPA (chat-first, Arenos design system)
 deploy/      cloudbuild.yaml, terraform/, scripts/{preflight,bootstrap}.sh
 ```
 
@@ -851,19 +852,49 @@ silently drops `X-Frame-Options` off the document.
 
 ### Brand
 
-The wordmark and app icon are real assets under `web/src/assets/`, served from
-the app's own origin. The brand pink in them is **not** the Modernist accent —
-`--color-accent` stays `#ec3013` and the logo carries its own colour. Do not
-reconcile them by editing the tokens without deciding that deliberately: every
-other accent in the app comes from that variable.
+**Sportscut was rebranded to Arenos**, on the Arenos design system (brand
+standards v1.0 draft, September 2026), ported via the `arenos-design` skill at
+`.claude/skills/arenos-design/`. That skill is the source of truth for the
+tokens now in `web/src/ds/styles.css` — retune the look by reading it, not by
+guessing at a hex.
+
+Unlike the old Modernist brand pink, `--color-accent` (Arenos Amber
+`#D4881A`) **is** the logo's colour, not an unrelated one living beside it —
+the lockup artwork's amber core is the same value. What the two still don't
+share is contrast: amber as a fill takes ink text
+(`--color-on-accent: #111111`, both themes), never white — white on `#D4881A`
+is roughly 1.9:1 and fails outright. The wordmark and lockups are real vendored
+assets under `web/src/assets/` (SVG, filled paths, no live type), served from
+the app's own origin, and are picked per theme by `THEMES[...].logo` /
+`.logoSignin` in `web/src/settings.js` — the header runs tight on space and
+uses the no-tagline cut; the sign-in screen has room for the full lockup.
 
 ### UI
 
-Chat-first, implementing `SPRTZ AI Chat.dc.html` on the vendored **Modernist**
-design system at `web/src/ds/`. Archivo, red on light, **zero corner radius**,
-2px rules, flush-left labels. Take every colour, space and radius from the
-tokens; `app.css` introduces none of its own. The one deliberate literal is the
-video letterbox matte, commented as such.
+Chat-first, originally implementing `SPRTZ AI Chat.dc.html` on the Modernist
+design system, now re-skinned onto **Arenos** at `web/src/ds/` — same
+structure, new tokens. Geist, amber on near-black by default (dark is the
+product's own surface, not a fallback; light is a full peer), small derived
+radii (8px cards, 5px inputs/chips, 3px controls) and a single 1px hairline
+rather than Modernist's 2px structural rule. Take every colour, space, font and
+radius from the tokens; `app.css` introduces none of its own beyond the two
+video-ground literals (the thumbnail clock's white and the letterbox matte's
+true black — both commented where they live, since a picture's ground does not
+follow the page).
+
+**Two themes, not a light/dark toggle bolted on after the fact.** `arenos-dark`
+is `ds/styles.css`'s own `:root` — an empty overlay, because dark is the
+default rather than something layered on top of light. `arenos-light` is a
+full token overlay in `settings.js`, following the same "read the ramp by
+step, not by lightness" rule every theme here has: neutral 900 stays near the
+video ground in *both* themes, so a thumbnail's backing never inherits the
+page's own background.
+
+**Anything a model produced is set in Geist Mono**, never the sans — the
+brand's own example is `01:24 · ATH-0842 · conf 0.941 · v2.3.0`, and in this
+app that means the moment thumbnail's timecode, per-clip durations, clip
+numbering and page counts. Anything a person wrote (labels, descriptions,
+summaries) stays in Geist.
 
 Where the backend genuinely cannot do what the design prototype mocks (post to
 a platform, report view counts), the UI **says so** rather than showing a

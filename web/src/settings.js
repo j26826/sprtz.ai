@@ -9,116 +9,99 @@
  * therefore what *new* analyses will be asked for, and it is copied onto each
  * job when it is registered.
  *
- * Themes are a token overlay rather than a stylesheet. `metro-light` is the
- * Modernist palette exactly as the design system ships it — an empty override —
- * so adding a theme is a matter of listing the tokens that differ, not of
- * duplicating a file that then drifts.
+ * Themes are a token overlay rather than a stylesheet. `arenos-dark` is the
+ * Arenos design system exactly as ds/styles.css ships it — an empty override —
+ * because dark is the product's own default surface, not a fallback from
+ * light. `arenos-light` is the full peer, applied as an overlay so both modes
+ * stay one system rather than two stylesheets that can drift apart.
  */
 
 import { LOCALES, localeName } from './i18n.js';
 
-const STORAGE_KEY = 'sportscut.settings';
+const STORAGE_KEY = 'arenos.settings';
 
 export const THEMES = {
-  'metro-light': {
-    name: 'Metro Light',
-    logo: '/assets/logo-full-black.png',
-    // No overrides: this is the design system's own palette. A theme that
-    // restated the tokens here would be a second source of truth for them.
+  /**
+   * Arenos Dark — the product default. Ground #0F1113, Arenos Amber as the
+   * only accent, Geist for brand and product, Geist Mono for anything a model
+   * produced. No overrides: this is ds/styles.css's own palette, so a theme
+   * that restated the tokens here would be a second source of truth for them.
+   */
+  'arenos-dark': {
+    name: 'Arenos Dark',
+    logo: '/assets/arenos-lockup-notag-on-dark.svg',
+    logoSignin: '/assets/arenos-lockup-tagline-on-dark.svg',
     tokens: {},
   },
 
   /**
-   * Skyline Dark — the Scanline palette on the Modernist structure.
+   * Arenos Light — Arena Ivory ground (#F6F4EF), a full peer to dark rather
+   * than a fallback. Same amber, same type, same radii and spacing; only the
+   * neutral ramp and the two accent ramps' contrast direction change.
    *
-   * Near-black cool ground, a violet accent in place of the red, type from IBM
-   * Plex, 14px cards and 8px pills on hairlines rather than 2px rules.
-   *
-   * Structure is a theme's business as much as its palette is, so radius and
-   * rule weight are tokens like any other and app.css names them everywhere it
-   * draws a border. Modernist keeps its square corners by leaving them at
-   * their shipped values, which is what an empty override means.
-   *
-   * **The ramps are read by step, not by lightness.** Each rung of the neutral
-   * and accent scales has a fixed job in app.css, and the theme answers the
-   * job rather than preserving the order: 100 is a surface, 300-500 are rules,
-   * 600-800 are text, and 900 is the ground a picture sits on — so 900 is dark
-   * here while 800 is nearly white. Sorting these into a monotonic ramp would
-   * put a white background behind every video.
+   * **The ramps are read by step, not by lightness**, same rule as any other
+   * theme here: neutral 100 is a surface, 300-500 are rules, 600-800 are
+   * text, 900 is the ground a picture sits on — so 900 stays near-black even
+   * in light mode, because a thumbnail's video ground does not follow the
+   * page. accent-700..900 are amber *as text*, which on a light ground amber
+   * itself cannot be (2.86:1, fails AA) — semantic.css's light-mode
+   * accent-text substitute, #9C6211, takes over there instead.
    */
-  'skyline-dark': {
-    name: 'Skyline Dark',
-    // The wordmark is drawn in dark ink and disappears on this ground.
-    logo: '/assets/icon-full-white.png',
-    fontUrl: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800'
-      + '&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap',
+  'arenos-light': {
+    name: 'Arenos Light',
+    logo: '/assets/arenos-lockup-notag-on-light.svg',
+    logoSignin: '/assets/arenos-lockup-tagline-on-light.svg',
     tokens: {
-      '--color-bg': '#0a0b0f',
-      '--color-surface': '#14161f',
-      '--color-text': '#f3f4f7',
-      // The darker end of the reference's own accent gradient, not the
-      // #7c6cff base. Solid buttons put white on this, and white on #7c6cff is
-      // 3.9:1 where this is 4.8:1 — the base stays as accent-500, which is
-      // where the ramp wants it and where nothing carries text.
-      '--color-accent': '#6a5cf0',
-      // Danger, kept separate from the accent. In the Modernist palette the
-      // two are both red and nothing depended on the difference; here the
-      // accent is violet, and a failed job printed in it reads as a highlight.
-      '--color-accent-2': '#ff6b6b',
-      '--color-divider': 'rgba(255, 255, 255, 0.18)',
+      '--color-bg': '#F6F4EF',
+      '--color-surface': '#FFFFFF',
+      '--color-text': '#191816',
+      '--color-accent': '#D4881A',
+      '--color-accent-2': '#B23D38',
+      '--color-divider': '#E3E1D8',
+      // Amber as a fill still takes ink text (semantic.css: --on-accent is
+      // #111111 in both themes) — this token is not overridden here on
+      // purpose, ds/styles.css's value already applies to both.
 
-      // 100 surface · 300-500 rules · 600-800 text · 900 the video ground.
-      '--color-neutral-100': '#14161f',
-      '--color-neutral-200': '#1b1e2a',
-      '--color-neutral-300': 'rgba(255, 255, 255, 0.10)',
-      '--color-neutral-400': 'rgba(255, 255, 255, 0.18)',
-      '--color-neutral-500': 'rgba(255, 255, 255, 0.26)',
-      '--color-neutral-600': '#7d8294',
-      '--color-neutral-700': '#9ca1b3',
-      '--color-neutral-800': '#d5d8e2',
-      '--color-neutral-900': '#0e0f15',
+      // The brand's 7-step light scale (neutrals.css --light-0..6).
+      '--color-neutral-100': '#FFFFFF',
+      '--color-neutral-200': '#F9F7F4',
+      '--color-neutral-300': '#E3E1D8',
+      '--color-neutral-400': '#D3D0C5',
+      '--color-neutral-500': '#B7B6B0',
+      '--color-neutral-600': '#8A8985',
+      '--color-neutral-700': '#595854',
+      '--color-neutral-800': '#191816',
+      '--color-neutral-900': '#0F1113',
 
-      // 100-300 are tints behind hover and pressed states; 700-900 are the
-      // accent as text, which has to be light enough to read on the ground.
-      '--color-accent-100': 'rgba(124, 108, 255, 0.14)',
-      '--color-accent-200': 'rgba(124, 108, 255, 0.22)',
-      '--color-accent-300': 'rgba(124, 108, 255, 0.32)',
-      '--color-accent-400': '#6a5cf0',
-      '--color-accent-500': '#7c6cff',
-      '--color-accent-600': '#8f7fff',
-      '--color-accent-700': '#b3adff',
-      '--color-accent-800': '#c9c2ff',
-      '--color-accent-900': '#ded9ff',
+      // 100-300 are --accent-soft at rising strength (light: rgba(212,136,26,
+      // 0.12) is the brand's own mid-point, landing at 200). 700-900 are
+      // amber-as-text: #9C6211 (AA) stands in for amber itself, which fails
+      // AA as light-mode type, then steps toward #774B0D (AAA, small type).
+      '--color-accent-100': 'rgba(212, 136, 26, 0.08)',
+      '--color-accent-200': 'rgba(212, 136, 26, 0.12)',
+      '--color-accent-300': 'rgba(212, 136, 26, 0.20)',
+      '--color-accent-400': '#DE9736',
+      '--color-accent-500': '#D4881A',
+      '--color-accent-600': '#B87415',
+      '--color-accent-700': '#9C6211',
+      '--color-accent-800': '#774B0D',
+      '--color-accent-900': '#5C3A0A',
 
-      '--color-accent-2-100': 'rgba(255, 107, 107, 0.13)',
-      '--color-accent-2-200': 'rgba(255, 107, 107, 0.20)',
-      '--color-accent-2-300': 'rgba(255, 107, 107, 0.30)',
-      '--color-accent-2-400': '#e85f5f',
-      '--color-accent-2-500': '#ff6b6b',
-      '--color-accent-2-600': '#ff8080',
-      '--color-accent-2-700': '#ff9b9b',
-      '--color-accent-2-800': '#ffbcbc',
-      '--color-accent-2-900': '#ffd9d9',
+      // Brick, light-mode values direct from colors.css/semantic.css.
+      '--color-accent-2-100': 'rgba(178, 61, 56, 0.08)',
+      '--color-accent-2-200': 'rgba(178, 61, 56, 0.12)',
+      '--color-accent-2-300': 'rgba(178, 61, 56, 0.20)',
+      '--color-accent-2-400': '#B23D38',
+      '--color-accent-2-500': '#9A3430',
+      '--color-accent-2-600': '#7D2A27',
+      '--color-accent-2-700': '#611F1D',
+      '--color-accent-2-800': '#451614',
+      '--color-accent-2-900': '#2E0E0D',
 
-      '--font-heading': "'Bricolage Grotesque', 'Archivo', system-ui, sans-serif",
-      '--font-heading-weight': '700',
-      '--font-body': "'IBM Plex Sans', 'Archivo', system-ui, sans-serif",
-
-      // Ink-tinted shadows are invisible on a dark ground; depth here is
-      // ambient black under the element rather than a tint over it.
-      '--shadow-sm': '0 1px 2px rgba(0, 0, 0, 0.5)',
-      '--shadow-md': '0 6px 18px -6px rgba(0, 0, 0, 0.6)',
-      '--shadow-lg': '0 30px 80px -30px rgba(0, 0, 0, 0.7)',
-
-      // 14px cards, 8px pills, and hairlines rather than 2px rules. On a
-      // near-black ground a 2px rule in the text colour is a bright line
-      // across the screen — the reference draws its structure with white at
-      // one tenth opacity instead, and the weight has to come down with it.
-      '--radius-lg': '14px',
-      '--radius-md': '8px',
-      '--radius-sm': '6px',
-      '--rule': '1px',
-      '--rule-hair': '1px',
+      // Elevation reads as soft lift on light rather than an ambient edge.
+      '--shadow-sm': '0 1px 2px rgba(17, 17, 17, 0.06)',
+      '--shadow-md': '0 2px 8px rgba(17, 17, 17, 0.08)',
+      '--shadow-lg': '0 8px 34px rgba(17, 17, 17, 0.12)',
     },
   },
 };
@@ -142,7 +125,7 @@ export const METADATA_LANGUAGES = [
 const DEFAULTS = {
   locale: '',            // empty means "follow the browser"
   metadataLanguage: 'en',
-  theme: 'metro-light',
+  theme: 'arenos-dark',
 };
 
 let current = { ...DEFAULTS };
@@ -195,7 +178,7 @@ export function applyTheme(themeId) {
   }
 
   applyThemeFont(theme.fontUrl || '');
-  applyThemeLogo(theme.logo || THEMES[DEFAULTS.theme].logo);
+  applyThemeLogo(theme);
 }
 
 
@@ -224,15 +207,23 @@ function applyThemeFont(url) {
 
 
 /**
- * Swap the wordmark for one that can be seen on this theme's ground.
+ * Swap the wordmark for the file drawn for this theme's ground.
  *
- * The logo carries its own colour rather than taking the accent, so a dark
- * theme cannot tint it — it needs the other file. An <img> rather than a
- * background image, so it keeps its alt text.
+ * The artwork carries its own ink rather than taking the accent, so a dark
+ * theme cannot tint it — it needs the other file. Two files, not one: the
+ * header runs tight on space and uses the no-tagline cut, while the sign-in
+ * screen has room for the full lockup with the tagline. An <img> rather than
+ * a background image, so it keeps its alt text.
  */
-function applyThemeLogo(src) {
-  for (const img of document.querySelectorAll('.brand-logo, .signin-logo')) {
-    if (img.getAttribute('src') !== src) img.setAttribute('src', src);
+function applyThemeLogo(theme) {
+  const fallback = THEMES[DEFAULTS.theme];
+  const header = theme.logo || fallback.logo;
+  const signin = theme.logoSignin || theme.logo || fallback.logoSignin || fallback.logo;
+  for (const img of document.querySelectorAll('.brand-logo')) {
+    if (img.getAttribute('src') !== header) img.setAttribute('src', header);
+  }
+  for (const img of document.querySelectorAll('.signin-logo')) {
+    if (img.getAttribute('src') !== signin) img.setAttribute('src', signin);
   }
 }
 
