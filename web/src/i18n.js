@@ -90,7 +90,7 @@ const STRINGS = {
     'header.newSession': 'New session',
     'header.signOut': 'Sign out',
 
-    'signin.title': 'Sportscut',
+    'signin.title': 'Arenos',
     'signin.blurb': 'Sign in to analyse a match and cut it into short-form clips.',
     'signin.email': 'Email',
     'signin.password': 'Password',
@@ -177,7 +177,7 @@ const STRINGS = {
     'composer.send': 'Send',
     'composer.thinking': 'Scanning the game…',
     'agent.label': 'Agent',
-    'publish.note': 'Sportscut packages clips for download — it does not post on your behalf.',
+    'publish.note': 'Arenos packages clips for download — it does not post on your behalf.',
   },
 
   'en-US': {
@@ -276,7 +276,7 @@ const STRINGS = {
     'header.newSession': 'Neue Sitzung',
     'header.signOut': 'Abmelden',
 
-    'signin.title': 'Sportscut',
+    'signin.title': 'Arenos',
     'signin.blurb': 'Melden Sie sich an, um ein Spiel zu analysieren und in Kurzclips zu schneiden.',
     'signin.email': 'E-Mail',
     'signin.password': 'Passwort',
@@ -365,7 +365,7 @@ const STRINGS = {
     'composer.thinking': 'Spiel wird gesichtet…',
     'agent.label': 'Agent',
     'publish.note':
-      'Sportscut stellt Clips zum Download bereit — es veröffentlicht nichts in Ihrem Namen.',
+      'Arenos stellt Clips zum Download bereit — es veröffentlicht nichts in Ihrem Namen.',
   },
 
   it: {
@@ -443,7 +443,7 @@ const STRINGS = {
     'header.newSession': 'Nuova sessione',
     'header.signOut': 'Esci',
 
-    'signin.title': 'Sportscut',
+    'signin.title': 'Arenos',
     'signin.blurb': 'Accedi per analizzare una partita e montarla in clip brevi.',
     'signin.email': 'Email',
     'signin.password': 'Password',
@@ -531,7 +531,7 @@ const STRINGS = {
     'composer.thinking': 'Sto guardando la partita…',
     'agent.label': 'Agente',
     'publish.note':
-      'Sportscut prepara le clip da scaricare — non pubblica nulla per tuo conto.',
+      'Arenos prepara le clip da scaricare — non pubblica nulla per tuo conto.',
   },
 
   fr: {
@@ -609,7 +609,7 @@ const STRINGS = {
     'header.newSession': 'Nouvelle session',
     'header.signOut': 'Se déconnecter',
 
-    'signin.title': 'Sportscut',
+    'signin.title': 'Arenos',
     'signin.blurb': 'Connectez-vous pour analyser un match et le monter en clips courts.',
     'signin.email': 'E-mail',
     'signin.password': 'Mot de passe',
@@ -701,7 +701,7 @@ const STRINGS = {
     'composer.thinking': 'Analyse du match…',
     'agent.label': 'Agent',
     'publish.note':
-      'Sportscut prépare des clips à télécharger — il ne publie rien à votre place.',
+      'Arenos prépare des clips à télécharger — il ne publie rien à votre place.',
   },
 
   es: {
@@ -779,7 +779,7 @@ const STRINGS = {
     'header.newSession': 'Nueva sesión',
     'header.signOut': 'Cerrar sesión',
 
-    'signin.title': 'Sportscut',
+    'signin.title': 'Arenos',
     'signin.blurb': 'Inicia sesión para analizar un partido y montarlo en clips cortos.',
     'signin.email': 'Correo electrónico',
     'signin.password': 'Contraseña',
@@ -867,7 +867,7 @@ const STRINGS = {
     'composer.thinking': 'Revisando el partido…',
     'agent.label': 'Agente',
     'publish.note':
-      'Sportscut prepara clips para descargar — no publica nada en tu nombre.',
+      'Arenos prepara clips para descargar — no publica nada en tu nombre.',
   },
 };
 

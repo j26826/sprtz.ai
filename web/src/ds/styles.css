@@ -1,66 +1,149 @@
-/* Modernist — design-system tokens and component classes. This file is the source of truth for the system's look; retune it here and see readme.md. */
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap');
+/* Arenos — design-system tokens and component classes.
+
+   Ported from the Arenos brand standards (v1.0 draft, September 2026) via the
+   arenos-design skill's token files (tokens/colors.css, neutrals.css,
+   semantic.css, typography.css, spacing.css, elevation.css) — every value here
+   traces to one of those, not to a redraw. This file is the source of truth
+   for the app's look; retune it here.
+
+   Dark is the product's default surface, not light: this :root block IS
+   Arenos Dark, so the empty-override theme in settings.js is 'arenos-dark'.
+   'arenos-light' is the full peer, applied as a token overlay — see
+   THEMES['arenos-light'] in settings.js for the light-mode values.
+
+   Fonts are vendored TTFs (assets/fonts/), not a Google Fonts @import: the
+   brand standards ship the nine weight files under an OFL licence specifically
+   so a product can bundle them rather than depend on a CDN. */
+
+@font-face {
+  font-family: "Geist";
+  src: url("assets/fonts/Geist-Light.ttf") format("truetype");
+  font-weight: 300; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("assets/fonts/Geist-Regular.ttf") format("truetype");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("assets/fonts/Geist-Medium.ttf") format("truetype");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("assets/fonts/Geist-SemiBold.ttf") format("truetype");
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist";
+  src: url("assets/fonts/Geist-Bold.ttf") format("truetype");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("assets/fonts/Geist-Mono-Regular.ttf") format("truetype");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("assets/fonts/Geist-Mono-Medium.ttf") format("truetype");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("assets/fonts/Geist-Mono-Bold.ttf") format("truetype");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
 
 :root {
-  --color-bg: #f3f2f2;
-  --color-surface: #eae9e9;
-  --color-text: #201e1d;
-  --color-accent: #ec3013;
-  --color-accent-2: #e15b47;
-  --color-divider: color-mix(in srgb, #201e1d 40%, transparent);
+  /* Component tokens — semantic.css, [data-theme="dark"] block. */
+  --color-bg: #0F1113;
+  --color-surface: #17191C;
+  --color-text: #E6E6E6;
+  --color-accent: #D4881A;
+  --color-accent-2: #CA5C57;
+  --color-divider: #2B2F34;
 
-  /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
-     same step of any role matches the others in visual value. */
-  --color-neutral-100: #f8f4f4;
-  --color-neutral-200: #eae7e7;
-  --color-neutral-300: #d7d3d3;
-  --color-neutral-400: #bab6b6;
-  --color-neutral-500: #9b9797;
-  --color-neutral-600: #7d7979;
-  --color-neutral-700: #605d5d;
-  --color-neutral-800: #444141;
-  --color-neutral-900: #2d2b2b;
+  /* on-accent is the one correctness rule this system insists on: amber as a
+     FILL takes ink text, never white. #D4881A under #FFFFFF is ~1.9:1 and
+     fails outright; under #111111 it is 6.6:1 and correct. Identical in both
+     themes (semantic.css defines it the same in light and dark), so it is not
+     overridden by arenos-light. */
+  --color-on-accent: #111111;
 
-  --color-accent-100: #fff2ef;
-  --color-accent-200: #ffe0d9;
-  --color-accent-300: #ffc4b8;
-  --color-accent-400: #ff9783;
-  --color-accent-500: #ff563c;
-  --color-accent-600: #dd2b0f;
-  --color-accent-700: #ae1800;
-  --color-accent-800: #7c1405;
-  --color-accent-900: #4d170e;
+  /* Neutral ramp — the brand's 7-step dark scale (neutrals.css --dark-0..6)
+     spread across 9 slots. 100 is a surface, 300-500 are rules, 600-800 are
+     text, 900 is the ground a picture sits on (kept near-black, at the same
+     step as the page ground, not just a numbered continuation). */
+  --color-neutral-100: #17191C;
+  --color-neutral-200: #1E2125;
+  --color-neutral-300: #2B2F34;
+  --color-neutral-400: #343940;
+  --color-neutral-500: #3E4248;
+  --color-neutral-600: #606568;
+  --color-neutral-700: #8B9094;
+  --color-neutral-800: #C7CACC;
+  --color-neutral-900: #0B0D0F;
 
-  --color-accent-2-100: #fff2ef;
-  --color-accent-2-200: #ffe0da;
-  --color-accent-2-300: #ffc4b9;
-  --color-accent-2-400: #ff9784;
-  --color-accent-2-500: #ef6853;
-  --color-accent-2-600: #c94b39;
-  --color-accent-2-700: #9e3526;
-  --color-accent-2-800: #71261b;
-  --color-accent-2-900: #471d16;
+  /* Accent ramp — 100-300 are --accent-soft at rising strength (dark:
+     rgba(212,136,26,0.14) is the brand's own mid-point, so 200 lands there
+     exactly), 400-600 are the amber itself and its hover/press moves, 700-900
+     are amber as text, which is simply amber itself on this dark ground
+     (semantic.css: --accent-text dark = #D4881A). */
+  --color-accent-100: rgba(212, 136, 26, 0.10);
+  --color-accent-200: rgba(212, 136, 26, 0.14);
+  --color-accent-300: rgba(212, 136, 26, 0.22);
+  --color-accent-400: #B87415;
+  --color-accent-500: #D4881A;
+  --color-accent-600: #DE9736;
+  --color-accent-700: #D4881A;
+  --color-accent-800: #E3A34C;
+  --color-accent-900: #F0C27E;
 
-  --font-heading: "Archivo", system-ui, sans-serif;
-  --font-heading-weight: 800;
-  --font-body: "Archivo", system-ui, sans-serif;
+  /* Second accent — Arenos brick (alert/error), dark-mode lift #CA5C57. This
+     is the system's ONLY other accent-shaped colour, and it means one thing:
+     alert. Amber is never repurposed as a warning colour. */
+  --color-accent-2-100: rgba(202, 92, 87, 0.10);
+  --color-accent-2-200: rgba(202, 92, 87, 0.16);
+  --color-accent-2-300: rgba(202, 92, 87, 0.26);
+  --color-accent-2-400: #B23D38;
+  --color-accent-2-500: #CA5C57;
+  --color-accent-2-600: #D57874;
+  --color-accent-2-700: #E0928F;
+  --color-accent-2-800: #EBB4B1;
+  --color-accent-2-900: #F5D6D4;
 
-  --space-1: 4.0px;
-  --space-2: 8.0px;
-  --space-3: 12.0px;
-  --space-4: 16.0px;
-  --space-6: 24.0px;
-  --space-8: 32.0px;
+  --font-heading: "Geist", "Helvetica Neue", Arial, sans-serif;
+  --font-heading-weight: 500;
+  --font-body: "Geist", "Helvetica Neue", Arial, sans-serif;
+  /* New: anything a model produced — timecodes, confidence, IDs, hashes —
+     is set in this face, never the sans. Not part of Modernist; introduced
+     for Arenos because the brand standards make the mono a functional
+     requirement, not a style choice (section 09). */
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
+  /* Spacing — the Fibonacci ladder (spacing.css), not the old 4/8/12/16 one.
+     21px is both a spacing step and the mark's fixed clear space. */
+  --space-1: 3px;
+  --space-2: 5px;
+  --space-3: 8px;
+  --space-4: 13px;
+  --space-6: 21px;
+  --space-8: 34px;
 
-  /* Elevation — derived from the ground: soft ink-tinted shadows on a
-     light theme, a hairline edge + ambient darkness on a dark one. */
-  --shadow-sm: 0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
-  --shadow-md: 0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
-  --shadow-lg: 0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
+  /* Radii — the standards specify none; spacing.css derives small ones on
+     purpose (this system's geometry is circles and squares, not pills).
+     8px on cards/panels, 5px on inputs/chips/buttons, 3px on meters/controls. */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+
+  /* Elevation (elevation.css, dark block) — an edge plus ambient darkness,
+     never a stacked drop shadow. */
+  --shadow-sm: 0 1px 0 rgba(230, 230, 230, 0.04);
+  --shadow-md: 0 2px 13px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 34px rgba(0, 0, 0, 0.6);
 }
 
 body {
@@ -84,11 +167,14 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading); font-weight: var(--font-heading-weight);
   line-height: 1.12; letter-spacing: -0.015em; margin: 0 0 var(--space-2);
 }
-h1 { font-size: 42px; }
-h2 { font-size: 32px; }
-h3 { font-size: 25px; }
-h4 { font-size: 20px; }
-h5 { font-size: 16px; }
+/* display/h1/h2 are the brand's own steps (typography.css); h3-h6 have no
+   register in the standards (the product only ever uses two heading levels),
+   so they continue the same phi-derived descent: 29 -> 21 -> 19 -> 17 -> 15 -> 13. */
+h1 { font-size: 29px; }
+h2 { font-size: 21px; }
+h3 { font-size: 19px; }
+h4 { font-size: 17px; }
+h5 { font-size: 15px; }
 h6 { font-size: 13px; }
 h6 { letter-spacing: 0.08em; text-transform: uppercase; }
 p { margin: 0 0 var(--space-3); }

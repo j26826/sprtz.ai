@@ -200,7 +200,7 @@ for (const [, path] of app.matchAll(/\bapi\(\s*[`'"]([^`'"]+)/g)) {
 // tinting it. A path that 404s is a missing image with nothing naming the
 // cause — the same class of failure as a t() key that does not resolve.
 const settings = read('src/settings.js');
-for (const [, src] of settings.matchAll(/logo: '([^']+)'/g)) {
+for (const [, src] of settings.matchAll(/logo(?:Signin)?: '([^']+)'/g)) {
   const file = src.replace(/^\//, 'src/');
   if (!existsSync(new URL(file, ROOT))) {
     fail(`settings.js names the logo ${src}, which web/${file} does not exist for`);

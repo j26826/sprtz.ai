@@ -1,25 +1,30 @@
-/* Sportscut chat — layout on top of the Modernist design system.
+/* Arenos chat — layout on top of the Arenos design system.
    Every colour, space and radius comes from ds/styles.css tokens, so a theme
    can repaint the app by overriding them and nothing here needs to change.
 
-   Four literals, and they are the same exception: white on the video ground
-   and white on the accent. Both of those surfaces are dark under every theme,
-   so their foreground does not follow the page — writing --color-bg there
-   worked only while the page happened to be light, and inverted with it. The
-   letterbox matte is the same argument at full strength: it is video, not a
-   UI surface, so it stays true black. */
+   Two literals remain, both video-ground exceptions: white on the thumbnail
+   clock and true black on the letterbox matte. The thumbnail is dark under
+   every theme, so its foreground does not follow the page the way --color-bg
+   would. The matte is the same argument at full strength: it is video, not a
+   UI surface. Everywhere text sits on the accent fill instead now goes through
+   --color-on-accent rather than a literal white — Arenos amber fails contrast
+   outright under white (about 1.9:1) and needs ink, which a hardcoded #fff
+   could not express. */
 
 /* Structure, alongside the design system's colour and space tokens.
 
-   Rule weight is a theme's business as much as its palette is: Modernist is
-   2px rules and square corners, and a theme built on hairlines and 14px cards
-   is a different object made of the same parts. The radii come from
-   ds/styles.css, which ships them at 0 — the rules below name them so that
-   setting them does something. --rule and --rule-hair live here because the
-   design system has no token for a border width. */
+   Rule weight is a theme's business as much as its palette is: a system built
+   on hairlines and small radii is a different object from one built on heavy
+   rules and square corners, even reusing the same component classes. --rule
+   and --rule-hair live here because ds/styles.css has no token for a border
+   width — nothing else there names one either. */
 :root {
-  --rule: 2px;        /* structural: the shell, panels, the composer */
-  --rule-hair: 1px;   /* dividers: rows inside a panel, header buttons */
+  /* Arenos specifies one hairline weight, 1px, everywhere — no separate
+     heavier structural rule. Both tokens carry the same value so nothing
+     downstream has to change to ask for it, and a future theme that does want
+     two weights only has to override one of them. */
+  --rule: 1px;
+  --rule-hair: 1px;
 }
 
 body {
@@ -63,27 +68,25 @@ input, button, textarea { font-family: var(--font-body); }
   margin-right: auto;
 }
 
-/* The wordmark carries its own weight and letterspacing, so it is sized by
-   height and left to keep its own proportions.
-
-   These two constraints now fight, and the width wins. The lockup is 1006x300,
-   so at 3em (45px in a 15px context) it wants 151px of width and the 8em cap
-   gives it 120px. object-fit keeps the ratio rather than squashing, which means
-   the rendered height is about 36px, not 45px. Raise the cap past 10.1em if the
-   full 3em is wanted. */
+/* The Arenos lockup (notag, horizontal) is a wide mark: its artwork bounds are
+   815.912 x 211, roughly 3.87:1. At 3em height (45px in the 15px body-size
+   context Arenos also uses) that wants about 174px of width — 11.6em — so the
+   cap is set past that rather than at a round number that would clip it.
+   object-fit keeps the ratio either way; this just avoids clipping by default. */
 .brand-logo {
   height: 3em;
   width: auto;
-  max-width: 8em;
+  max-width: 12em;
   object-fit: contain;
   display: block;
 }
 
-.signin-logo { height: 30px; width: auto; margin-bottom: var(--space-4); }
+/* The tagline cut (819.358 x 211, same ~3.87:1) at a legible sign-in size. */
+.signin-logo { height: 34px; width: auto; margin-bottom: var(--space-4); }
 
 .brand-name {
   font-family: var(--font-heading);
-  font-weight: 800;
+  font-weight: 700;
   font-size: 15px;
   letter-spacing: -0.02em;
   text-transform: uppercase;
@@ -155,7 +158,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .panel-head-title {
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -222,6 +225,8 @@ input, button, textarea { font-family: var(--font-body); }
      theme, so this is white rather than --color-bg, which follows the page. */
   color: #fff;
   z-index: 1;
+  /* A timecode — the brand's own example of what the mono face exists for. */
+  font-family: var(--font-mono);
 }
 
 .moment-label { font-size: 12.5px; font-weight: 700; line-height: 1.25; }
@@ -242,7 +247,7 @@ input, button, textarea { font-family: var(--font-body); }
   line-height: 1.4;
 }
 
-/* Buttons in the Modernist idiom — flush left labels, square corners */
+/* Buttons — flush left labels, radius from the theme's own tokens */
 
 .btn-outline {
   border: var(--rule-hair) solid var(--color-text);
@@ -262,9 +267,12 @@ input, button, textarea { font-family: var(--font-body); }
 .btn-solid {
   border: 0;
   background: var(--color-accent);
-  /* On the accent, so white rather than --color-bg — which is the page's own
-     colour and is only readable here while the page is light. */
-  color: #fff;
+  /* On the accent, not on --color-bg (the page's own colour, and only
+     readable here by luck of which theme is active). --color-on-accent is a
+     fixed ink/white choice per theme — Arenos requires ink here because white
+     on its amber fails contrast outright; the fallback covers any theme that
+     does not define the token. */
+  color: var(--color-on-accent, #fff);
   padding: 9px 14px;
   font-size: 10.5px;
   font-weight: 700;
@@ -431,9 +439,10 @@ input, button, textarea { font-family: var(--font-body); }
 
 .clip-n {
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--color-neutral-600);
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
 
 .clip-label { font-size: 12px; font-weight: 700; line-height: 1.25; min-width: 0; }
@@ -459,6 +468,7 @@ input, button, textarea { font-family: var(--font-body); }
   font-variant-numeric: tabular-nums;
   min-width: 38px;
   text-align: center;
+  font-family: var(--font-mono);
 }
 
 .link-btn {
@@ -579,7 +589,7 @@ input, button, textarea { font-family: var(--font-body); }
   border: 0;
   border-left: var(--rule) solid var(--color-text);
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent, #fff);
   padding: 0 20px;
   font-size: 11px;
   font-weight: 700;
@@ -720,7 +730,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 .modal-title {
   font-family: var(--font-heading);
-  font-weight: 800;
+  font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -754,7 +764,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   border: 0;
   border-bottom: var(--rule) solid var(--color-text);
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent, #fff);
   padding: 13px 16px;
   font-family: var(--font-body);
   font-size: 10.5px;
@@ -959,14 +969,17 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
   color: var(--color-neutral-700);
+  font-family: var(--font-mono);
 }
 
 .pager .link-btn[disabled] { opacity: 0.35; cursor: default; }
 
 
 /* ── Rounding ───────────────────────────────────────────────────────────
-   Inert under Modernist, whose radii are 0 — these rules name the tokens so a
-   theme that sets them is applied rather than ignored.
+   Arenos radii are small and deliberate (8px cards, 5px inputs/chips, 3px
+   controls — see ds/styles.css) rather than zero, so these rules matter now;
+   they stay written as tokens rather than literals so a future theme that
+   wants a different radius scale only has to override the three variables.
 
    Containers that round also clip. A row's own background or bottom rule is
    square, so without overflow it draws over the corner it is supposed to sit

@@ -1,9 +1,9 @@
 /**
- * Sportscut — chat-first sports video agent.
+ * Arenos — chat-first sports video agent.
  *
- * Implements `SPRTZ AI Chat.dc.html` on the Modernist design system. The design
- * is a prototype driven by fixture data; this is the same interface driven by
- * the real system:
+ * Originally implemented `SPRTZ AI Chat.dc.html` on the Modernist design
+ * system; re-skinned onto the Arenos design system (brand standards v1.0) with
+ * the same structure. This is the interface driven by the real system:
  *
  *   - the transcript and its inline cards render from Firestore, which the
  *     agents write through the catalog MCP server, so the moment list and the
