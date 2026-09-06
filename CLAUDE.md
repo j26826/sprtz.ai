@@ -1154,10 +1154,17 @@ default to empty:
 |---|---|
 | `_IAP_MEMBERS` | IAP is on but nobody is authorised — no one can reach the editor |
 | `_CDN_DOMAIN` | CDN is HTTP-only, so the HTTPS editor blocks HLS playback as mixed content |
+| `_APP_DOMAIN` | The editor and API are served from `<lb-ip>.nip.io` rather than a real hostname |
 
 Set them on the trigger (`_IAP_MEMBERS` is comma-separated, e.g.
 `user:you@example.com,domain:example.com`). Point the domain's A record at the
-`cdn_ip` output before the managed certificate can provision.
+`cdn_ip` or `app_ip` output before the matching managed certificate can
+provision — **DNS-only, not proxied.** Google's validation reaches the load
+balancer directly; a proxying host (Cloudflare's orange cloud, for one) answers
+for the domain instead of forwarding to it, and the certificate sits in
+`FAILED_NOT_VISIBLE` forever with nothing in this repo's logs to explain why —
+the failure is entirely on Google's side, checked against a domain that
+resolves to the wrong place from its perspective.
 
 **IAP does not work in this project, and authentication is enforced by the
 application instead.** IAP's authorization step ran with an *empty principal*
