@@ -245,7 +245,7 @@ variable "web_service_name" {
 variable "app_domain" {
   type        = string
   description = <<-EOT
-    Hostname serving the editor and API, e.g. dev.arenos.ai. Empty derives
+    Hostname serving the editor and API, e.g. demo.arenos.ai. Empty derives
     <lb-ip>.nip.io, which resolves back to the load balancer and lets Google
     issue a managed certificate without owning a domain. Point the domain's A
     record at the app_ip output — DNS-only, not proxied — before the managed
