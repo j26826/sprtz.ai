@@ -67,9 +67,19 @@ locals {
   app_url  = "https://${local.app_host}"
 }
 
+# The name carries a hash of the domain, and that is what makes the lifecycle
+# block below work at all.
+#
+# A managed certificate's domain list is immutable, so changing app_domain
+# forces a replacement — and with a fixed name, create_before_destroy asks
+# Google to create a second certificate called sprtz-dev-app-cert while the
+# first one still exists. That is a 409 alreadyExists, and the apply dies
+# having changed nothing. Naming it after the domains means the replacement is
+# a genuinely new resource: created first, attached to the proxy, and only
+# then is the old one destroyed.
 resource "google_compute_managed_ssl_certificate" "app" {
   project = var.project_id
-  name    = "${local.prefix}-app-cert"
+  name    = "${local.prefix}-app-cert-${substr(sha256(local.app_host), 0, 8)}"
 
   managed {
     domains = [local.app_host]

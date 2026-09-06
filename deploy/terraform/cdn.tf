@@ -152,13 +152,20 @@ resource "google_compute_url_map" "cdn" {
 # plain-HTTP HLS URL would be blocked as mixed content. A managed certificate
 # needs a domain, so when cdn_domain is empty the HTTP listener is created alone
 # and playback works only for local development.
+# Named after its domain and replaced create-before-destroy, for the reason
+# spelled out on the app certificate in loadbalancer.tf: a fixed name makes
+# changing cdn_domain a 409 that fails the apply outright.
 resource "google_compute_managed_ssl_certificate" "cdn" {
   count   = var.cdn_domain == "" ? 0 : 1
   project = var.project_id
-  name    = "${local.prefix}-cdn-cert"
+  name    = "${local.prefix}-cdn-cert-${substr(sha256(var.cdn_domain), 0, 8)}"
 
   managed {
     domains = [var.cdn_domain]
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
