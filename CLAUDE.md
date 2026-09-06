@@ -1116,6 +1116,26 @@ for a whole analysis.
 `iam.serviceAccountAdmin`, `secretmanager.admin`, `datastore.owner`,
 `run.admin` (Editor cannot `run.services.setIamPolicy`).
 
+**A managed certificate cannot be replaced under its own name.** The domain
+list is immutable, so changing `app_domain` or `cdn_domain` forces a
+replacement — and with a fixed `name`, `create_before_destroy` asks Google to
+create a second certificate under a name the first one still holds. That is
+`Error 409: ... already exists`, and the apply dies having changed nothing.
+Both certificate names carry `substr(sha256(<domain>), 0, 8)` so a domain
+change is a genuinely new resource: created first, attached to the proxy, then
+the old one destroyed.
+
+The failure is at least safe — nothing is deleted, so the old certificate stays
+attached and the site keeps serving on the old hostname. What it is not is
+obvious: the error names the certificate, not the domain change that caused it.
+
+**A domain cutover is not instant, and there is a window.** Terraform creates
+the new certificate, points the proxy at it and destroys the old one, but a
+managed certificate is `PROVISIONING` for roughly 10-15 minutes after that —
+and a proxy holding only an unprovisioned certificate fails TLS. Both the old
+and the new hostname are down for that window. Watch
+`gcloud compute ssl-certificates list` rather than guessing.
+
 **Firestore vector indexes replace themselves forever.** Firestore appends
 `__name__` to the index it creates, so the remote object never matches the
 declared fields. The provider reads that as a change, forces replacement, and
