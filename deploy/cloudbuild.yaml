@@ -11,11 +11,13 @@ substitutions:
   _AR_REPO: sprtz-dev-containers
   _TF_STATE_BUCKET: ""
   # Deployment-specific settings. Empty is a working default, but note what each
-  # one costs you: with no _IAP_MEMBERS nobody can reach the editor, and with no
-  # _CDN_DOMAIN the CDN is HTTP-only, so the HTTPS editor blocks HLS playback as
-  # mixed content. Set them on the trigger.
+  # one costs you: with no _IAP_MEMBERS nobody can reach the editor, with no
+  # _CDN_DOMAIN the CDN is HTTP-only so the HTTPS editor blocks HLS playback as
+  # mixed content, and with no _APP_DOMAIN the editor and API are served from
+  # <lb-ip>.nip.io rather than a real hostname. Set them on the trigger.
   _IAP_MEMBERS: ""
   _CDN_DOMAIN: ""
+  _APP_DOMAIN: ""
   # Editor service name. Overridden away from the default because IAP keeps
   # accessSettings per service name and a stale gcipSettings block could not be
   # cleared on the old one by any means.
@@ -234,6 +236,7 @@ steps:
                -var="app_name=${_APP_NAME}" \
                -var="image_tag=$SHORT_SHA" \
                -var="cdn_domain=${_CDN_DOMAIN}" \
+               -var="app_domain=${_APP_DOMAIN}" \
                -var="web_service_name=${_WEB_SERVICE_NAME}"
 
         # iap_members is a list; build the HCL literal only when it is set, so

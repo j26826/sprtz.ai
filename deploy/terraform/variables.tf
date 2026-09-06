@@ -245,9 +245,14 @@ variable "web_service_name" {
 variable "app_domain" {
   type        = string
   description = <<-EOT
-    Hostname serving the editor and API. Empty derives <lb-ip>.nip.io, which
-    resolves back to the load balancer and lets Google issue a managed
-    certificate without owning a domain.
+    Hostname serving the editor and API, e.g. dev.arenos.ai. Empty derives
+    <lb-ip>.nip.io, which resolves back to the load balancer and lets Google
+    issue a managed certificate without owning a domain. Point the domain's A
+    record at the app_ip output — DNS-only, not proxied — before the managed
+    certificate can provision: Google's validation reaches the load balancer
+    directly, and a proxying DNS host (e.g. Cloudflare's orange cloud) answers
+    for the domain instead, so the certificate never issues. Set via the
+    _APP_DOMAIN trigger substitution, same mechanism as cdn_domain.
   EOT
   default     = ""
 }

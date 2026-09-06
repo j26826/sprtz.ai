@@ -4,7 +4,7 @@ output "app_url" {
 }
 
 output "app_ip" {
-  description = "Load balancer IP. The managed certificate is issued for <ip>.nip.io."
+  description = "Load balancer IP. The managed certificate is issued for app_domain if set, else <ip>.nip.io. Point app_domain's DNS A record here — DNS-only, not proxied — before applying with it set."
   value       = google_compute_global_address.app.address
 }
 
