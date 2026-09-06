@@ -228,7 +228,7 @@ function mountSettings() {
     if (e.target.id === 'settings') closeSettings();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeSettings(); closeDetails(); }
+    if (e.key === 'Escape') { closeSettings(); closeDetails(); toggleAccountMenu(false); }
   });
 }
 
@@ -349,6 +349,7 @@ setPersistence(auth, browserLocalPersistence).catch((err) => {
 
 onAuthStateChanged(auth, async (user) => {
   state.user = user;
+  renderAccount();
   keepSessionAlive(user);
   // Restoring a stored session is asynchronous and fires null first. Showing
   // the sign-in card in that gap makes every reload look like a logout.
@@ -525,6 +526,33 @@ function momentById(id) {
  * listener the cards use — it follows an analysis rather than needing a
  * refresh of its own.
  */
+/**
+ * The signed-in account, at the foot of the rail.
+ *
+ * Firebase gives a displayName only when something set one, and these accounts
+ * are provisioned by hand in Identity Platform — so the email is the name in
+ * practice, and the part before the @ is what a person recognises. The avatar
+ * is its first letter rather than a photo: there is no photo to have.
+ */
+function renderAccount() {
+  const name = state.user?.displayName
+    || (state.user?.email || '').split('@')[0]
+    || '';
+  $('account-name').textContent = name;
+  $('account-initial').textContent = name.slice(0, 1);
+  $('account-btn').title = state.user?.email || name;
+}
+
+
+/** Open or shut the account menu, and say which it is for a screen reader. */
+function toggleAccountMenu(open) {
+  const menu = $('account-menu');
+  const shut = open === undefined ? !menu.classList.contains('hidden') : !open;
+  menu.classList.toggle('hidden', shut);
+  $('account-btn').setAttribute('aria-expanded', String(!shut));
+}
+
+
 function renderSessions() {
   const list = $('sessions-list');
   if (!list) return;
@@ -535,6 +563,14 @@ function renderSessions() {
   }
 
   const jobsById = new Map(state.jobs.map((j) => [j.id, j]));
+
+  // Sessions arrive newest first, so "today" is a prefix of the list and the
+  // separator goes in where the day changes. Rendering the label from inside
+  // the map — rather than as two pre-built lists — is what keeps a heading
+  // from appearing with nothing under it.
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  let group = '';
 
   list.innerHTML = state.sessions.map((session) => {
     const job = session.jobId ? jobsById.get(session.jobId) : null;
@@ -549,8 +585,12 @@ function renderSessions() {
         ? `${esc(job.stage || job.status)} · ${Math.round(job.progress || 0)}%`
         : esc(job.status || '');
     const stamp = new Date(session.createdAt || Date.now());
+    const bucket = stamp >= startOfToday ? 'today' : 'earlier';
+    const heading = bucket === group ? '' : `
+      <div class="session-group">${esc(t(`sessions.${bucket}`))}</div>`;
+    group = bucket;
 
-    return `
+    return `${heading}
       <div class="session-row">
         <button class="session" data-session="${esc(session.id)}" data-tone="${tone}"
                 aria-current="${session.id === state.sessionKey}">
@@ -2075,6 +2115,17 @@ $('composer').addEventListener('submit', (event) => {
 // delegated handler. They are fixed elements that exist for the life of the
 // page, so delegation buys nothing, and it put them behind a selector and a
 // chain of early returns that had already broken them once.
+$('account-btn').addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleAccountMenu();
+});
+
+// Anywhere else, and Escape. A menu that only closes by clicking its own
+// button is one people leave open.
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.sessions-footer')) toggleAccountMenu(false);
+});
+
 $('open-settings')?.addEventListener('click', openSettings);
 $('close-settings')?.addEventListener('click', closeSettings);
 $('close-details')?.addEventListener('click', closeDetails);
@@ -2083,6 +2134,7 @@ $('details')?.addEventListener('click', (event) => {
   if (event.target.id === 'details') closeDetails();
 });
 $('sign-out')?.addEventListener('click', signOutNow);
+$('account-menu').addEventListener('click', () => toggleAccountMenu(false));
 
 $('new-session').addEventListener('click', startSession);
 

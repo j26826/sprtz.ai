@@ -69,6 +69,8 @@ const STRINGS = {
     'sessions.deleteNote': 'This removes the conversation only. The match, its moments and its clips are not affected.',
     'sessions.noMatch': 'No match yet',
     'sessions.untitled': 'New session',
+    'sessions.today': 'Today',
+    'sessions.earlier': 'Earlier',
     'sessions.deleteConfirm': 'Delete the session',
 
     'sessions.empty': 'No sessions yet. Upload a match to start one.',
@@ -254,6 +256,8 @@ const STRINGS = {
     'sessions.deleteNote': 'Damit wird nur das Gespräch entfernt. Das Spiel, seine Szenen und Clips bleiben erhalten.',
     'sessions.noMatch': 'Noch kein Spiel',
     'sessions.untitled': 'Neue Sitzung',
+    'sessions.today': 'Heute',
+    'sessions.earlier': 'Früher',
     'sessions.deleteConfirm': 'Sitzung löschen',
 
     'sessions.empty': 'Noch keine Sitzungen. Laden Sie ein Spiel hoch, um zu beginnen.',
@@ -422,6 +426,8 @@ const STRINGS = {
     'sessions.deleteNote': 'Verrà rimossa solo la conversazione. La partita, le sue azioni e le clip restano.',
     'sessions.noMatch': 'Nessuna partita',
     'sessions.untitled': 'Nuova sessione',
+    'sessions.today': 'Oggi',
+    'sessions.earlier': 'Prima',
     'sessions.deleteConfirm': 'Eliminare la sessione',
 
     'sessions.empty': 'Ancora nessuna sessione. Carica una partita per iniziarne una.',
@@ -588,6 +594,8 @@ const STRINGS = {
     'sessions.deleteNote': 'Seule la conversation est supprimée. Le match, ses actions et ses clips ne sont pas touchés.',
     'sessions.noMatch': 'Pas encore de match',
     'sessions.untitled': 'Nouvelle session',
+    'sessions.today': 'Aujourd’hui',
+    'sessions.earlier': 'Plus tôt',
     'sessions.deleteConfirm': 'Supprimer la session',
 
     'sessions.empty': 'Aucune session pour le moment. Importez un match pour en démarrer une.',
@@ -758,6 +766,8 @@ const STRINGS = {
     'sessions.deleteNote': 'Solo se elimina la conversación. El partido, sus jugadas y sus clips no se ven afectados.',
     'sessions.noMatch': 'Sin partido todavía',
     'sessions.untitled': 'Nueva sesión',
+    'sessions.today': 'Hoy',
+    'sessions.earlier': 'Antes',
     'sessions.deleteConfirm': 'Eliminar la sesión',
 
     'sessions.empty': 'Aún no hay sesiones. Sube un partido para empezar una.',
