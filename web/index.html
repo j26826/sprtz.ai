@@ -56,36 +56,65 @@
 
 <div class="shell hidden" id="app">
 
-  <header class="app-header">
-    <div class="brand">
-      <img class="brand-logo" src="/assets/arenos-lockup-notag-on-dark.svg" alt="Arenos" />
-    </div>
-    <button class="header-btn" id="open-settings" data-i18n="header.settings">Settings</button>
-    <button class="header-btn" id="sign-out" data-i18n="header.signOut">Sign out</button>
-  </header>
-
   <div class="workspace">
+    <!-- The brand signs the rail rather than a bar of its own: with Settings and
+         Sign out moved into the account menu at the foot of this rail, a
+         full-width header had nothing left in it but the logo. -->
     <aside class="sessions" id="sessions">
-      <button class="sessions-new" id="new-session" data-i18n="header.newSession">
-        New session
-      </button>
+      <div class="sessions-header">
+        <div class="brand">
+          <img class="brand-logo" src="/assets/arenos-lockup-notag-on-dark.svg" alt="Arenos" />
+        </div>
+        <button class="sessions-new" id="new-session"
+                data-i18n-title="header.newSession" data-i18n-aria="header.newSession"
+                title="New session" aria-label="New session">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.7"
+                  stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+
       <div class="sessions-list" id="sessions-list"></div>
+
+      <div class="sessions-footer">
+        <button class="account" id="account-btn" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar" id="account-initial" aria-hidden="true"></span>
+          <span class="account-name" id="account-name"></span>
+          <svg class="account-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none"
+               aria-hidden="true">
+            <path d="M6 15l6-6 6 6" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="account-menu hidden" id="account-menu" role="menu">
+          <button class="account-menu-item" id="open-settings" role="menuitem"
+                  data-i18n="header.settings">Settings</button>
+          <button class="account-menu-item" id="sign-out" role="menuitem"
+                  data-i18n="header.signOut">Sign out</button>
+        </div>
+      </div>
     </aside>
 
-    <div class="scroll" id="scroll">
-      <div class="transcript" id="transcript"></div>
-    </div>
-  </div>
+    <!-- The composer belongs to the content column, not to the window: spanning
+         the full width put a search bar under the session list, which is not
+         what it searches. -->
+    <div class="main-area">
+      <div class="scroll" id="scroll">
+        <div class="transcript" id="transcript"></div>
+      </div>
 
-  <div class="composer">
-    <div class="suggestions" id="suggestions"></div>
-    <div class="composer-inner">
-      <form class="composer-box" id="composer">
-        <input class="composer-input" id="draft" autocomplete="off"
-               placeholder="Ask for a moment, an edit, a cut, or a post &mdash; e.g. &ldquo;every wing shot in the second half, 30 seconds, vertical&rdquo;" />
-        <button class="composer-send" type="submit" id="send" data-i18n="composer.send">Send</button>
-      </form>
-      <div class="footer-line" id="footer-line">Enter to send &middot; the agent edits the reel in place &mdash; no timeline required</div>
+      <div class="composer">
+        <div class="suggestions" id="suggestions"></div>
+        <div class="composer-inner">
+          <form class="composer-box" id="composer">
+            <input class="composer-input" id="draft" autocomplete="off"
+                   placeholder="Ask for a moment, an edit, a cut, or a post &mdash; e.g. &ldquo;every wing shot in the second half, 30 seconds, vertical&rdquo;" />
+            <button class="composer-send" type="submit" id="send" data-i18n="composer.send">Send</button>
+          </form>
+          <div class="footer-line" id="footer-line">Enter to send &middot; the agent edits the reel in place &mdash; no timeline required</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
