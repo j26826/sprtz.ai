@@ -15,16 +15,43 @@
 
    Rule weight is a theme's business as much as its palette is: a system built
    on hairlines and small radii is a different object from one built on heavy
-   rules and square corners, even reusing the same component classes. --rule
-   and --rule-hair live here because ds/styles.css has no token for a border
-   width — nothing else there names one either. */
+   rules and square corners, even reusing the same component classes. --rule,
+   --rule-hair and --color-rule live here because ds/styles.css names none of
+   them — it has no concept of a border at all, only of the colours one might
+   be drawn in. */
 :root {
-  /* Arenos specifies one hairline weight, 1px, everywhere — no separate
-     heavier structural rule. Both tokens carry the same value so nothing
-     downstream has to change to ask for it, and a future theme that does want
-     two weights only has to override one of them. */
-  --rule: 1px;
-  --rule-hair: 1px;
+  /* Arenos specifies one hairline weight everywhere — no separate heavier
+     structural rule. Both tokens carry the same value so nothing downstream
+     has to change to ask for it, and a future theme that does want two weights
+     only has to override one of them.
+
+     0.1px does not mean a tenth of a pixel, and it does not mean a faded line.
+     Measured in Chrome: any non-zero width below one device pixel snaps up to
+     exactly one device pixel, painted at full colour — 0.5px, 0.1px and 0.01px
+     are indistinguishable, and none of them disappears. So this reads as "the
+     thinnest line the display can draw".
+
+     What that means in practice depends on the display, which is the part
+     worth knowing before changing it back. At 1x a 1px rule is already one
+     device pixel, so 0.1px paints identically and nothing looks different. At
+     2x a 1px rule is two device pixels and 0.1px is one, so the rule is
+     genuinely halved. The change is a retina change. */
+  --rule: 0.1px;
+  --rule-hair: 0.1px;
+
+  /* The colour a rule is drawn in, which is not the colour of text.
+     It used to be --color-text, and that read as deliberate while the two
+     wanted the same value — near-black on light, near-white on dark. They do
+     not: a border wants to sit under the reading, and text wants to carry it.
+     Sharing one token meant softening the borders could only be done by
+     softening the prose, which on the dark theme's near-black ground is the
+     difference between a quiet line and body copy at 1.9:1.
+
+     #3E4248 is a mid-slate that works against both grounds — a soft line on
+     #F6F4EF and a visible one on #0F1113 — so it is defined once here rather
+     than per theme. A theme that wants its own may override it like any other
+     token. */
+  --color-rule: #3E4248;
 }
 
 body {
@@ -146,7 +173,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* ── Inline cards ───────────────────────────────────────────────────── */
 
-.panel { margin-top: 14px; border: var(--rule) solid var(--color-text); max-width: 640px; }
+.panel { margin-top: 14px; border: var(--rule) solid var(--color-rule); max-width: 640px; }
 .panel-light { margin-top: 14px; border: var(--rule-hair) solid var(--color-neutral-300); max-width: 640px; }
 
 /* Inside a card the label's own spacing and the card's padding already do most
@@ -258,7 +285,7 @@ input, button, textarea { font-family: var(--font-body); }
 /* Buttons — flush left labels, radius from the theme's own tokens */
 
 .btn-outline {
-  border: var(--rule-hair) solid var(--color-text);
+  border: var(--rule-hair) solid var(--color-rule);
   background: transparent;
   color: var(--color-text);
   padding: 6px 10px;
@@ -358,7 +385,7 @@ input, button, textarea { font-family: var(--font-body); }
 .dz-meta { font-size: 11px; color: var(--color-neutral-700); margin-top: 3px; }
 
 .file-label {
-  border: var(--rule-hair) solid var(--color-text);
+  border: var(--rule-hair) solid var(--color-rule);
   background: transparent;
   padding: 7px 11px;
   font-size: 10.5px;
@@ -570,7 +597,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* Composer */
 
-.composer { flex: none; border-top: var(--rule) solid var(--color-text); }
+.composer { flex: none; border-top: var(--rule) solid var(--color-rule); }
 
 .suggestions { padding: 12px 48px 8px; display: flex; flex-wrap: wrap; gap: 7px; }
 
@@ -578,7 +605,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .composer-box {
   display: flex;
-  border: var(--rule) solid var(--color-text);
+  border: var(--rule) solid var(--color-rule);
   background: var(--color-neutral-100);
 }
 
@@ -595,7 +622,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .composer-send {
   border: 0;
-  border-left: var(--rule) solid var(--color-text);
+  border-left: var(--rule) solid var(--color-rule);
   background: var(--color-accent);
   color: var(--color-on-accent, #fff);
   padding: 0 20px;
@@ -629,7 +656,7 @@ input, button, textarea { font-family: var(--font-body); }
 
 .signin-card {
   width: min(420px, 92vw);
-  border: var(--rule) solid var(--color-text);
+  border: var(--rule) solid var(--color-rule);
   background: var(--color-neutral-100);
   padding: var(--space-8);
 }
@@ -694,7 +721,7 @@ input, button, textarea { font-family: var(--font-body); }
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  border: var(--rule) solid var(--color-text);
+  border: var(--rule) solid var(--color-rule);
   background: transparent;
   color: var(--color-text);
   padding: 6px 8px;
@@ -723,7 +750,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .modal-card {
   width: min(520px, 100%);
   background: var(--color-neutral-100);
-  border: var(--rule) solid var(--color-text);
+  border: var(--rule) solid var(--color-rule);
   max-height: 84vh;
   overflow-y: auto;
 }
@@ -733,7 +760,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   align-items: baseline;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: var(--rule) solid var(--color-text);
+  border-bottom: var(--rule) solid var(--color-rule);
 }
 
 .modal-title {
@@ -774,7 +801,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   flex: none;
   display: flex;
   flex-direction: column;
-  border-right: var(--rule) solid var(--color-text);
+  border-right: var(--rule) solid var(--color-rule);
   background: var(--color-neutral-100);
   min-height: 0;
 }
@@ -995,7 +1022,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 
 .detail-player {
-  border-right: var(--rule) solid var(--color-text);
+  border-right: var(--rule) solid var(--color-rule);
   background: var(--color-neutral-900);
 }
 
@@ -1015,7 +1042,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .detail-split { grid-template-columns: 1fr; }
   .detail-player {
     border-right: 0;
-    border-bottom: var(--rule) solid var(--color-text);
+    border-bottom: var(--rule) solid var(--color-rule);
   }
   .detail-player .player-slot { position: static; }
 }
