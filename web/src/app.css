@@ -59,14 +59,15 @@ input, button, textarea { font-family: var(--font-body); }
 }
 
 /* The Arenos lockup (notag, horizontal) is a wide mark — artwork bounds
-   815.912 x 211, roughly 3.87:1 — and it now sits in a 232px rail rather than
-   a full-width header, so it is sized to fit that. At 22px tall it wants about
-   85px of width, which clears the plus button beside it with room to spare.
-   object-fit keeps the ratio; the cap only prevents clipping. */
+   815.912 x 211, roughly 3.87:1 — sitting in a 232px rail rather than a
+   full-width header. At 35px tall it wants about 136px of width, and the rail
+   leaves 172px once its 13px padding, the 8px gap and the 26px plus button are
+   taken out, so it clears the control beside it. object-fit keeps the ratio;
+   the cap is what stops a wider lockup from ever reaching the button. */
 .brand-logo {
-  height: 22px;
+  height: 35px;
   width: auto;
-  max-width: 132px;
+  max-width: 172px;
   object-fit: contain;
   display: block;
 }
@@ -95,8 +96,34 @@ input, button, textarea { font-family: var(--font-body); }
   gap: 24px;
 }
 
-.msg { border-left: var(--rule) solid var(--color-neutral-400); padding-left: 16px; }
-.msg-agent { border-left-color: var(--color-accent); }
+/* A user turn is a line in the margin; an agent turn is a card. The two are
+   different kinds of thing and the transcript reads better for saying so: one
+   is what somebody typed, the other is the reply the desk works from — and
+   usually the frame around a moments, games or stage-strip list as well. */
+.msg-user { border-left: var(--rule) solid var(--color-neutral-400); padding-left: 16px; }
+
+.card {
+  background: var(--color-surface);
+  border: var(--rule-hair) solid var(--color-divider);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+/* Replies land at the foot of a scrolled column, so a card that fades up says
+   a new one has arrived without shifting anything already read.
+   It is not a decoration that can be left in the markup: the transcript is
+   rewritten wholesale on every render, and an agent reply re-renders on every
+   streamed token, so the class has to be applied once and then dropped — see
+   the WeakSet in render(). */
+@keyframes card-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.fade-in { animation: card-fade-up 0.32s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in { animation: none; }
+}
 
 .msg-label {
   font-size: 9.5px;
@@ -121,6 +148,12 @@ input, button, textarea { font-family: var(--font-body); }
 
 .panel { margin-top: 14px; border: var(--rule) solid var(--color-text); max-width: 640px; }
 .panel-light { margin-top: 14px; border: var(--rule-hair) solid var(--color-neutral-300); max-width: 640px; }
+
+/* Inside a card the label's own spacing and the card's padding already do most
+   of that work, so the panel's margin is trimmed to keep a card that answers
+   with a list reading at the same rhythm as one that answers in a sentence. */
+.card > .panel,
+.card > .panel-light { margin-top: var(--space-3); }
 
 .panel-head {
   display: flex;
@@ -910,7 +943,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   padding: 11px 14px;
   cursor: pointer;
   font-family: var(--font-body);
-  text-align: left;
 }
 
 /* The open session is marked with a rule rather than a fill, so the list keeps

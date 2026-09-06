@@ -1408,11 +1408,29 @@ function cardAnswersIt(m) {
 }
 
 
+/**
+ * Agent turns that have already played their entrance.
+ *
+ * The transcript is rewritten with innerHTML on every render and an agent
+ * reply re-renders on every streamed token, so a fade-in class left in the
+ * markup would replay the animation on each of the dozens of writes a reply
+ * takes to arrive — a card that strobes rather than one that appears. The
+ * message objects are stable across renders even though their elements are
+ * not, so they are what gets remembered; a WeakSet does it without keeping a
+ * cleared transcript alive.
+ */
+const animatedMsgs = new WeakSet();
+
+
 function render() {
   renderSessions();
-  $('transcript').innerHTML = state.msgs.map((m, i) => `
-    <div class="msg ${m.who === 'agent' ? 'msg-agent' : ''}">
-      <div class="msg-label">${m.who === 'agent' ? 'Agent' : 'You'}</div>
+  $('transcript').innerHTML = state.msgs.map((m, i) => {
+    const agent = m.who === 'agent';
+    const fresh = agent && !animatedMsgs.has(m);
+    if (fresh) animatedMsgs.add(m);
+    return `
+    <div class="msg ${agent ? `msg-agent card${fresh ? ' fade-in' : ''}` : 'msg-user'}">
+      <div class="msg-label">${agent ? 'Agent' : 'You'}</div>
       ${cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showIngest ? ingestCard() : ''}
@@ -1423,9 +1441,12 @@ function render() {
       ${m.showPublish ? publishCard() : ''}
       ${m.showActivity ? activityCard(m, i) : ''}
       ${actionsRow(m)}
-    </div>`).join('')
+    </div>`;
+  }).join('')
+    // No fade on the waiting card: it is not a message, so there is no object
+    // to remember it by, and it would re-enter on every render while it waits.
     + (state.thinking ? `
-      <div class="msg msg-agent">
+      <div class="msg msg-agent card">
         <div class="msg-label">${esc(t('agent.label'))}</div>
         <div class="thinking-text">${esc(t('composer.thinking'))}</div>
       </div>` : '');
