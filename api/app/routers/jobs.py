@@ -323,6 +323,31 @@ async def create_job_from_source(
     return result
 
 
+@router.post("/search")
+async def search_library(
+    body: LibrarySearchRequest, user: CallerIdentity = Depends(current_user)
+) -> dict:
+    """Semantic search over every game's moments, reranked, each result naming its game.
+
+    Declared ahead of the /{job_id} routes on purpose: FastAPI matches in
+    declaration order, and a literal "search" would otherwise be captured as a
+    job id by the route below it.
+    """
+    return await clients.call_mcp(
+        "catalog",
+        "knn_search_moments",
+        {
+            "query": body.query,
+            "job_id": "",
+            "limit": body.limit,
+            "owner_uid": user.uid,
+            "rerank": body.rerank,
+            "sport": body.sport,
+            "job_ids": body.job_ids,
+        },
+    )
+
+
 @router.get("/pending-uploads")
 async def list_pending_uploads(
     user: CallerIdentity = Depends(current_user),
@@ -607,6 +632,25 @@ async def list_clips(
     """List a job's suggested clips."""
     await _load_job(job_id, user)
     return await clients.call_mcp("catalog", "list_clips", {"job_id": job_id, "limit": limit})
+
+
+class LibrarySearchRequest(BaseModel):
+    """A search across every game on the desk, optionally narrowed."""
+    query: str = Field(min_length=1, max_length=500)
+    limit: int = Field(default=10, ge=1, le=50)
+    rerank: bool = True
+    # Narrowing. A sport keeps only games of that sport; job_ids keeps only
+    # those games. One job id is answered by the per-job index exactly.
+    sport: str = Field(default="", max_length=40, pattern=r"^[a-z_]*$")
+    job_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("job_ids")
+    @classmethod
+    def _ids(cls, v: list[str]) -> list[str]:
+        clean = [x.strip() for x in v if x and x.strip()]
+        if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", x) for x in clean):
+            raise ValueError("job_ids must be job identifiers")
+        return list(dict.fromkeys(clean))
 
 
 class SearchRequest(BaseModel):

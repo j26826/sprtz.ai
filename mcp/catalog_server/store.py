@@ -371,6 +371,33 @@ def _game_out(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _chunks(items: list[str], size: int = 30) -> list[list[str]]:
+    """Firestore's `in` takes at most thirty values."""
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def get_games_by_ids(job_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """The game record for each job id, keyed by job id. Missing ones are absent.
+
+    An equality filter with no ordering, so the automatic single-field index
+    serves it and nothing new is declared in firestore.tf.
+    """
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    wanted = [j for j in dict.fromkeys(job_ids or []) if j]
+    found: dict[str, dict[str, Any]] = {}
+    for chunk in _chunks(wanted):
+        for doc in db().collection("games").where(filter=FieldFilter("jobId", "in", chunk)).stream():
+            data = doc.to_dict() or {}
+            found[data.get("jobId") or doc.id] = {
+                "job_id": data.get("jobId") or doc.id,
+                "title": data.get("title", ""),
+                "sport": data.get("sport", ""),
+                "discipline": data.get("discipline", ""),
+            }
+    return found
+
+
 def get_game(job_id: str) -> dict[str, Any]:
     snapshot = game_ref(job_id).get()
     if not snapshot.exists:
@@ -969,7 +996,10 @@ the query.
 
 Score every candidate on how well it answers what the editor actually asked for, \
 and return them ordered most relevant first. Judge what happens in the moment, \
-described in its own words — not whether its type label resembles the query.
+described in its own words — not whether its type label resembles the query. Each \
+candidate also says which match or class it is in and, where known, who was \
+competing; when the query names a match, a team, a rider or a horse, that is part \
+of what it asks for.
 
 Give every candidate a score. Score generously only when the moment genuinely \
 answers the query; a list where everything scores above 0.8 is not a ranking.
@@ -998,16 +1028,7 @@ def _rerank(query: str, candidates: list[dict[str, Any]], limit: int) -> list[di
 
     from google.genai import types
 
-    lines = []
-    for i, moment in enumerate(candidates):
-        detail = moment.get("description") or moment.get("label", "")
-        extra = []
-        if moment.get("scoreboard"):
-            extra.append(f"scoreboard {moment['scoreboard']}")
-        if moment.get("is_goal"):
-            extra.append("resulted in a goal")
-        suffix = f" ({'; '.join(extra)})" if extra else ""
-        lines.append(f"{i}. [{moment.get('label', 'Unknown')}] {detail}{suffix}")
+    lines = [_candidate_line(i, moment) for i, moment in enumerate(candidates)]
 
     try:
         response = genai_client().models.generate_content(
@@ -1057,8 +1078,55 @@ def _rerank(query: str, candidates: list[dict[str, Any]], limit: int) -> list[di
     return ranked[:limit]
 
 
+def _filter_candidates(candidates: list[dict[str, Any]], *, sport: str = "",
+                       job_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    """Narrow a candidate set by sport or by game, in Python.
+
+    In Python because the library-wide vector index is on the embedding alone —
+    a `where` on a collection-group vector query needs the field in the index,
+    and moments do not carry their sport anyway; it comes from the game joined
+    on beside them. Same reasoning as the status filter in list_jobs: over-read
+    first, then narrow.
+    """
+    wanted = {j for j in (job_ids or []) if j}
+    want_sport = (sport or "").strip().lower()
+    out = []
+    for m in candidates:
+        if wanted and m.get("job_id") not in wanted:
+            continue
+        if want_sport and (m.get("game", {}).get("sport", "") or "").lower() != want_sport:
+            continue
+        out.append(m)
+    return out
+
+
+def _candidate_line(index: int, moment: dict[str, Any]) -> str:
+    """One candidate as the reranker sees it: what it is, and where it is.
+
+    The game is named on every line. An editor searching the whole library
+    asks for "the double save in the Sweden match" and "the pat after the
+    freestyle", and a ranker that only sees the play cannot use either half.
+    """
+    detail = moment.get("summary") or moment.get("description") or moment.get("label", "")
+    extra = []
+    game = moment.get("game") or {}
+    where = " / ".join(x for x in (game.get("title"), game.get("discipline") or game.get("sport")) if x)
+    if where:
+        extra.append(f"in {where}")
+    who = " / ".join(x for x in (moment.get("rider"), moment.get("horse")) if x)
+    if who:
+        extra.append(who)
+    if moment.get("scoreboard"):
+        extra.append(f"scoreboard {moment['scoreboard']}")
+    if moment.get("is_goal"):
+        extra.append("resulted in a goal")
+    suffix = f" ({'; '.join(extra)})" if extra else ""
+    return f"{index}. [{moment.get('label', 'Unknown')}] {detail}{suffix}"
+
+
 def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
-                       limit: int = 10, rerank: bool = True) -> list[dict[str, Any]]:
+                       limit: int = 10, rerank: bool = True,
+                       sport: str = "", job_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Nearest-neighbour search over moment embeddings, reranked by Gemini.
 
     Scoped to one job when job_id is given, otherwise across the owner's whole
@@ -1071,6 +1139,15 @@ def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
 
     vector = embed([query], task_type="RETRIEVAL_QUERY")[0]
 
+    # A search "across everything, but only this one game" is a per-job search
+    # and gets the per-job index, which answers exactly; the post-filter below
+    # is for a sport or for several games, where over-reading is the only way.
+    chosen = [j for j in (job_ids or []) if j]
+    if not job_id and len(chosen) == 1:
+        job_id = chosen[0]
+        chosen = []
+    filtering = bool(sport) or bool(chosen)
+
     if job_id:
         base = job_ref(job_id).collection("moments")
     else:
@@ -1080,6 +1157,11 @@ def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
         base = db().collection_group("moments")
 
     fetch = min(limit * RERANK_OVERFETCH, RERANK_MAX_CANDIDATES) if rerank else limit
+    if filtering:
+        # A filter discards most of what the index returns, so ask for more —
+        # a sport that is a tenth of the library would otherwise fill one page
+        # from ten pages of the other sport's nearest neighbours.
+        fetch = min(fetch * 4, RERANK_MAX_CANDIDATES * 4)
 
     results = base.find_nearest(
         vector_field="embedding",
@@ -1098,6 +1180,14 @@ def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
         # without knowing the measure.
         moment["similarity"] = round(1.0 - float(distance) / 2.0, 4) if distance is not None else None
         candidates.append(moment)
+
+    # The game, joined on before anything ranks or filters. A result across the
+    # library means nothing without the match it is in, and the ranker needs it
+    # for the same reason the reader does.
+    games = get_games_by_ids([m.get("job_id", "") for m in candidates])
+    for m in candidates:
+        m["game"] = games.get(m.get("job_id", ""), {"job_id": m.get("job_id", ""), "title": "", "sport": "", "discipline": ""})
+    candidates = _filter_candidates(candidates, sport=sport, job_ids=chosen)
 
     if not rerank:
         return candidates[:limit]

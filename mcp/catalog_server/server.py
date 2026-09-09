@@ -396,6 +396,7 @@ def match_games_by_title(query: str, limit: int = 5) -> dict:
 
 @mcp.tool
 def knn_search_moments(query: str, job_id: str, limit: int, owner_uid: str = "",
+                       sport: str = "", job_ids: list[str] | None = None,
                        rerank: bool = True) -> dict:
     """Find moments whose meaning matches a plain-language query.
 
@@ -410,10 +411,12 @@ def knn_search_moments(query: str, job_id: str, limit: int, owner_uid: str = "",
         job_id: Job to search within. Empty string searches the owner's whole library.
         limit: Maximum results.
         owner_uid: Required only for a library-wide search.
+        sport: Only moments from games of this sport, e.g. "equestrian". Library-wide only.
+        job_ids: Only moments from these games. One id is answered by the per-job index.
         rerank: Set false to skip reranking and return raw vector order.
     """
     try:
-        moments = store.knn_search_moments(query, job_id, owner_uid, limit, rerank=rerank)
+        moments = store.knn_search_moments(query, job_id, owner_uid, limit, rerank=rerank, sport=sport, job_ids=job_ids or [])
         return {
             "status": "success",
             "query": query,

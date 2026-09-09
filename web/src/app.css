@@ -1322,6 +1322,58 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   overflow: hidden;
 }
 
+/* ── Search across the desk ─────────────────────────────────────────────── */
+
+/* The panel is the question restated with its scope beside it, so what is
+   being searched and where are read together. Chips for the options, because
+   they are a small closed set and a pressed chip reads as the current state. */
+.search-panel {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-neutral-200);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-md);
+}
+.search-query {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-neutral-800);
+}
+.search-opts { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.search-panel .field-label { display: block; margin-top: var(--space-3); }
+
+/* A result is a button the width of its row: the whole thing opens. The game
+   is the first line, because across the desk a moment without its match is a
+   sentence without a subject. */
+.search-result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+.search-result:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.search-game {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+  margin-bottom: 3px;
+}
+.search-why {
+  margin-top: 4px;
+  font-size: 10.5px;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--color-neutral-700);
+}
+
 /* ── Context links: at upload, and on analyse-again ────────────────────── */
 
 .ingest-context { margin-top: var(--space-4); }

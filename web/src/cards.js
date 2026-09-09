@@ -41,6 +41,29 @@ const RULES = [
   ['reel', /\b(cut|reel|montage|render|generate|reframe|vertical|shorter|tighten)\b/],
 ];
 
+// Looking across the desk rather than inside the open match. The signal is a
+// scope led by a preposition or a question about which match — "in any match",
+// "across all games", "anywhere in the library", "which match has" — because
+// that is unambiguous whatever the play is called. It has to be, since the
+// plays of one sport are not the plays of another: a pirouette is a moment as
+// much as a save is, and a list of nouns would always be missing one. The bare
+// "all games" is deliberately not here — that is asking for the list.
+const SCOPE = new RegExp([
+  String.raw`\b(across|anywhere|throughout)\b`,
+  // Led by a locative preposition. "of all games" is possessive — "details of
+  // all games" is the list — so `of` is deliberately not here; and the bare
+  // "every game" or "any match" is the list too, which is why the preposition
+  // is required rather than the quantifier alone.
+  String.raw`\b(in|from) (any|every|other|all( the)?) (game|match|video|recording|games|matches|videos|recordings|content|assets)\b`,
+  String.raw`\bwhich (game|match|video|recording)\b`,
+  String.raw`\b(whole|entire) (desk|library|archive)\b`,
+  String.raw`\b(library|archive)\b`,
+  // A search verb aimed at a collection — "search the equestrian videos",
+  // "look through the recordings". "games" is not in this noun set on purpose:
+  // "show all equestrian games" is the list filtered by sport, not a search.
+  String.raw`\b(search|look)( (in|through|across))?( the)?( (handball|equestrian|dressage|jumping|eventing))? (videos|recordings|footage|library|archive)\b`,
+].join('|'));
+
 // The one-match record: its teams, competition, venue, score and how it felt.
 const GAME_DETAIL = /\bgame detail|\babout (the|this) (game|match)\b|\bwho played\b|\bfinal score\b|\bfind (the|a) (game|match)\b|\bwhat was the (game|match)\b|\bgame info\b|\bthe game\s*$/;
 
@@ -67,6 +90,10 @@ export function chooseCard(question) {
   const q = key(question);
 
   if (RULES[0][1].test(q)) return 'activity';
+
+  // A search across the desk, before the games route sees "games" or "which
+  // match" in it and answers with a list of matches instead.
+  if (SCOPE.test(q) && !RULES[1][1].test(q)) return 'search';
 
   // Every game on the desk. Plural says it outright; "all"/"list"/"which" says
   // it with the noun in the singular, which is how "show all game details"
