@@ -31,7 +31,14 @@ PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-south1")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
 EMBEDDING_DIMENSIONS = int(os.environ.get("EMBEDDING_DIMENSIONS", "768"))
-RERANK_MODEL = os.environ.get("RERANK_MODEL", "gemini-2.5-flash")
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "gemini-3.6-flash")
+# Its own location, because the model and the location move together: the
+# newer Flash generation is served only through Vertex's `global` location in
+# this project, while the embedding model is regional and stays on LOCATION.
+# The fallback is LOCATION rather than an opinion: unset means "wherever the
+# regional client already goes", which is what every test and local run gets.
+# Terraform is what points it at `global`.
+RERANK_LOCATION = os.environ.get("RERANK_LOCATION", LOCATION)
 # How many candidates to pull from the vector index per result asked for. The
 # reranker can only reorder what retrieval gave it, so over-fetching is what
 # actually buys the quality; 4x is where the gain flattens on this corpus.
@@ -58,6 +65,26 @@ def genai_client() -> Any:
 
         _genai_client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
     return _genai_client
+
+
+_rerank_client = None
+
+
+def rerank_client() -> Any:
+    """A client for the rerank model's location.
+
+    The regional client itself when reranking is not going anywhere different
+    — one object, one seam, so whatever a test injects there is what the
+    reranker uses. A separate client only when the locations differ.
+    """
+    global _rerank_client
+    if RERANK_LOCATION == LOCATION:
+        return genai_client()
+    if _rerank_client is None:
+        from google import genai
+
+        _rerank_client = genai.Client(vertexai=True, project=PROJECT_ID, location=RERANK_LOCATION)
+    return _rerank_client
 
 
 def now() -> datetime:
@@ -1031,7 +1058,7 @@ def _rerank(query: str, candidates: list[dict[str, Any]], limit: int) -> list[di
     lines = [_candidate_line(i, moment) for i, moment in enumerate(candidates)]
 
     try:
-        response = genai_client().models.generate_content(
+        response = rerank_client().models.generate_content(
             model=RERANK_MODEL,
             contents=_RERANK_PROMPT.format(
                 query=query, count=len(candidates), candidates="\n".join(lines)

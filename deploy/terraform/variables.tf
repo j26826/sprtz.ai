@@ -51,8 +51,38 @@ variable "image_tag" {
 
 variable "gemini_model" {
   type        = string
-  description = "Gemini model used for video analysis and every agent in the pipeline."
+  description = "Gemini model the agent engine runs on: the root agent, the game judgement and grounding. Analysis and reranking have their own."
   default     = "gemini-2.5-flash"
+}
+
+# Analysis and reranking are separable from the engine's own model because the
+# newer Flash generation is served only through Vertex's `global` location in
+# this project — every regional endpoint returns 404 for it — while the
+# embedding model and the agent's regional client stay where they are. Each
+# pair is a model and the location it is called from, because the two move
+# together: a model that is only global is not a model in us-central1.
+variable "analysis_model" {
+  type        = string
+  description = "Gemini model for the per-segment video analysis."
+  default     = "gemini-3.6-flash"
+}
+
+variable "analysis_location" {
+  type        = string
+  description = "Vertex location the analysis model is called from. `global` for the models only served there."
+  default     = "global"
+}
+
+variable "rerank_model" {
+  type        = string
+  description = "Gemini model that reranks search candidates for relevance."
+  default     = "gemini-3.6-flash"
+}
+
+variable "rerank_location" {
+  type        = string
+  description = "Vertex location the rerank model is called from."
+  default     = "global"
 }
 
 variable "segment_minutes" {

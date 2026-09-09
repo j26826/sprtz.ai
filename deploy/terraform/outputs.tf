@@ -33,6 +33,16 @@ output "gemini_model" {
   value       = var.gemini_model
 }
 
+output "analysis_model" {
+  description = "Gemini model for the per-segment video analysis."
+  value       = var.analysis_model
+}
+
+output "analysis_location" {
+  description = "Vertex location the analysis model is called from."
+  value       = var.analysis_location
+}
+
 output "vertex_region" {
   description = "Region hosting Agent Runtime and Gemini."
   value       = var.vertex_region
