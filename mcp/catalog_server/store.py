@@ -300,6 +300,16 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict
         # than thousands, and filtering them is a Python pass over a list the
         # caller already has — the same reasoning as list_jobs and its status.
         "rides": game.get("rides", []),
+        # What the published record added. Kept apart from the observed fields
+        # above it for the same reason the grounded* fields are: a reader must
+        # always be able to tell a caption from a search result.
+        "showTitle": game.get("show_title", ""),
+        "location": game.get("location", ""),
+        "equipeUrl": game.get("equipe_url", ""),
+        "judges": game.get("judges", []),
+        "startList": game.get("start_list", []),
+        "scheduleAnchors": game.get("schedule_anchors", 0),
+        "scheduleOffsetSec": game.get("schedule_offset_sec"),
         "homeTeam": game.get("home_team", ""),
         "awayTeam": game.get("away_team", ""),
         "competition": game.get("competition", ""),
@@ -703,6 +713,15 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
                 # type flagged for review would arrive here and be dropped —
                 # detected, stored, and indistinguishable from anything else.
                 "requiresHumanReview": bool(moment.get("requires_human_review", False)),
+                # Who was in the arena. Joined from the ride windows, and
+                # identitySource says whether the name was read off a graphic
+                # or inferred from the published start list — a caption must
+                # never present the second as the first.
+                "rider": moment.get("rider", ""),
+                "horse": moment.get("horse", ""),
+                "startNumber": moment.get("start_number", ""),
+                "rideOrder": moment.get("ride_order"),
+                "identitySource": moment.get("identity_source", ""),
                 "excitement": moment.get("excitement", 0.0),
                 "highlightScore": moment.get("highlight_score", 0.0),
                 "description": moment.get("description", ""),
@@ -775,6 +794,42 @@ def record_moment_thumbnails(job_id: str, thumbnails: dict[str, str]) -> int:
     return saved
 
 
+def update_moment_identity(job_id: str, identities: list[dict[str, Any]]) -> int:
+    """Set who was riding on moments that already exist.
+
+    Moments are written before the game record is built, and the ride they
+    belong to can only be named after grounding — the start list is what names
+    a round no graphic did. So this patches the identity fields on stored
+    moments in place, the way record_moment_thumbnails patches a thumbnail.
+    Nothing else on the moment is touched, and a moment the list does not
+    mention is left exactly as it was.
+    """
+    collection = job_ref(job_id).collection("moments")
+    batch = db().batch()
+    count = 0
+    for row in identities:
+        moment_id = str(row.get("moment_id") or "")
+        if not moment_id:
+            continue
+        batch.update(collection.document(moment_id), {
+            "rider": row.get("rider", ""),
+            "horse": row.get("horse", ""),
+            "startNumber": row.get("start_number", ""),
+            "rideOrder": row.get("ride_order"),
+            "identitySource": row.get("identity_source", ""),
+        })
+        count += 1
+        # Firestore batches cap at 500 writes.
+        if count % 400 == 0:
+            batch.commit()
+            batch = db().batch()
+    if count % 400:
+        batch.commit()
+    if count:
+        job_ref(job_id).update({"updatedAt": now()})
+    return count
+
+
 def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
     """Firestore document -> the snake_case shape the agents use.
 
@@ -792,6 +847,11 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "peak_sec": data.get("peakSec", 0.0),
         "confidence": data.get("confidence", 0.0),
         "requires_human_review": bool(data.get("requiresHumanReview", False)),
+        "rider": data.get("rider", ""),
+        "horse": data.get("horse", ""),
+        "start_number": data.get("startNumber", ""),
+        "ride_order": data.get("rideOrder"),
+        "identity_source": data.get("identitySource", ""),
         "excitement": data.get("excitement", 0.0),
         "highlight_score": data.get("highlightScore", 0.0),
         "description": data.get("description", ""),

@@ -765,6 +765,9 @@ function momentsHead(view, index, inReel) {
 function momentTile(m) {
   const clip = state.clips.find((c) => c.momentId === m.momentId);
   const meta = [
+    // H.No and rider first: on a competition day that is what a tile is
+    // scanned for. A schedule-inferred name is marked with a tilde.
+    m.rider ? `${m.startNumber ? `#${m.startNumber} ` : ''}${m.identitySource === 'schedule' ? '~' : ''}${m.rider}` : '',
     m.label || m.momentType,
     `${Math.round(m.endSec - m.startSec)}s`,
     m.confidence == null ? '' : `${Math.round(m.confidence * 100)}%`,
@@ -844,6 +847,14 @@ const DETAIL_ROWS = [
   ['moment.start', (m) => clock(m.startSec)],
   ['moment.end', (m) => clock(m.endSec)],
   ['moment.peak', (m) => clock(m.peakSec)],
+  ['moment.rider', (m) => m.rider],
+  ['moment.horse', (m) => m.horse],
+  ['moment.startNumber', (m) => m.startNumber],
+  // Read off a graphic or inferred from the start list. Shown, because a
+  // caption that presents the second as the first is the failure this whole
+  // record exists to avoid.
+  ['moment.identitySource', (m) => (m.identitySource
+    ? t(`identity.${m.identitySource}`) : '')],
   ['moment.participant', (m) => m.participant],
   ['moment.participantRole', (m) => m.participantRole],
   ['moment.actionTeam', (m) => m.actionTeam],
@@ -1101,6 +1112,11 @@ function stageStrip(job) {
 // and one found by a web search are different kinds of claim.
 const GAME_DETAIL_ROWS = [
   ['game.title', (g) => g.title],
+  // The published name of the event and where it was, from Equipe. Beside the
+  // observed title rather than in place of it: one was read off a caption and
+  // one was found by a search, and they are different kinds of claim.
+  ['game.showTitle', (g) => g.showTitle],
+  ['game.location', (g) => g.location],
   ['game.sport', (g) => g.sport],
   // With how sure the reading was, because it was read off the footage rather
   // than declared at upload. "Jumping" alone hides that it was a judgement.
@@ -1124,6 +1140,17 @@ const GAME_DETAIL_ROWS = [
   ['game.groundedAwayTeam', (g) => g.groundedAwayTeam],
   ['game.groundedCompetition', (g) => g.groundedCompetition],
   ['game.groundedVenue', (g) => g.groundedVenue],
+  // The panel, as position and name — E Smith · H Jones — because a judge's
+  // mark only means something against which letter they sat at.
+  ['game.judges', (g) => (Array.isArray(g.judges) && g.judges.length
+    ? g.judges.map((j) => [j.position, j.name].filter(Boolean).join(' ')).join(' · ')
+    : '')],
+  ['game.startList', (g) => (Array.isArray(g.startList) && g.startList.length
+    ? String(g.startList.length) : '')],
+  // How the start list was placed against the video. Zero anchors is a real
+  // answer — it means no round the schedule names was ever named on screen.
+  ['game.scheduleOffset', (g) => (g.scheduleAnchors
+    ? `${g.scheduleAnchors} ${t('game.scheduleOffsetHint')}` : '')],
 ];
 
 
@@ -1391,6 +1418,11 @@ function openGameDetails(game) {
 
   // The sources belong in the popup rather than the card: they qualify the
   // grounded rows, and are meaningless next to a row nobody is looking at.
+  const equipe = g.equipeUrl
+    ? `<div class="detail-key">${esc(t('game.equipe'))}</div>
+       <div class="detail-value"><a href="${esc(g.equipeUrl)}" target="_blank"
+          rel="noopener noreferrer" class="link-btn">${esc(g.equipeUrl)}</a></div>`
+    : '';
   const sources = (g.grounded && g.groundingSources?.length)
     ? `<div class="detail-key">${esc(t('game.groundedBy'))}</div>
        <div class="detail-value">${g.groundingSources.slice(0, 5).map((src) => `
@@ -1402,7 +1434,7 @@ function openGameDetails(game) {
   $('details-body').innerHTML = rows.map(([label, value]) => `
     <div class="detail-key">${esc(label)}</div>
     <div class="detail-value">${esc(String(value))}</div>`).join('')
-    + ridesTable(g) + notConfirmedBlock(g) + sources;
+    + ridesTable(g) + notConfirmedBlock(g) + equipe + sources;
 
   // The two share one dialog, so a game opened after a moment would otherwise
   // inherit that moment's video — playing, beside a record it has nothing to
