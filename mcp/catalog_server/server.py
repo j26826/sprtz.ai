@@ -259,6 +259,24 @@ def record_moment_thumbnails(job_id: str, thumbnails: dict) -> dict:
 
 
 @mcp.tool
+def update_moment_identity(job_id: str, identities: list[dict]) -> dict:
+    """Set who was riding on moments that already exist.
+
+    Args:
+        job_id: The job the moments belong to.
+        identities: [{"moment_id", "rider", "horse", "start_number", "ride_order",
+            "identity_source"}, ...]. Moments not listed are left untouched.
+
+    Returns:
+        dict with `updated`, the number of moments patched.
+    """
+    try:
+        return {"status": "success", "updated": store.update_moment_identity(job_id, identities)}
+    except Exception as exc:  # noqa: BLE001 — reported to the caller, never raised past the tool
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+
+@mcp.tool
 def list_moments(job_id: str, limit: int, min_score: float) -> dict:
     """List a job's key moments, highest scoring first.
 

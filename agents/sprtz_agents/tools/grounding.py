@@ -70,21 +70,36 @@ things actually read off the screen:
 
 {observed}
 
-Use Google Search to identify this show and class. Results for this sport are \
-published on online.equipe.com — prefer that site, and cite the show, class or \
-start page you actually used. Then reply with a single JSON object, and nothing \
-else:
+Use Google Search to identify this show and class. Results, start lists and \
+judge panels for this sport are published on online.equipe.com — prefer that \
+site, and cite the show, class, start-list or start page you actually used. \
+Then reply with a single JSON object, and nothing else:
 
 {{
   "show": "full name of the show as the organiser publishes it, or \"\"",
+  "competition": "the series or championship it belongs to, if any, or \"\"",
   "className": "the class or test these rounds were in, or \"\"",
   "venue": "venue name, or \"\"",
+  "location": "town and country, or \"\"",
   "date": "YYYY-MM-DD of the class, or \"\"",
   "equipeUrl": "the online.equipe.com page for the show or class, or \"\"",
+  "judges": [
+    {{"position": "C", "name": "judge's full name", "country": "or \"\""}}
+  ],
+  "startList": [
+    {{
+      "startNumber": "the start / head number as printed, as a string",
+      "startTime": "HH:MM scheduled start, 24-hour, or \"\"",
+      "rider": "rider's full name as published",
+      "horse": "horse's full name as published",
+      "nation": "rider's nation code, or \"\""
+    }}
+  ],
   "rides": [
     {{
       "rider": "rider's full name as published",
       "horse": "horse's full name as published",
+      "startNumber": "as printed, or \"\"",
       "finalPlace": 3,
       "totalPct": 68.957
     }}
@@ -92,16 +107,19 @@ else:
   "notes": "one sentence on what this class was, or \"\""
 }}
 
-Only include a ride in `rides` if the published results plainly correspond to \
-one of the combinations read off the screen — same rider, same horse. Copy the \
-published spelling; do not correct the on-screen one. Use null for a placing or \
-percentage the page does not show.
+`startList` is the whole class in published start order, every combination, \
+whether or not the camera saw them — it is what lets a round be placed in the \
+video by its scheduled time when no graphic named the rider. `rides` is only \
+the combinations whose results plainly correspond to one read off the screen: \
+same rider, same horse. Copy published spellings; do not correct on-screen \
+ones. Use null for a placing or percentage the page does not show, and "" for \
+a start time it does not give. Judge positions are the letters around the \
+arena (E, H, C, M, B, and F/K/V/S/R/P where used).
 
 If the search does not identify the show with reasonable confidence, return \
-empty strings and an empty rides list. An empty answer is correct here; a \
-plausible one is not, because it will be stored as though somebody had read it, \
-and a rider credited with a placing from a different class is worse than no \
-placing at all.\
+empty strings and empty lists. An empty answer is correct here; a plausible one \
+is not, because it will be stored as though somebody had read it, and a rider \
+credited with a placing from a different class is worse than no placing at all.\
 """
 
 
@@ -311,17 +329,21 @@ async def identify_show(
 
     fields = parse_show(getattr(response, "text", "") or "")
     sources = extract_sources(response)
-    if not fields.get("show") and not fields.get("rides"):
+    if not fields.get("show") and not fields.get("rides") and not fields.get("startList"):
         return {"grounded": False, "reason": "search did not identify the show"}
 
     return {
         "grounded": True,
         "from_equipe": cites_equipe(sources),
         "show": fields.get("show", ""),
+        "competition": fields.get("competition", ""),
         "class_name": fields.get("className", ""),
         "venue": fields.get("venue", ""),
+        "location": fields.get("location", ""),
         "match_date": fields.get("date", ""),
         "equipe_url": fields.get("equipeUrl", ""),
+        "judges": fields.get("judges", []),
+        "start_list": fields.get("startList", []),
         "rides": fields.get("rides", []),
         "notes": fields.get("notes", ""),
         "sources": sources,
@@ -342,11 +364,11 @@ def parse_show(text: str) -> dict[str, Any]:
         return {}
     out: dict[str, Any] = {}
     for key, value in data.items():
-        if key == "rides":
+        if key in ("rides", "judges", "startList"):
             # A list of rows or nothing. A string here would be iterated by
-            # apply_grounding one character at a time.
+            # the consumers one character at a time.
             if isinstance(value, list):
-                out["rides"] = [r for r in value if isinstance(r, dict)]
+                out[key] = [r for r in value if isinstance(r, dict)]
         elif isinstance(value, str):
             out[key] = value.strip()
     return out

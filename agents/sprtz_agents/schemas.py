@@ -465,6 +465,16 @@ class Moment(BaseModel):
     score_team1: int | None = None
     score_team2: int | None = None
     action_team: str = ""
+    # Who was in the arena when this happened, for a sport where the recording
+    # is a day of rounds. Joined from the ride windows in code rather than asked
+    # of the model per moment, and identity_source says how the ride itself was
+    # named: "observed" from a graphic, "schedule" inferred from the published
+    # start list. A caption must never present the second as the first.
+    rider: str = ""
+    horse: str = ""
+    start_number: str = ""
+    ride_order: int | None = None
+    identity_source: str = ""
     # Judgements about form. Equestrian asks for them because the discipline is
     # judged on how a movement was performed rather than on whether it scored;
     # handball leaves them empty, which is why they default rather than being
@@ -547,6 +557,20 @@ class GameDetails(BaseModel):
     # rather than one contest. Empty for a sport where the whole video is the
     # unit — a handball match has no rides.
     rides: list[dict] = Field(default_factory=list)
+    # What the published record adds to the observed one, kept apart from it.
+    # The show's own name, where it was, the panel that judged it, and the whole
+    # start list in published order — every combination, seen or not, because
+    # the start list is what places an unnamed round in the video by its time.
+    show_title: str = ""
+    location: str = ""
+    equipe_url: str = ""
+    judges: list[dict] = Field(default_factory=list)
+    start_list: list[dict] = Field(default_factory=list)
+    # How the start list was placed against the video: how many named rounds
+    # anchored it, and the clock-to-video offset that resulted. Null when it
+    # could not be placed, which is a real outcome rather than a gap.
+    schedule_anchors: int = 0
+    schedule_offset_sec: float | None = None
     home_team: str = Field(default="", description="As printed on the score bug.")
     away_team: str = Field(default="", description="As printed on the score bug.")
     competition: str = Field(default="", description="League or competition, if named on screen.")

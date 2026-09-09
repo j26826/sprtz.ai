@@ -285,6 +285,14 @@ def apply_grounding(rides: list[dict], published: list[dict], *, source: str) ->
 
         ride["grounded_rider"] = (hit.get("rider") or "").strip()
         ride["grounded_horse"] = (hit.get("horse") or "").strip()
+        # The head number is printed on the horse and on the start list, and
+        # nowhere else on screen — it is the one identifier both sides share.
+        number = str(hit.get("startNumber") or hit.get("start_number") or "").strip()
+        if number and not ride.get("start_number"):
+            ride["start_number"] = number
+        nation = (hit.get("nation") or "").strip()
+        if nation and not ride.get("nation"):
+            ride["nation"] = nation
         place = hit.get("finalPlace", hit.get("final_place"))
         ride["final_place"] = int(place) if isinstance(place, (int, float)) and place else None
         total = hit.get("totalPct", hit.get("total_pct"))
@@ -304,4 +312,144 @@ def apply_grounding(rides: list[dict], published: list[dict], *, source: str) ->
             elif not ride.get("score_check") or ride.get("score_check") == "ok":
                 ride["score_check"] = f"ok, confirmed by {source}"
         out.append(ride)
+    return out
+
+
+# --- The schedule -------------------------------------------------------------
+
+# How far a round may run from its scheduled time and still be the round the
+# schedule says. Dressage days slip, but they slip in minutes, not in classes:
+# ten minutes either side is a late start, twenty is somebody else's slot.
+_SCHEDULE_WINDOW_SEC = 600.0
+
+
+def _time_of_day(value: str) -> float | None:
+    """'HH:MM' or 'HH:MM:SS' as seconds past midnight, else None."""
+    parts = (value or "").strip().split(":")
+    if len(parts) not in (2, 3) or not all(x.isdigit() for x in parts):
+        return None
+    h, m = int(parts[0]), int(parts[1])
+    sec = int(parts[2]) if len(parts) == 3 else 0
+    if h > 23 or m > 59 or sec > 59:
+        return None
+    return h * 3600 + m * 60 + sec
+
+
+def _row_matches(ride: dict, row: dict) -> bool:
+    """Same combination, by the rule apply_grounding uses: the horse decides."""
+    rider, horse = normalise_name(ride.get("rider", "")), normalise_name(ride.get("horse", ""))
+    pr, ph = normalise_name(row.get("rider", "")), normalise_name(row.get("horse", ""))
+    horse_match = bool(horse and ph) and _similar(horse, ph) >= _SAME_COMBINATION
+    rider_match = bool(rider and pr) and _similar(rider, pr) >= _SAME_COMBINATION
+    return horse_match or (rider_match and not (horse and ph))
+
+
+def align_schedule(rides: list[dict], start_list: list[dict]) -> tuple[list[dict], dict]:
+    """Place the published start list against the video, and name what it can.
+
+    A lower third names the rider for some rounds and not others — the camera
+    was on a close-up when the graphic ran, or the producer never keyed it. The
+    start list knows who rode at 14:32; what it does not know is where 14:32 is
+    in an eight-hour file. So the rounds that *were* named are used as anchors:
+    each one gives the difference between its scheduled clock time and where
+    it actually starts in the video, and the median of those is the offset.
+    Every unnamed round is then looked up by its own predicted clock time.
+
+    The median rather than the first anchor, because one misattributed round
+    would otherwise shift the whole day. And a round is only named this way
+    when exactly one scheduled start falls inside the window around it: two
+    candidates is not an identification, it is a guess with a coin.
+
+    Anything named here says so. `identity_source` is "observed" for a name
+    read off the screen and "schedule" for one inferred from the timetable,
+    and the two are never confused, because a caption that names the wrong
+    rider is the failure this whole record is built to avoid.
+    """
+    rows = []
+    for row in start_list or []:
+        at = _time_of_day(str(row.get("startTime") or row.get("start_time") or ""))
+        if at is None:
+            continue
+        rows.append({**row, "_at": at})
+
+    out = [dict(r) for r in rides]
+    for ride in out:
+        ride.setdefault("identity_source", "observed" if (ride.get("rider") or ride.get("horse")) else "")
+
+    if not rows:
+        return out, {"anchors": 0, "offset_sec": None, "named": 0}
+
+    # Anchors: named rounds the start list also has.
+    deltas = []
+    for ride in out:
+        if not (ride.get("rider") or ride.get("horse")):
+            continue
+        for row in rows:
+            if _row_matches(ride, row):
+                deltas.append(row["_at"] - float(ride.get("start_sec", 0.0)))
+                if not ride.get("start_number"):
+                    number = str(row.get("startNumber") or row.get("start_number") or "").strip()
+                    if number:
+                        ride["start_number"] = number
+                break
+    if not deltas:
+        return out, {"anchors": 0, "offset_sec": None, "named": 0}
+
+    deltas.sort()
+    offset = deltas[len(deltas) // 2]
+    named = 0
+    for ride in out:
+        if ride.get("rider") or ride.get("horse"):
+            continue
+        predicted = float(ride.get("start_sec", 0.0)) + offset
+        # Nearest against runner-up, not a count of what falls in the window.
+        # Starts are six to eight minutes apart, so a window wide enough to
+        # absorb a late start always holds the neighbours too, and counting
+        # them would name nothing all day. A round predicted six seconds from
+        # one slot and eight minutes from the next is that slot; one predicted
+        # midway between two is a guess with a coin, and stays blank.
+        ranked = sorted(rows, key=lambda row: abs(row["_at"] - predicted))
+        nearest = abs(ranked[0]["_at"] - predicted)
+        if nearest > _SCHEDULE_WINDOW_SEC:
+            continue
+        if len(ranked) > 1 and abs(ranked[1]["_at"] - predicted) < 2 * nearest:
+            continue
+        row = ranked[0]
+        ride["rider"] = (row.get("rider") or "").strip()
+        ride["horse"] = (row.get("horse") or "").strip()
+        number = str(row.get("startNumber") or row.get("start_number") or "").strip()
+        if number:
+            ride["start_number"] = number
+        if row.get("nation"):
+            ride["nation"] = str(row["nation"]).strip()
+        ride["identity_source"] = "schedule"
+        named += 1
+
+    return out, {"anchors": len(deltas), "offset_sec": round(offset, 1), "named": named}
+
+
+def attach_moments(moments: list[dict], rides: list[dict]) -> list[dict]:
+    """Give every moment the ride it happened in.
+
+    By time, in code: a moment at 1:28:34 belongs to whoever was in the arena
+    at 1:28:34, which the ride windows already say. Asking the model to name
+    the rider on each moment would ask it forty times for a fact it was asked
+    once, and give it forty chances to answer differently.
+    """
+    out = []
+    for m in moments:
+        m = dict(m)
+        at = float(m.get("peak_sec") or m.get("start_sec") or 0.0)
+        ride = next(
+            (r for r in rides
+             if float(r.get("start_sec", 0.0)) <= at <= float(r.get("end_sec", 0.0))),
+            None,
+        )
+        if ride is not None:
+            m["rider"] = ride.get("rider", "") or ""
+            m["horse"] = ride.get("horse", "") or ""
+            m["start_number"] = ride.get("start_number", "") or ""
+            m["ride_order"] = ride.get("order")
+            m["identity_source"] = ride.get("identity_source", "") or ""
+        out.append(m)
     return out

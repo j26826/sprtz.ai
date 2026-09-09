@@ -523,6 +523,19 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
             discipline=discipline_label,
         )
 
+    # Every moment learns whose round it happened in, by time, before it is
+    # stored. Observed identities only at this point — the start list that
+    # names the rounds no graphic did is not consulted until grounding, and
+    # those moments are patched afterwards rather than held back until then.
+    fused_rides = result.get("rides") or []
+    if fused_rides:
+        joined = rides_tool.attach_moments([m.model_dump() for m in moments], fused_rides)
+        for m, j in zip(moments, joined, strict=True):
+            m.rider, m.horse = j.get("rider", ""), j.get("horse", "")
+            m.start_number = j.get("start_number", "")
+            m.ride_order = j.get("ride_order")
+            m.identity_source = j.get("identity_source", "")
+
     persisted = await _persist_moments(job_id, moments)
     await _drop_segments(job_id)
     # After the moments are saved, because the thumbnail is recorded against a
@@ -585,6 +598,39 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
     }
 
 
+async def _patch_moment_identities(job_id: str, moments: list[Moment], rides: list[dict]) -> int:
+    """Re-join stored moments to rides the schedule has just named.
+
+    Only moments whose identity actually changed are written: a round the
+    graphic already named is unchanged by grounding, and rewriting every moment
+    of a day to change forty of them is the kind of write that gets throttled.
+    Never allowed to fail the stage — a moment without a rider is still a
+    moment.
+    """
+    try:
+        joined = rides_tool.attach_moments([m.model_dump() for m in moments], rides)
+        changed = [
+            {"moment_id": j["moment_id"], "rider": j.get("rider", ""), "horse": j.get("horse", ""),
+             "start_number": j.get("start_number", ""), "ride_order": j.get("ride_order"),
+             "identity_source": j.get("identity_source", "")}
+            for m, j in zip(moments, joined, strict=True)
+            if (j.get("rider", ""), j.get("horse", ""), j.get("start_number", ""))
+               != (m.rider, m.horse, m.start_number)
+        ]
+        if not changed:
+            return 0
+        res = await mcp_client.call_tool(
+            "catalog", "update_moment_identity", {"job_id": job_id, "identities": changed})
+        n = int(res.get("updated") or 0) if res.get("status") == "success" else 0
+        if n:
+            await _emit(job_id, "analysis",
+                        f"{n} moments named from the published start list.", patched=n)
+        return n
+    except Exception:
+        logger.exception("could not patch moment identities for %s", job_id)
+        return 0
+
+
 async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
@@ -623,13 +669,29 @@ async def _record_game_details(
                 venue=game.venue, rides=game.rides, scoreboards=scoreboards,
             )
             source = "equipe" if found.get("from_equipe") else "web"
-            grounded_rides = rides_tool.apply_grounding(
-                game.rides, found.get("rides") or [], source=source,
-            ) if found.get("grounded") else game.rides
+            grounded_rides, placed = game.rides, {"anchors": 0, "offset_sec": None, "named": 0}
+            if found.get("grounded"):
+                # The start list first: it can name a round no graphic did,
+                # and a named round is one the results can then be attached to.
+                grounded_rides, placed = rides_tool.align_schedule(
+                    game.rides, found.get("start_list") or [])
+                grounded_rides = rides_tool.apply_grounding(
+                    grounded_rides, found.get("rides") or [], source=source)
+                # Moments were stored with what the graphics said; rounds the
+                # schedule has since named get their moments patched in place.
+                await _patch_moment_identities(job_id, moments, grounded_rides)
             update = {
                 "rides": grounded_rides,
+                "show_title": found.get("show", ""),
+                "location": found.get("location", ""),
+                "equipe_url": found.get("equipe_url", ""),
+                "judges": found.get("judges") or [],
+                "start_list": found.get("start_list") or [],
+                "schedule_anchors": int(placed.get("anchors") or 0),
+                "schedule_offset_sec": placed.get("offset_sec"),
                 "grounded_competition": " — ".join(
-                    x for x in (found.get("show", ""), found.get("class_name", "")) if x),
+                    x for x in (found.get("competition", ""), found.get("class_name", "")) if x)
+                    or found.get("show", ""),
                 "grounded_venue": found.get("venue", ""),
                 "grounded_home_team": "",
                 "grounded_away_team": "",
