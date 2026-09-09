@@ -64,6 +64,14 @@ const SCOPE = new RegExp([
   String.raw`\b(search|look)( (in|through|across))?( the)?( (handball|equestrian|dressage|jumping|eventing))? (videos|recordings|footage|library|archive)\b`,
 ].join('|'));
 
+// The desk's key moments rather than one match's. "Show all key moments",
+// "the best moments", "highlights" — the ranked shortlist, with no match named
+// — is a question about everything on the desk. Answering it from whichever
+// match happened to be open is how "no key moments were found" got said about
+// a desk full of them. When a match *is* named, app.js sees that and keeps it
+// to the match; this module cannot, because it does not hold the game list.
+const DESK_MOMENTS = /\b(key|best|top|greatest) (moments|plays|highlights)\b|\bhighlights\b/;
+
 // The one-match record: its teams, competition, venue, score and how it felt.
 const GAME_DETAIL = /\bgame detail|\babout (the|this) (game|match)\b|\bwho played\b|\bfinal score\b|\bfind (the|a) (game|match)\b|\bwhat was the (game|match)\b|\bgame info\b|\bthe game\s*$/;
 
@@ -110,6 +118,8 @@ export function chooseCard(question) {
   for (const [card, pattern] of RULES.slice(1)) {
     if (pattern.test(q)) return card;
   }
+
+  if (DESK_MOMENTS.test(q)) return 'desk-moments';
 
   return 'moments';
 }

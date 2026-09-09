@@ -348,6 +348,21 @@ async def search_library(
     )
 
 
+@router.post("/top-moments")
+async def top_moments(
+    body: TopMomentsRequest, user: CallerIdentity = Depends(current_user)
+) -> dict:
+    """The key moments across every game, best first, each naming its game.
+
+    Ahead of the /{job_id} routes for the same reason /search is: a literal
+    "top-moments" would otherwise be read as a job id.
+    """
+    return await clients.call_mcp(
+        "catalog", "list_top_moments",
+        {"limit": body.limit, "sport": body.sport, "job_ids": body.job_ids},
+    )
+
+
 @router.get("/pending-uploads")
 async def list_pending_uploads(
     user: CallerIdentity = Depends(current_user),
@@ -641,6 +656,21 @@ class LibrarySearchRequest(BaseModel):
     rerank: bool = True
     # Narrowing. A sport keeps only games of that sport; job_ids keeps only
     # those games. One job id is answered by the per-job index exactly.
+    sport: str = Field(default="", max_length=40, pattern=r"^[a-z_]*$")
+    job_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("job_ids")
+    @classmethod
+    def _ids(cls, v: list[str]) -> list[str]:
+        clean = [x.strip() for x in v if x and x.strip()]
+        if any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", x) for x in clean):
+            raise ValueError("job_ids must be job identifiers")
+        return list(dict.fromkeys(clean))
+
+
+class TopMomentsRequest(BaseModel):
+    """The key moments across the desk, optionally narrowed."""
+    limit: int = Field(default=20, ge=1, le=50)
     sport: str = Field(default="", max_length=40, pattern=r"^[a-z_]*$")
     job_ids: list[str] = Field(default_factory=list, max_length=50)
 
