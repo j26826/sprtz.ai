@@ -1329,6 +1329,20 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .detail-player { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 }
 
+/* The rounding rule above clips children to the corners with overflow:hidden,
+   and that shorthand also resets the overflow-y:auto this card was given when
+   it got its max-height — so a record taller than 84vh was cut off with no
+   scrollbar and no way to reach the rest. Measured on the game popup: 848px of
+   content in a 597px box, 251px of it unreachable.
+
+   Both axes have to stay non-visible or the corners stop clipping, so this
+   clips sideways and scrolls down. It has to come after the shared rule to win,
+   which is the whole reason the regression was silent. */
+.modal-card {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 .btn-solid,
 .btn-outline,
 .chip,
