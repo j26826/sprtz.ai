@@ -115,9 +115,238 @@ DISCIPLINES = (
 )
 
 
+
+# --- Things that are not the test: incidents, and what happens after it -------
+#
+# Everything here is read from context rather than from the movement alone, and
+# two of them are the same physical action with opposite meanings. A horse
+# bucking during a test is a stress signal; the same horse bucking on a lap of
+# honour is fresh. What separates them is when it happens and how hard, which is
+# why the stress one carries a review gate and the celebratory one does not.
+
+_INCIDENTS = (
+    MomentType(
+        code="outside_boards",
+        category="incident",
+        discipline="dressage",
+        label="Outside the boards",
+        description=(
+            "The horse steps outside the white boards marking the arena, or leaves the "
+            "arena entirely."
+        ),
+        base_score=0.7,
+        typical_action_seconds=5.0,
+        cues=(
+            "a hoof or the whole horse beyond the low white perimeter boards",
+            "boards displaced or knocked",
+            "the rider circling back to re-enter",
+        ),
+    ),
+    MomentType(
+        code="arena_distraction",
+        category="incident",
+        discipline="dressage",
+        label="Distraction",
+        description=(
+            "The horse's attention goes to something in the arena rather than the test — "
+            "reaching for the flowers or planting around the markers, spooking at the "
+            "boards, staring at the crowd."
+        ),
+        base_score=0.72,
+        typical_action_seconds=5.0,
+        cues=(
+            "head dropping towards the flower planters at the markers or the judge's box",
+            "mouth actually reaching the foliage rather than passing near it",
+            "a sideways shy away from something at the edge of the arena",
+        ),
+    ),
+    MomentType(
+        code="tack_failure",
+        category="incident",
+        discipline="dressage",
+        label="Tack failure",
+        description=(
+            "Equipment fails mid-test: an ear bonnet coming off, a stirrup leather "
+            "breaking, a rein or the bridle coming apart."
+        ),
+        # Reviewed before publication for the same reason as a buck: a bridle
+        # failing is a safety incident, and whether it reads as a mishap or as
+        # something frightening is not a judgement to leave to a model.
+        requires_human_review=True,
+        base_score=0.75,
+        typical_action_seconds=6.0,
+        cues=(
+            "ear bonnet or browband displaced, hanging, or on the ground",
+            "a stirrup swinging free or the rider's leg suddenly without one",
+            "rein length suddenly uneven, or the bridle off the head",
+        ),
+    ),
+    MomentType(
+        code="buck",
+        category="incident",
+        discipline="dressage",
+        label="Buck during the test",
+        description=(
+            "The horse bucks, rears, bolts or otherwise breaks from the test. Report what "
+            "the horse actually did and how hard, not how it looked."
+        ),
+        # Held back from publication on purpose. During a test this is usually a
+        # horse that is unhappy rather than a horse being dramatic, and the two
+        # are not separable from the picture with enough confidence to publish
+        # on. It is still detected, stored and shown — a rider and a trainer
+        # want to know it happened. It just does not go out unseen.
+        requires_human_review=True,
+        base_score=0.6,
+        typical_action_seconds=6.0,
+        cues=(
+            "hindquarters thrown up with the head down, out of the test's rhythm",
+            "the rider losing position, or the test visibly stopping",
+            "distinct from a fresh horse at prize-giving — this happens mid-test",
+        ),
+    ),
+    MomentType(
+        code="rider_emotion",
+        category="ceremony",
+        discipline="dressage",
+        label="Rider emotion",
+        description=(
+            "The rider is visibly moved — at the prize-giving, or riding out of the arena "
+            "at the end of a test. Tears, a hand to the face, an arm raised."
+        ),
+        base_score=0.84,
+        typical_action_seconds=6.0,
+        cues=(
+            "at the exit after the final halt, or lined up for a presentation",
+            "rosettes, sashes, a podium or officials present",
+            "face covered, wiping eyes, or both arms up",
+        ),
+    ),
+    MomentType(
+        code="horse_excitement",
+        category="ceremony",
+        discipline="dressage",
+        label="Horse excitement",
+        description=(
+            "A fresh horse at the prize-giving or lap of honour — jogging on the spot, "
+            "breaking into piaffe-like steps, or a small buck with the rosettes and noise."
+        ),
+        # Deliberately not review-gated where `buck` is. Here the context does
+        # the work: rosettes, applause and a loose rein after the test is over.
+        # Report it as excitement only when that context is actually visible —
+        # if it is not, this is a `buck` and it is held back.
+        base_score=0.8,
+        typical_action_seconds=6.0,
+        cues=(
+            "rosettes, sashes, presentation party or a lap of honour in shot",
+            "jogging sideways, head high, on a loose or long rein",
+            "the test is plainly over — no markers being ridden to",
+        ),
+    ),
+)
+
 # --- Dressage and Para-Dressage: what the horse does on the flat --------------
 
 _FLATWORK = (
+    MomentType(
+        code="tempi_changes",
+        category="flatwork",
+        discipline="dressage",
+        label="Tempi changes",
+        description=(
+            "A sequence of flying changes at a set count — every fourth, third, second or "
+            "single stride. The one-time changes look like the horse skipping down the "
+            "diagonal."
+        ),
+        # Higher than a single flying change, which is one moment; a clean line
+        # of tempis is the movement an audience with no dressage vocabulary can
+        # still see is difficult.
+        base_score=0.86,
+        typical_action_seconds=10.0,
+        cues=(
+            "repeated changes of leading leg at an even count, usually on a diagonal",
+            "the count is the point — fours, threes, twos, or every stride",
+            "straightness and rhythm unchanged through the sequence",
+        ),
+    ),
+    MomentType(
+        code="halt_salute",
+        category="flatwork",
+        discipline="dressage",
+        label="Halt and salute",
+        description=(
+            "The horse stands square and motionless on the centre line while the rider "
+            "salutes the judge. Every test opens and closes with one, so a pair of them "
+            "brackets the ride."
+        ),
+        # Low as content on its own — it is a formality, not a highlight. It
+        # earns its place by being the most reliable boundary marker a dressage
+        # test has: the two halts are where the ride starts and ends, which is
+        # what turns a competition day into rides rather than one long video.
+        base_score=0.35,
+        typical_action_seconds=6.0,
+        cues=(
+            "horse stationary, ideally with all four legs square",
+            "rider's arm drops to the side or hat is removed",
+            "usually on the centre line facing the judge at C",
+        ),
+    ),
+    MomentType(
+        code="half_pass",
+        category="flatwork",
+        discipline="dressage",
+        label="Half-pass",
+        description=(
+            "The horse travels forwards and sideways at once on a diagonal, bent towards "
+            "the direction of travel, outside legs crossing over the inside ones."
+        ),
+        base_score=0.74,
+        typical_action_seconds=9.0,
+        cues=(
+            "body angled to the track while still moving forward",
+            "outside fore and hind crossing in front of the inside pair",
+            "bend towards the direction of travel, not away from it",
+        ),
+    ),
+    MomentType(
+        code="free_walk",
+        category="flatwork",
+        discipline="dressage",
+        label="Free walk",
+        description=(
+            "The horse stretches its neck down and forward on a long rein at a relaxed "
+            "four-beat walk, covering ground without hurrying."
+        ),
+        base_score=0.4,
+        typical_action_seconds=12.0,
+        cues=(
+            "rein visibly loose, contact given away",
+            "neck stretched down and out, nose ahead of the vertical",
+            "unhurried four-beat rhythm with clear overtrack",
+        ),
+    ),
+    MomentType(
+        code="rider_joy",
+        category="partnership",
+        discipline="dressage",
+        label="Rider joy",
+        description=(
+            "The rider is visibly pleased with the horse — patting or stroking its neck, "
+            "smiling, a hand off the rein in praise. Usually just after a movement that "
+            "went well, or at the end of the test."
+        ),
+        # The one moment here that is about the pair rather than the movement,
+        # and the reason it scores as well as some of the technical work: it is
+        # the readable emotional beat in a discipline that otherwise gives a
+        # short-form audience very little to read.
+        base_score=0.68,
+        typical_action_seconds=4.0,
+        lead_in_seconds=1.5,
+        cues=(
+            "rider's hand leaves the rein and reaches to the neck or shoulder",
+            "rider leaning forward, often with both reins in one hand",
+            "frequently follows the final halt, or a difficult movement",
+        ),
+    ),
     MomentType(
         code="piaffe",
         category="flatwork",
@@ -795,7 +1024,7 @@ EQUESTRIAN = register_profile(
         sport="equestrian",
         display_name="Equestrian",
         moment_types=(
-            _FLATWORK + _OBSTACLE + _CROSS_COUNTRY + _ENDURANCE
+            _FLATWORK + _INCIDENTS + _OBSTACLE + _CROSS_COUNTRY + _ENDURANCE
             + _DRIVING + _ACROBATIC + _WESTERN + _PERFORMANCE
         ),
         context=EQUESTRIAN_CONTEXT,

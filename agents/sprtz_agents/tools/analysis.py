@@ -303,7 +303,41 @@ async def analyse_segments(
         # Settled here rather than by the caller: it is one fact about the whole
         # job, and it is what the moment catalogue was filtered by.
         "discipline": _discipline_of(analyses),
+        # What was looked for and not found, gathered across the segments that
+        # bothered to say. An absence only means anything if it survives to the
+        # record — reported once by one segment and dropped here, it would be
+        # indistinguishable from nobody having checked.
+        "not_confirmed": _not_confirmed_of(analyses),
     }
+
+
+def _not_confirmed_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> list[dict]:
+    """Collapse the per-segment negatives into one list per moment type.
+
+    Segments overlap and a long ride spans several of them, so the same
+    rejected candidate is reported more than once. Grouping by type keeps the
+    notes — which is the part somebody would go and check — while stopping the
+    record from claiming six separate absences of one movement.
+    """
+    notes: dict[str, list[str]] = {}
+    for plan, analysis in analyses:
+        for item in getattr(analysis, "not_confirmed", []) or []:
+            code = (getattr(item, "moment_type", "") or "").strip()
+            note = (getattr(item, "note", "") or "").strip()
+            if not code:
+                continue
+            # Timed against the whole match rather than the clip, so a note can
+            # be gone to directly. Segment timecodes are meaningless once the
+            # segment file is deleted.
+            stamped = f"[segment {plan.index}] {note}" if note else ""
+            if stamped:
+                notes.setdefault(code, []).append(stamped)
+            else:
+                notes.setdefault(code, [])
+    return [
+        {"momentType": code, "notes": found}
+        for code, found in sorted(notes.items())
+    ]
 
 
 def _discipline_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> dict:
@@ -360,6 +394,7 @@ def _to_absolute(
         moment_type=spec.code,
         category=spec.category,
         label=spec.label,
+        requires_human_review=spec.requires_human_review,
         start_sec=round(start, 2),
         end_sec=round(end, 2),
         peak_sec=round(min(max(peak, start), end), 2),

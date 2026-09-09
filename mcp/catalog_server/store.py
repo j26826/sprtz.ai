@@ -289,6 +289,12 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict
         # code when it needs one.
         "discipline": game.get("discipline", ""),
         "disciplineConfidence": game.get("discipline_confidence", 0.0),
+        # Movements the analysis looked for across this match and did not find,
+        # with the notes that rejected them. This payload is built field by
+        # field rather than dumped, so anything not named here is dropped
+        # silently — which is why a schema field alone is not enough to store
+        # something.
+        "notConfirmed": game.get("not_confirmed", []),
         "homeTeam": game.get("home_team", ""),
         "awayTeam": game.get("away_team", ""),
         "competition": game.get("competition", ""),
@@ -688,6 +694,10 @@ def upsert_moments(job_id: str, moments: list[dict[str, Any]]) -> int:
                 "endSec": moment["end_sec"],
                 "peakSec": moment["peak_sec"],
                 "confidence": moment.get("confidence", 0.0),
+                # The welfare gate. This payload is field-by-field, so a moment
+                # type flagged for review would arrive here and be dropped —
+                # detected, stored, and indistinguishable from anything else.
+                "requiresHumanReview": bool(moment.get("requires_human_review", False)),
                 "excitement": moment.get("excitement", 0.0),
                 "highlightScore": moment.get("highlight_score", 0.0),
                 "description": moment.get("description", ""),
@@ -776,6 +786,7 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "end_sec": data.get("endSec", 0.0),
         "peak_sec": data.get("peakSec", 0.0),
         "confidence": data.get("confidence", 0.0),
+        "requires_human_review": bool(data.get("requiresHumanReview", False)),
         "excitement": data.get("excitement", 0.0),
         "highlight_score": data.get("highlightScore", 0.0),
         "description": data.get("description", ""),

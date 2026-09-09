@@ -166,6 +166,7 @@ def assemble(
     fallback_title: str = "",
     discipline: str = "",
     discipline_confidence: float = 0.0,
+    not_confirmed: list[dict] | None = None,
     teams_are_constant: bool = True,
 ) -> GameDetails:
     """Put the record together: facts from the observations, judgements from the model."""
@@ -184,6 +185,7 @@ def assemble(
         sport=sport,
         discipline=discipline,
         discipline_confidence=discipline_confidence,
+        not_confirmed=not_confirmed or [],
         title=compose_title(
             home=home_team, away=away_team,
             competition=competition, fallback=fallback_title,

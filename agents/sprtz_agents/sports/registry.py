@@ -46,6 +46,17 @@ class MomentType:
     # Which discipline this belongs to, for a sport that has them. Empty means
     # it applies to the whole sport.
     discipline: str = ""
+    # Whether a person must look at this before it can be published.
+    #
+    # Set for moment types that can show an animal in distress. A horse bucking
+    # during a test is not a highlight — it usually means something is wrong,
+    # and cutting it to music and posting it showcases that. The same movement
+    # at prize-giving, from a horse that is simply fresh, is a different thing
+    # entirely, and the two are separated by context rather than by what the
+    # body does — which is exactly why a model should not be the last word on
+    # it. Flagged moments are analysed, stored and shown to the desk like any
+    # other; what they cannot do is leave the building unseen.
+    requires_human_review: bool = False
 
 
 @dataclass(frozen=True)

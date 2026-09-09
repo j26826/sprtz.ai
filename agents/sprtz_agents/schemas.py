@@ -271,6 +271,36 @@ class EquestrianMoment(DetectedMoment):
     )
 
 
+class NotConfirmed(BaseModel):
+    """A movement looked for in this segment and not found.
+
+    An absence is a finding. Without somewhere to record one, "no pirouette in
+    this ride" and "nobody checked" are the same empty result — and they lead to
+    opposite decisions, because one is an answer and the other is a gap.
+
+    It matters most for the movements that are easy to half-see. A collected
+    canter through a corner looks like the beginning of a pirouette from the
+    wrong angle, and a model with nowhere to put "I looked at this and it was
+    not one" will either drop it silently or report the thing it half-saw.
+    """
+
+    moment_type: str = Field(
+        description=(
+            "The moment type code you looked for and could not confirm. Use the "
+            "code exactly as given in the catalogue."
+        )
+    )
+    note: str = Field(
+        description=(
+            "What you saw instead, and where. Name the timecode of the strongest "
+            "candidate you rejected and say what ruled it out — 'two candidates "
+            "near 03:12 and 04:40, both collected canter through a corner rather "
+            "than a turn on the haunches'. A bare 'not seen' is not useful; the "
+            "point of this field is that somebody can go and check."
+        )
+    )
+
+
 class EquestrianSegmentAnalysis(SegmentAnalysis):
     """A segment of equestrian footage, which also says what it is.
 
@@ -288,6 +318,17 @@ class EquestrianSegmentAnalysis(SegmentAnalysis):
         description=(
             "Which discipline this footage shows, using the code exactly as given "
             "in the catalogue. Empty if the footage genuinely does not settle it."
+        ),
+    )
+    not_confirmed: list[NotConfirmed] = Field(
+        default_factory=list,
+        description=(
+            "Movements you actively looked for in this segment and could not "
+            "confirm. Report the ones a viewer would reasonably expect at this "
+            "level and the ones you saw a candidate for and rejected. Leave it "
+            "empty only if you genuinely checked for nothing beyond what you "
+            "reported — an empty list is a claim about your own search, not a "
+            "claim about the footage."
         ),
     )
     discipline_confidence: float = Field(
@@ -312,6 +353,11 @@ class Moment(BaseModel):
     start_sec: float
     end_sec: float
     peak_sec: float
+    # Copied from the moment type rather than decided per moment, so the gate
+    # cannot be reasoned away by a confident-sounding description. See
+    # MomentType.requires_human_review: this is the welfare gate, and it travels
+    # with the record to whatever eventually publishes it.
+    requires_human_review: bool = False
     confidence: float
     excitement: float
     highlight_score: float = Field(
@@ -403,6 +449,11 @@ class GameDetails(BaseModel):
             "on screen identified the fixture."
         ),
     )
+    # What the analysis looked for across this match and did not find, one entry
+    # per moment type with the notes that rejected it. Kept beside the moments
+    # rather than derived from their absence, because "no pirouette in this
+    # test" and "nobody looked" are the same empty list and opposite answers.
+    not_confirmed: list[dict] = Field(default_factory=list)
     home_team: str = Field(default="", description="As printed on the score bug.")
     away_team: str = Field(default="", description="As printed on the score bug.")
     competition: str = Field(default="", description="League or competition, if named on screen.")

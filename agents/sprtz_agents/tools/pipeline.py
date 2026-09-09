@@ -539,6 +539,7 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         fallback_title=job.get("title", ""),
         discipline=discipline_label,
         discipline_confidence=float(found_discipline.get("confidence", 0.0)),
+        not_confirmed=result.get("not_confirmed", []),
         teams_are_constant=profile.teams_are_constant,
     )
 
@@ -586,6 +587,7 @@ async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
     fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
+    not_confirmed: list[dict] | None = None,
     teams_are_constant: bool = True,
 ) -> GameDetails | None:
     """Build and store the match-level record.
@@ -601,6 +603,7 @@ async def _record_game_details(
             competitions=competitions, venues=venues,
             fallback_title=fallback_title,
             discipline=discipline, discipline_confidence=discipline_confidence,
+            not_confirmed=not_confirmed or [],
             teams_are_constant=teams_are_constant,
         )
 
