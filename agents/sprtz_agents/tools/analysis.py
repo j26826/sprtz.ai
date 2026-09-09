@@ -65,7 +65,9 @@ def _get_client() -> genai.Client:
         _client = genai.Client(
             vertexai=True,
             project=settings.project_id,
-            location=settings.location,
+            # The analysis model's own location, which may be `global`: the
+            # engine's regional endpoint returns 404 for the newer Flash models.
+            location=settings.analysis_location,
         )
     return _client
 
@@ -207,7 +209,7 @@ async def _analyse_one(
     async with semaphore:
         try:
             response = await _get_client().aio.models.generate_content(
-                model=settings.model,
+                model=settings.analysis_model,
                 contents=[types.Content(role="user", parts=[video_part, types.Part(text=prompt)])],
                 config=config,
             )

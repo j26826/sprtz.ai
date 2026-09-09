@@ -31,6 +31,20 @@ class Settings:
     # graphics, commentary audio and crowd noise all come from this one model.
     model: str = field(default_factory=lambda: os.environ.get("SPRTZ_MODEL", "gemini-2.5-flash"))
 
+    # The analysis call has its own model and its own location, because the two
+    # move together: the newer Flash generation is served only through Vertex's
+    # `global` location in this project, so a model that is only global is not
+    # a model in the engine's region. Each falls back to the engine's own
+    # setting, so an environment that sets neither behaves as it always did.
+    analysis_model: str = field(
+        default_factory=lambda: os.environ.get("SPRTZ_ANALYSIS_MODEL")
+        or os.environ.get("SPRTZ_MODEL", "gemini-2.5-flash")
+    )
+    analysis_location: str = field(
+        default_factory=lambda: os.environ.get("SPRTZ_ANALYSIS_LOCATION")
+        or os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    )
+
     embedding_model: str = field(
         default_factory=lambda: os.environ.get("SPRTZ_EMBEDDING_MODEL", "gemini-embedding-001")
     )

@@ -20,7 +20,7 @@ Terraform + Cloud Build for everything else.
 2. **Ingest.** The media server probes it. A 180-minute recording is planned into
    13 overlapping 15-minute segments.
 3. **Package and analyse, together.** One `ParallelAgent` transcodes the video to
-   an HLS ladder behind the CDN while Gemini 2.5 Flash analyses every segment
+   an HLS ladder behind the CDN while Gemini 3.6 Flash analyses every segment
    concurrently, reading each range straight out of GCS.
 4. **Merge.** Per-segment detections become one absolute-timestamped timeline;
    anything a boundary caused to be reported twice is collapsed.

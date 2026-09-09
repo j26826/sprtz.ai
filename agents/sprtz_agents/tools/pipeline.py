@@ -413,7 +413,7 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
     await _emit(
         job_id,
         "analysis",
-        f"Analysing {segment_count} segments of {profile.display_name} with {settings.model}.",
+        f"Analysing {segment_count} segments of {profile.display_name} with {settings.analysis_model}.",
         segments=segment_count,
         model=settings.model,
     )

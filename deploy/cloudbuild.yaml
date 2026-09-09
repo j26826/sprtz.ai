@@ -382,6 +382,8 @@ steps:
           --logs-bucket "$$LOGS_BUCKET" \
           --commit "$SHORT_SHA" \
           --env "SPRTZ_MODEL=$$(tf gemini_model)" \
+          --env "SPRTZ_ANALYSIS_MODEL=$$(tf analysis_model)" \
+          --env "SPRTZ_ANALYSIS_LOCATION=$$(tf analysis_location)" \
           --env "SPRTZ_EMBEDDING_MODEL=$$(tf embedding_model)" \
           --env "SPRTZ_EMBEDDING_DIMENSIONS=$$(tf embedding_dimensions)" \
           --env "MCP_CATALOG_URL=$$(tf mcp_catalog_url)" \

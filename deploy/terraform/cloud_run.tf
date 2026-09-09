@@ -53,7 +53,11 @@ resource "google_cloud_run_v2_service" "mcp_catalog" {
       }
       env {
         name  = "RERANK_MODEL"
-        value = var.gemini_model
+        value = var.rerank_model
+      }
+      env {
+        name  = "RERANK_LOCATION"
+        value = var.rerank_location
       }
       env {
         name  = "RERANK_OVERFETCH"
