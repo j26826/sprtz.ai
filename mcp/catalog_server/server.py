@@ -30,7 +30,7 @@ def _fail(exc: Exception, **context: Any) -> dict:
 @mcp.tool
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
                original_name: str, size_bytes: int, content_type: str = "",
-               metadata_language: str = "en") -> dict:
+               metadata_language: str = "en", context_urls: list[str] | None = None) -> dict:
     """Open a new analysis job for an uploaded video.
 
     Args:
@@ -43,11 +43,12 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         size_bytes: Size of the upload.
         content_type: Content type the client declared, checked at ingest.
         metadata_language: ISO 639-1 code the analysis should write in.
+        context_urls: Pages the editor says are about this recording, for grounding.
     """
     try:
         return {"status": "success", **store.create_job(
             job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
-            content_type, metadata_language)}
+            content_type, metadata_language, context_urls or [])}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 
@@ -254,6 +255,20 @@ def record_moment_thumbnails(job_id: str, thumbnails: dict) -> dict:
     try:
         saved = store.record_moment_thumbnails(job_id, thumbnails)
         return {"status": "success", "job_id": job_id, "saved": saved}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def update_job_context(job_id: str, context_urls: list[str]) -> dict:
+    """Replace the pages an editor says are about this job.
+
+    Args:
+        job_id: The job.
+        context_urls: http(s) URLs. The whole list; it replaces what was there.
+    """
+    try:
+        return {"status": "success", **store.update_job_context(job_id, context_urls or [])}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 

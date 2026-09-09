@@ -48,6 +48,7 @@ const $ = (id) => document.getElementById(id);
 /* ─────────────────────────────────────────────────────────── state ── */
 
 const state = {
+  reanalyse: null,   // { jobId, urls } while the analyse-again panel is open
   user: null,
   msgs: [],
   jobs: [],
@@ -970,6 +971,12 @@ function ingestCard() {
             <button class="chip" data-sport="${esc(s)}" aria-pressed="${u.sport === s}"
                     style="text-transform:capitalize">${esc(s)}</button>`).join('')}
         </div>
+        <div class="ingest-context">
+          <label class="field-label" for="context-urls">${esc(t('ingest.contextUrls'))}</label>
+          <div class="setting-hint">${esc(t('ingest.contextUrlsHint'))}</div>
+          <textarea class="input ctx-textarea" id="context-urls" rows="3"
+                    data-context-urls placeholder="${esc(t('reanalyse.placeholder'))}">${esc(u.contextUrls || '')}</textarea>
+        </div>
       </div>
       <div style="padding:14px 16px">
         ${u.status === 'uploading' || u.status === 'analyzing' ? `
@@ -1514,6 +1521,60 @@ function deleteSession(sessionId) {
   }
 }
 
+/**
+ * Analyse again, with the evidence in view.
+ *
+ * A recording once grounded to the right show and the wrong class, and every
+ * field it filled looked plausible — three riders who compete in several
+ * classes still matched. The only way to see it was to see what the search
+ * had been told and what it had looked at, and nothing on screen showed
+ * either. So this shows both, lets the editor fix the links, and only then
+ * runs the analysis again: the links are saved first, because the agent reads
+ * them off the job when it grounds.
+ */
+function reanalysePanel(j) {
+  const r = state.reanalyse;
+  const game = state.games.find((g) => (g.jobId || g.id) === j.id) || {};
+  const sources = Array.isArray(game.groundingSources) ? game.groundingSources : [];
+  const queries = Array.isArray(game.groundingQueries) ? game.groundingQueries : [];
+  const none = `<div class="ctx-muted">${esc(t('reanalyse.none'))}</div>`;
+  return `
+    <div class="reanalyse">
+      <div class="panel-head-title">${esc(t('reanalyse.title'))}</div>
+      <div class="setting-hint">${esc(t('reanalyse.hint'))}</div>
+
+      <div class="field-label">${esc(t('reanalyse.links'))}</div>
+      <div class="ctx-list">
+        ${r.urls.length ? r.urls.map((u, i) => `
+          <div class="ctx-row">
+            <a class="link-btn ctx-link" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>
+            <button class="link-btn" data-ctx-remove="${i}">${esc(t('reanalyse.remove'))}</button>
+          </div>`).join('') : none}
+        <div class="ctx-row">
+          <input class="input ctx-input" data-ctx-input placeholder="${esc(t('reanalyse.placeholder'))}" />
+          <button class="btn-outline" data-ctx-add="1">${esc(t('reanalyse.add'))}</button>
+        </div>
+      </div>
+
+      <div class="field-label">${esc(t('reanalyse.sources'))}</div>
+      <div class="ctx-list">
+        ${game.equipeUrl ? `<a class="link-btn ctx-link" href="${esc(game.equipeUrl)}" target="_blank" rel="noopener noreferrer">${esc(game.equipeUrl)}</a>` : ''}
+        ${sources.length ? sources.map((src) => `
+          <a class="link-btn ctx-link" href="${esc(src.uri)}" target="_blank" rel="noopener noreferrer">${esc(src.title || src.uri)}</a>`).join('')
+          : (game.equipeUrl ? '' : none)}
+      </div>
+
+      <div class="field-label">${esc(t('reanalyse.queries'))}</div>
+      <div class="ctx-list ctx-muted">${queries.length ? queries.map((q) => `<div>${esc(q)}</div>`).join('') : none}</div>
+
+      <div class="ctx-actions">
+        <button class="btn-solid" data-reanalyse-go="${esc(j.id)}">${esc(t('reanalyse.go'))}</button>
+        <button class="link-btn" data-reanalyse-cancel="1">${esc(t('reanalyse.cancel'))}</button>
+      </div>
+    </div>`;
+}
+
+
 function jobsCard(msg, index) {
   if (!state.jobs.length) return emptyCard(t('jobs.none'));
   const view = pageOf(state.jobs, msg.page);
@@ -1524,6 +1585,7 @@ function jobsCard(msg, index) {
     const tone = failed || stalled ? 'failed' : running ? 'running' : 'idle';
     return `
       <div class="job">
+        ${state.reanalyse?.jobId === j.id ? reanalysePanel(j) : ''}
         <div class="job-top">
           <div class="job-name">${esc(j.title || j.source?.originalName || j.id)}</div>
           <div class="job-status" data-tone="${tone}">${
@@ -2038,6 +2100,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
       // descriptions are written in is a property of that match, not of
       // whoever opens it later.
       metadata_language: getSettings().metadataLanguage,
+      context_urls: contextUrlList(),
       // Only set when picking up an orphan somebody else left: the bytes are
       // under their prefix, not this caller's.
       ...(uploaded_by ? { uploaded_by } : {}),
@@ -2084,6 +2147,50 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
  * again. `gcloud storage cp` is resumable and parallel, so for a file that size
  * the right answer is to let it do the copying and hand the location over.
  */
+/**
+ * The context links as a list, from the form's textarea.
+ *
+ * One per line, blanks dropped, duplicates dropped. Read from the DOM rather
+ * than held in state so a link typed after the file was chosen still goes.
+ */
+function contextUrlList() {
+  const raw = document.querySelector('[data-context-urls]')?.value || '';
+  return [...new Set(raw.split(/\s+/).map((x) => x.trim()).filter(Boolean))].slice(0, 10);
+}
+
+
+function addContextUrl() {
+  const input = document.querySelector('[data-ctx-input]');
+  const url = (input?.value || '').trim();
+  if (!url || !state.reanalyse) return;
+  if (!/^https?:\/\/\S+$/.test(url)) { input.classList.add('input-bad'); return; }
+  if (!state.reanalyse.urls.includes(url) && state.reanalyse.urls.length < 10) {
+    state.reanalyse.urls.push(url);
+  }
+  render();
+}
+
+
+/**
+ * Save the links, then ask for the analysis. In that order, and awaited: the
+ * agent reads the links off the job document when it grounds, so a request
+ * that raced ahead of the save would analyse against the old ones.
+ */
+async function reanalyseWithContext(jobId) {
+  const urls = state.reanalyse?.urls || [];
+  try {
+    await api(`/api/jobs/${encodeURIComponent(jobId)}/context`, {
+      method: 'PATCH', body: JSON.stringify({ context_urls: urls }),
+    });
+  } catch (err) {
+    say(`${t('reanalyse.title')}: ${err.message || err}`);
+    return;
+  }
+  state.reanalyse = null;
+  ask('Clear this job\'s previous results and analyse the match again.', { showJobs: true });
+}
+
+
 async function registerFromStorage() {
   const u = state.upload;
   const uri = (u.gcsUri || '').trim();
@@ -2101,6 +2208,7 @@ async function registerFromStorage() {
         title: uri.split('/').pop().replace(/\.[^.]+$/, '') || uri,
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
+      context_urls: contextUrlList(),
       }),
     });
 
@@ -2192,13 +2300,21 @@ async function startUpload() {
 
 /* ──────────────────────────────────────────────────── interactions ── */
 
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && event.target.matches('[data-ctx-input]')) {
+    event.preventDefault();
+    addContextUrl();
+  }
+});
+
 document.addEventListener('click', (event) => {
   const hit = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
     + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
-    + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs]');
+    + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs],'
+    + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -2287,9 +2403,31 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (hit.dataset.reanalyse) {
-    selectJob(hit.dataset.reanalyse);
-    ask('Clear this job\'s previous results and analyse the match again.',
-      { showJobs: true });
+    // Not straight away: show what the last grounding was told and read, and
+    // let the links be fixed first. The analysis runs from the panel.
+    const jobId = hit.dataset.reanalyse;
+    const job = state.jobs.find((x) => x.id === jobId) || {};
+    selectJob(jobId);
+    state.reanalyse = { jobId, urls: [...(job.contextUrls || [])] };
+    render();
+    return;
+  }
+  if (hit.dataset.ctxRemove !== undefined && state.reanalyse) {
+    state.reanalyse.urls.splice(Number(hit.dataset.ctxRemove), 1);
+    render();
+    return;
+  }
+  if (hit.dataset.ctxAdd && state.reanalyse) {
+    addContextUrl();
+    return;
+  }
+  if (hit.dataset.reanalyseCancel) {
+    state.reanalyse = null;
+    render();
+    return;
+  }
+  if (hit.dataset.reanalyseGo) {
+    reanalyseWithContext(hit.dataset.reanalyseGo);
     return;
   }
   if (hit.dataset.cancelJob) {

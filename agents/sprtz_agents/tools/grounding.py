@@ -125,6 +125,40 @@ credited with a placing from a different class is worse than no placing at all.\
 
 EQUIPE_HOST = "online.equipe.com"
 
+# The page kinds Equipe publishes, and the id each one carries. A show id is
+# the one that matters for "did the answer come from where the editor said":
+# class, start-list and start pages all live under a show, and their own ids
+# appear in the citations for that show's results.
+_EQUIPE_ID = re.compile(
+    r"online\.equipe\.com/(?:[a-z]{2}/)?(shows|meeting_classes|class_sections|startlists|starts)/(\d+)")
+
+
+def equipe_ids(urls: list[str]) -> set[str]:
+    """`kind:id` for every Equipe page among the editor's links."""
+    found: set[str] = set()
+    for url in urls or []:
+        m = _EQUIPE_ID.search(url or "")
+        if m:
+            found.add(f"{m.group(1)}:{m.group(2)}")
+    return found
+
+
+def context_lines(urls: list[str]) -> str:
+    """The editor's links, as evidence the search is told to honour."""
+    urls = [u for u in (urls or []) if u and u.strip()]
+    if not urls:
+        return ""
+    lines = "\n".join(f"- {u.strip()}" for u in urls[:10])
+    return (
+        "\nThe editor has said these pages are about this recording:\n"
+        f"{lines}\n"
+        "Treat them as authoritative about WHICH show and class this is. An "
+        "online.equipe.com link names the show or class outright: answer only "
+        "from that show, and from that class where the link names one, even if "
+        "another class at the same show looks a closer match to the evidence "
+        "above. Cite the page you used from among them.\n"
+    )
+
 
 def _client() -> Any:
     from google import genai
@@ -289,7 +323,7 @@ def cites_equipe(sources: list[dict[str, str]]) -> bool:
 
 async def identify_show(
     *, discipline: str, competition: str, venue: str,
-    rides: list[dict], scoreboards: list[str],
+    rides: list[dict], scoreboards: list[str], context_urls: list[str] | None = None,
 ) -> dict[str, Any]:
     """Resolve an equestrian competition day against online.equipe.com. Never raises.
 
@@ -308,8 +342,12 @@ async def identify_show(
     settings = get_settings()
     observed = observed_show_lines(
         competition=competition, venue=venue, rides=rides, scoreboards=scoreboards)
-    if observed.startswith("- Nothing legible"):
+    context = context_lines(context_urls or [])
+    # A link the editor gave is evidence too: with nothing read off the screen
+    # but a class page in hand, there is still exactly one thing to search for.
+    if observed.startswith("- Nothing legible") and not context:
         return {"grounded": False, "reason": "nothing legible to ground on"}
+    observed = observed + context
 
     try:
         response = await _client().aio.models.generate_content(
@@ -331,6 +369,24 @@ async def identify_show(
     sources = extract_sources(response)
     if not fields.get("show") and not fields.get("rides") and not fields.get("startList"):
         return {"grounded": False, "reason": "search did not identify the show"}
+
+    # Fail closed. The whole reason an editor supplies a link is that the
+    # search once settled on the right show and the wrong class, and a record
+    # grounded to the wrong class looks fine — three riders who compete in
+    # several classes still match. If the editor named an Equipe show and none
+    # of the citations are from it, this answer is not the one asked for, and
+    # storing it would reproduce the exact failure the link was meant to fix.
+    wanted = {i for i in equipe_ids(context_urls or []) if i.startswith("shows:")}
+    if wanted:
+        cited = equipe_ids([src.get("uri", "") for src in sources]
+                           + [fields.get("equipeUrl", "")])
+        if not (wanted & cited):
+            return {
+                "grounded": False,
+                "reason": "answer did not come from the show the editor supplied",
+                "sources": sources,
+                "queries": search_queries(response),
+            }
 
     return {
         "grounded": True,

@@ -551,6 +551,7 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         competitions=result.get("competitions", []),
         venues=result.get("venues", []),
         fallback_title=job.get("title", ""),
+        context_urls=job.get("contextUrls") or [],
         discipline=discipline_label,
         discipline_confidence=float(found_discipline.get("confidence", 0.0)),
         not_confirmed=result.get("not_confirmed", []),
@@ -637,6 +638,7 @@ async def _record_game_details(
     fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
     not_confirmed: list[dict] | None = None,
     rides: list[dict] | None = None,
+    context_urls: list[str] | None = None,
     teams_are_constant: bool = True,
 ) -> GameDetails | None:
     """Build and store the match-level record.
@@ -667,6 +669,7 @@ async def _record_game_details(
             found = await grounding.identify_show(
                 discipline=game.discipline, competition=game.competition,
                 venue=game.venue, rides=game.rides, scoreboards=scoreboards,
+                context_urls=context_urls or [],
             )
             source = "equipe" if found.get("from_equipe") else "web"
             grounded_rides, placed = game.rides, {"anchors": 0, "offset_sec": None, "named": 0}
@@ -719,8 +722,15 @@ async def _record_game_details(
             "summary": (judgement.get("summary") or game.summary),
             "grounded": bool(found.get("grounded")),
             "grounding_sources": found.get("sources", []),
+            "grounding_queries": found.get("queries", []),
+            "context_urls": list(context_urls or []),
             **update,
         })
+        if found.get("reason", "").startswith("answer did not come from"):
+            await _emit(job_id, "analysis",
+                        "Grounding was refused: the search answered from a different show "
+                        "than the one the context links name. Nothing from it was stored.",
+                        level="warning")
 
         await mcp_client.call_tool("catalog", "upsert_game", {
             "job_id": job_id,
