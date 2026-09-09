@@ -22,9 +22,16 @@ from google import genai
 from google.genai import types
 
 from sprtz_agents.config import get_settings
-from sprtz_agents.schemas import DetectedMoment, Moment, SegmentAnalysis, SegmentPlan
+from sprtz_agents.schemas import (
+    DetectedMoment,
+    Moment,
+    SegmentAnalysis,
+    SegmentPlan,
+    parse_timecode,
+)
 from sprtz_agents.sports import get_profile
 from sprtz_agents.sports.prompt import build_segment_prompt, build_system_instruction
+from sprtz_agents.tools import rides
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +315,46 @@ async def analyse_segments(
         # record — reported once by one segment and dropped here, it would be
         # indistinguishable from nobody having checked.
         "not_confirmed": _not_confirmed_of(analyses),
+        # Rides, for a sport where the recording is a day of them rather than
+        # one contest. Empty for anything whose segments do not report them.
+        "rides": _rides_of(analyses),
     }
+
+
+def _rides_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> list[dict]:
+    """Per-segment ride sightings, stitched into whole rides.
+
+    Timecodes are relative to the segment file, which is deleted once the
+    analysis has read it, so they are made absolute here — while the plan that
+    knows the offset is still in scope.
+    """
+    fragments: list[dict] = []
+    for plan, analysis in analyses:
+        for seen in getattr(analysis, "rides", []) or []:
+            start = parse_timecode(getattr(seen, "start_tc", "") or "")
+            end = parse_timecode(getattr(seen, "end_tc", "") or "")
+            if start is None or end is None or end <= start:
+                continue
+            # A ride already under way when the window opened, or still going
+            # when it closed, is clamped to the window rather than dropped: the
+            # halves are stitched back together by identity afterwards.
+            start = min(max(start, 0.0), plan.duration_sec)
+            end = min(max(end, 0.0), plan.duration_sec)
+            if end <= start:
+                continue
+            fragments.append({
+                "segment": plan.index,
+                "start_sec": plan.start_sec + start,
+                "end_sec": plan.start_sec + end,
+                "rider": getattr(seen, "rider", "") or "",
+                "horse": getattr(seen, "horse", "") or "",
+                "test_type": getattr(seen, "test_type", "") or "",
+                "scoreboard_text": getattr(seen, "scoreboard_text", "") or "",
+                "judge_marks": list(getattr(seen, "judge_marks", []) or []),
+                "total_pct": getattr(seen, "total_pct", None),
+                "rank": getattr(seen, "rank", None),
+            })
+    return rides.fuse(fragments)
 
 
 def _not_confirmed_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> list[dict]:
