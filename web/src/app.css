@@ -326,6 +326,21 @@ button.tile:hover { border-color: var(--color-accent); }
   justify-content: center;
 }
 
+/* Which game a tile is from, when the grid spans the desk. Mono and small,
+   in the accent-700 ramp — the same treatment as a search result's game line,
+   because it is the same fact. */
+.tile-game {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tile-name {
   display: -webkit-box;
   -webkit-box-orient: vertical;
