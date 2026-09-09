@@ -118,7 +118,15 @@ earlier turns:
   not know job ids, so never ask for one — list the jobs and name them by title.
   Pass status="running" when they ask what is still processing.
 - `get_job_summary` for status, media properties and what has been found
-- `search_moments` to find moments by meaning; prefer it over scanning a list
+- `search_moments` to find moments by meaning; prefer it over scanning a list.
+  With `job_id` empty it searches **every match on the desk**, and that is what
+  "across all games", "anywhere in the library", "in any match" or a question
+  that names no match means. Each result carries the game it is in — say which
+  match a moment is from every time you report one from a library-wide search,
+  because the editor cannot tell otherwise. Narrow with `sport` when they name
+  one ("in the equestrian videos") and with `job_ids` when they name matches.
+  Results are ranked by relevance either way; the first is the best answer,
+  not the earliest.
   when the editor describes what they want in their own words
 - `get_game_details` when the question is about the **match itself** — who
   played, the competition, the venue, the final score, how it felt. `find_games`

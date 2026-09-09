@@ -890,7 +890,8 @@ async def propose_clips(
     }
 
 
-async def search_moments(job_id: str, query: str, limit: int) -> dict:
+async def search_moments(job_id: str, query: str, limit: int,
+                         sport: str = "", job_ids: str = "") -> dict:
     """Find moments by meaning rather than by type.
 
     Embeds the query, retrieves the nearest moments by vector similarity, then
@@ -902,6 +903,10 @@ async def search_moments(job_id: str, query: str, limit: int) -> dict:
         job_id: Job to search within. Pass an empty string to search every job the user owns.
         query: What to look for, in plain language.
         limit: Maximum number of results.
+        sport: With an empty job_id, keep only games of this sport ("handball",
+            "equestrian"). Ignored when job_id is set.
+        job_ids: With an empty job_id, a comma-separated list of job ids to keep.
+            Use it when the editor names which matches to look in.
 
     Returns:
         dict with the matching moments, best first. Each carries rerank_reason
@@ -910,7 +915,8 @@ async def search_moments(job_id: str, query: str, limit: int) -> dict:
     return await mcp_client.call_tool(
         "catalog",
         "knn_search_moments",
-        {"job_id": job_id, "query": query, "limit": limit, "rerank": True},
+        {"job_id": job_id, "query": query, "limit": limit, "rerank": True,
+         "sport": sport, "job_ids": [x.strip() for x in job_ids.split(",") if x.strip()]},
     )
 
 

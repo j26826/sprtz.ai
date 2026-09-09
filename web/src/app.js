@@ -1575,6 +1575,147 @@ function reanalysePanel(j) {
 }
 
 
+/** Distinct sports on the desk. The sport chooser is shown only when there are two. */
+function sportsOnDesk() {
+  return [...new Set(state.games.map((g) => (g.sport || '').toLowerCase()).filter(Boolean))];
+}
+
+
+/**
+ * Where to look, and how narrowly.
+ *
+ * Two scopes: the open match, or every match on the desk. The desk scope can
+ * be narrowed to a sport — offered only when the desk actually has more than
+ * one, because a chooser with one option is a question with one answer — and
+ * to particular matches. Ranking is the same on both paths; only the set of
+ * candidates changes.
+ */
+function searchPanel(msg, index) {
+  const sports = sportsOnDesk();
+  const all = msg.searchMode === 'all';
+  const chip = (attr, value, label, pressed) => `
+    <button class="chip" data-${attr}="${index}:${esc(value)}" aria-pressed="${pressed}">${esc(label)}</button>`;
+  return `
+    <div class="search-panel">
+      <div class="panel-head-title">${esc(t('search.title'))}</div>
+      <div class="search-query">${esc(msg.query || '')}</div>
+      <div class="search-opts">
+        ${chip('search-mode', 'job', t('search.scopeJob'), !all)}
+        ${chip('search-mode', 'all', t('search.scopeAll'), all)}
+      </div>
+      ${all && sports.length > 1 ? `
+        <div class="field-label">${esc(t('search.sport'))}</div>
+        <div class="search-opts">
+          ${chip('search-sport', '', t('search.anySport'), !msg.searchSport)}
+          ${sports.map((sp) => chip('search-sport', sp, sp, msg.searchSport === sp)).join('')}
+        </div>` : ''}
+      ${all && state.games.length > 1 ? `
+        <div class="field-label">${esc(t('search.games'))}</div>
+        <div class="search-opts">
+          ${state.games
+            .filter((g) => !msg.searchSport || (g.sport || '').toLowerCase() === msg.searchSport)
+            .map((g) => chip('search-game', g.jobId || g.id, gameHeadline(g),
+                             (msg.searchJobs || []).includes(g.jobId || g.id))).join('')}
+        </div>` : ''}
+      <div class="ctx-actions">
+        <button class="btn-solid" data-search-run="${index}" ${msg.searching ? 'disabled' : ''}>
+          ${esc(msg.searching ? t('search.running') : t('search.run'))}
+        </button>
+      </div>
+    </div>`;
+}
+
+
+/**
+ * The results: each one names its game, because across the desk a moment
+ * without its match is a sentence without a subject. Rows are drawn from the
+ * response rather than from the open match's listeners, which only hold the
+ * moments of the match that is open.
+ */
+function searchCard(msg, index) {
+  const rows = msg.searchResults;
+  if (rows === null || rows === undefined) return '';
+  if (!rows.length) return emptyCard(t('search.none'));
+  return `
+    <div class="list">
+      <div class="list-head">
+        <div class="panel-head-title">${esc(t('search.results'))}</div>
+        <div class="panel-head-meta"><span class="list-count">${rows.length}</span></div>
+      </div>
+      <div class="panel-light">
+        ${rows.map((r, k) => {
+          const game = r.game || {};
+          const who = [r.rider, r.horse].filter(Boolean).join(' / ');
+          return `
+          <div class="row">
+            <button class="search-result" data-search-open="${index}:${k}">
+              <div class="search-game">${esc(game.title || game.job_id || r.job_id || '')}${
+                game.discipline || game.sport ? ` · ${esc(game.discipline || game.sport)}` : ''}</div>
+              <div class="moment-label">${esc(r.summary || r.label || r.moment_type || '')}</div>
+              <div class="tile-meta">${esc([r.label || r.moment_type, who, clock(r.start_sec || 0),
+                r.rerank_score != null ? `rank ${Number(r.rerank_score).toFixed(2)}` : ''].filter(Boolean).join(' · '))}</div>
+              ${r.rerank_reason ? `<div class="search-why">${esc(r.rerank_reason)}</div>` : ''}
+            </button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+
+async function runSearch(index) {
+  const msg = state.msgs[index];
+  if (!msg || !msg.query) return;
+  msg.searching = true;
+  render();
+  try {
+    const all = msg.searchMode === 'all';
+    if (!all && !state.jobId) throw new Error(t('game.none'));
+    const res = all
+      ? await api('/api/jobs/search', {
+          method: 'POST',
+          body: JSON.stringify({ query: msg.query, limit: 10, rerank: true,
+                                 sport: msg.searchSport || '', job_ids: msg.searchJobs || [] }),
+        })
+      : await api(`/api/jobs/${encodeURIComponent(state.jobId)}/search`, {
+          method: 'POST', body: JSON.stringify({ query: msg.query, limit: 10, rerank: true }),
+        });
+    msg.searchResults = res.moments || res.results || [];
+  } catch (err) {
+    msg.searchResults = [];
+    say(`${t('search.title')}: ${err.message || err}`);
+  } finally {
+    msg.searching = false;
+    render();
+  }
+}
+
+
+/**
+ * Open a result. The row already holds the record, so the popup is drawn from
+ * it directly — selecting the match first is for the player, whose listeners
+ * only exist for the open job.
+ */
+function openSearchResult(index, k) {
+  const row = state.msgs[index]?.searchResults?.[k];
+  if (!row) return;
+  if (row.job_id && row.job_id !== state.jobId) selectJob(row.job_id);
+  const m = Object.fromEntries(Object.entries(row).map(([key, v]) =>
+    [key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), v]));
+  const rows = DETAIL_ROWS.map(([key, read]) => [t(key), read(m)])
+    .filter(([, value]) => value !== '' && value != null);
+  $('details-title').textContent = m.summary || m.label || t('moment.details');
+  $('details-body').innerHTML = rows.map(([label, value]) => `
+    <div class="detail-key">${esc(label)}</div>
+    <div class="detail-value">${esc(String(value))}</div>`).join('');
+  $('details-player').innerHTML = playerMarkup(m);
+  state.details = m.momentId;
+  state.playing = m.momentId;
+  showDetailsModal(true);
+  mountPlayer();
+}
+
+
 function jobsCard(msg, index) {
   if (!state.jobs.length) return emptyCard(t('jobs.none'));
   const view = pageOf(state.jobs, msg.page);
@@ -1720,6 +1861,7 @@ function render() {
     <div class="msg ${agent ? `msg-agent card${fresh ? ' fade-in' : ''}` : 'msg-user'}">
       <div class="msg-label">${agent ? 'Agent' : 'You'}</div>
       ${cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
+      ${m.showSearch ? searchPanel(m, i) + searchCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showIngest ? ingestCard() : ''}
       ${m.showReel ? reelCard(m, i) : ''}
@@ -2021,7 +2163,16 @@ function attachCards(index, question) {
   // once it has been chosen.
   const card = chooseCard(question);
 
-  if (card === 'activity') {
+  if (card === 'search') {
+    // The route only fires on scope words, so the panel opens set to the
+    // whole desk; the editor can pull it back to the open match.
+    msg.showSearch = true;
+    msg.query = question;
+    msg.searchMode = 'all';
+    msg.searchSport = '';
+    msg.searchJobs = [];
+    msg.searchResults = null;
+  } else if (card === 'activity') {
     msg.showActivity = true;
   } else if (card === 'games') {
     msg.showGames = true;
@@ -2314,7 +2465,8 @@ document.addEventListener('click', (event) => {
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
     + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
     + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs],'
-    + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel]');
+    + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel],'
+    + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -2400,6 +2552,29 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.deleteSession) { deleteSession(hit.dataset.deleteSession); return; }
   if (hit.dataset.session) {
     if (hit.dataset.session !== state.sessionKey) openSession(hit.dataset.session);
+    return;
+  }
+  if ('searchMode' in hit.dataset || 'searchSport' in hit.dataset || 'searchGame' in hit.dataset) {
+    const raw = hit.dataset.searchMode ?? hit.dataset.searchSport ?? hit.dataset.searchGame;
+    const sep = raw.indexOf(':');
+    const msg = state.msgs[Number(raw.slice(0, sep))];
+    const value = raw.slice(sep + 1);
+    if (msg) {
+      if ('searchMode' in hit.dataset) msg.searchMode = value;
+      else if ('searchSport' in hit.dataset) { msg.searchSport = value; msg.searchJobs = []; }
+      else {
+        const list = msg.searchJobs || [];
+        msg.searchJobs = list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
+      }
+      msg.searchResults = null;
+    }
+    render();
+    return;
+  }
+  if (hit.dataset.searchRun) { runSearch(Number(hit.dataset.searchRun)); return; }
+  if (hit.dataset.searchOpen) {
+    const [i, k] = hit.dataset.searchOpen.split(':').map(Number);
+    openSearchResult(i, k);
     return;
   }
   if (hit.dataset.reanalyse) {

@@ -101,3 +101,26 @@ describe('asking for the records, not the index', () => {
     assert.equal(wantsDetail('which games do we have'), false);
   });
 });
+
+
+describe('a search for plays across the desk', () => {
+  // Scope words are what separate "find the double save" — the open match —
+  // from "find the double save across all games", which is every match on
+  // the desk with each result naming its game.
+  routes({
+    'find every double save across all games': 'search',
+    'is there a buck anywhere in the library': 'search',
+    'search the equestrian videos for a pat': 'search',
+    'which match has the best fast break': 'search',
+    'show me pirouettes in any match': 'search',
+    'look for tack failures across all the recordings': 'search',
+    // The same questions without scope words stay on the open match.
+    'find the double save': 'moments',
+    'show me pirouettes': 'moments',
+    // And a list of games is still a list of games, not a search.
+    'show all games': 'games',
+    'list all the matches': 'games',
+    // Getting a recording in is still ingest even with "all" in it.
+    'upload all the games from yesterday': 'ingest',
+  });
+});
