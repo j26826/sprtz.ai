@@ -1322,6 +1322,48 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   overflow: hidden;
 }
 
+/* ── Context links: at upload, and on analyse-again ────────────────────── */
+
+.ingest-context { margin-top: var(--space-4); }
+.ctx-textarea {
+  width: 100%;
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* The panel sits at the top of the job it belongs to, framed like a card
+   inside the card, because it is a mode the job is in rather than a row. */
+.reanalyse {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-neutral-200);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-md);
+}
+.reanalyse .field-label { margin-top: var(--space-3); display: block; }
+
+.ctx-list { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-1); }
+.ctx-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+/* URLs are the model's and the editor's alike: mono, and truncated rather
+   than wrapped, because the host and the id are what identify a page. */
+.ctx-link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.ctx-input { flex: 1; font-family: var(--font-mono); font-size: 11.5px; }
+.ctx-input.input-bad { border-color: var(--color-accent-2); }
+.ctx-muted { font-size: 11px; color: var(--color-neutral-600); font-family: var(--font-mono); }
+.ctx-actions { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-4); }
+
 /* ── Rides, inside the game popup ─────────────────────────────────────── */
 
 /* The detail grid is key/value; a table of rides needs the whole width, so

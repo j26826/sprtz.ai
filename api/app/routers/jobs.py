@@ -12,7 +12,7 @@ import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from google.auth.transport import requests as google_requests
 from google.cloud import storage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.core import cdn, clients
@@ -26,6 +26,31 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 _ALLOWED_CONTENT_TYPES = {
     "video/mp4", "video/quicktime", "video/x-matroska", "video/webm", "video/x-msvideo",
 }
+
+
+# Pages the editor knows are about this recording — the Equipe show or class,
+# a federation results page, a start list. Handed to grounding as evidence, so
+# a search that would otherwise settle on the right show and the wrong class
+# is told which class. Bounded because each one is quoted into a prompt.
+_MAX_CONTEXT_URLS = 10
+_MAX_CONTEXT_URL_LEN = 500
+
+
+def _clean_context_urls(urls: list[str]) -> list[str]:
+    seen: list[str] = []
+    for raw in urls or []:
+        url = (raw or "").strip()
+        if not url:
+            continue
+        if not re.match(r"^https?://[^\s]+$", url):
+            raise ValueError(f"Not an http(s) URL: {url[:80]!r}")
+        if len(url) > _MAX_CONTEXT_URL_LEN:
+            raise ValueError("A context URL is too long.")
+        if url not in seen:
+            seen.append(url)
+    if len(seen) > _MAX_CONTEXT_URLS:
+        raise ValueError(f"At most {_MAX_CONTEXT_URLS} context URLs.")
+    return seen
 
 
 class UploadRequest(BaseModel):
@@ -56,6 +81,12 @@ class CreateJobRequest(BaseModel):
     # only ever different when picking up an orphan somebody else left: the
     # path was written with their uid and the bytes are still there under it.
     uploaded_by: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
+    context_urls: list[str] = Field(default_factory=list)
+
+    @field_validator("context_urls")
+    @classmethod
+    def _context_urls(cls, v: list[str]) -> list[str]:
+        return _clean_context_urls(v)
 
 
 def _storage_client() -> storage.Client:
@@ -175,6 +206,7 @@ async def create_job(
             "size_bytes": body.size_bytes,
             "content_type": body.content_type,
             "metadata_language": body.metadata_language,
+            "context_urls": body.context_urls,
         },
     )
     if result.get("status") == "error":
@@ -194,6 +226,12 @@ class RegisterSourceRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     sport: str = Field(default="handball")
     metadata_language: str = Field(default="en", max_length=8)
+    context_urls: list[str] = Field(default_factory=list)
+
+    @field_validator("context_urls")
+    @classmethod
+    def _context_urls(cls, v: list[str]) -> list[str]:
+        return _clean_context_urls(v)
 
 
 @router.post("/from-source", status_code=status.HTTP_201_CREATED)
@@ -277,6 +315,7 @@ async def create_job_from_source(
             "size_bytes": size_bytes,
             "content_type": blob.content_type or "",
             "metadata_language": body.metadata_language,
+            "context_urls": body.context_urls,
         },
     )
     if result.get("status") == "error":
@@ -351,6 +390,32 @@ async def _load_job(job_id: str, user: CallerIdentity) -> dict:
     if job.get("status") == "error":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No job {job_id}.")
     return job
+
+
+class ContextRequest(BaseModel):
+    context_urls: list[str] = Field(default_factory=list)
+
+    @field_validator("context_urls")
+    @classmethod
+    def _context_urls(cls, v: list[str]) -> list[str]:
+        return _clean_context_urls(v)
+
+
+@router.patch("/{job_id}/context")
+async def update_context(
+    job_id: str, body: ContextRequest, user: CallerIdentity = Depends(current_user),
+):
+    """Replace the job's context links, ahead of analysing it again.
+
+    The browser cannot write job documents — Firestore rules deny it — so this
+    is the one door. The whole list is replaced rather than merged, because the
+    editor is looking at the whole list when they save it.
+    """
+    result = await clients.call_mcp(
+        "catalog", "update_job_context", {"job_id": job_id, "context_urls": body.context_urls})
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+    return result
 
 
 @router.get("/{job_id}")

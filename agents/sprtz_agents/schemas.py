@@ -571,6 +571,12 @@ class GameDetails(BaseModel):
     # could not be placed, which is a real outcome rather than a gap.
     schedule_anchors: int = 0
     schedule_offset_sec: float | None = None
+    # What the search was told and what it asked. The links are the editor's;
+    # the queries are the model's. Together they are the only way to see why a
+    # record grounded where it did — the wrong-class case was invisible without
+    # them, because every field it filled looked plausible.
+    context_urls: list[str] = Field(default_factory=list)
+    grounding_queries: list[str] = Field(default_factory=list)
     home_team: str = Field(default="", description="As printed on the score bug.")
     away_team: str = Field(default="", description="As printed on the score bug.")
     competition: str = Field(default="", description="League or competition, if named on screen.")

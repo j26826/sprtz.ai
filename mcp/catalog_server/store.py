@@ -310,6 +310,11 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict
         "startList": game.get("start_list", []),
         "scheduleAnchors": game.get("schedule_anchors", 0),
         "scheduleOffsetSec": game.get("schedule_offset_sec"),
+        # What the search was told and what it asked. Stored so an editor can
+        # see why a record grounded where it did — the wrong-class case was
+        # invisible without them.
+        "contextUrls": game.get("context_urls", []),
+        "groundingQueries": game.get("grounding_queries", []),
         "homeTeam": game.get("home_team", ""),
         "awayTeam": game.get("away_team", ""),
         "competition": game.get("competition", ""),
@@ -471,6 +476,12 @@ def job_ref(job_id: str):
     return db().collection("jobs").document(job_id)
 
 
+def update_job_context(job_id: str, context_urls: list[str]) -> dict[str, Any]:
+    """Replace the job's context links. The whole list, not a merge."""
+    job_ref(job_id).update({"contextUrls": list(context_urls or []), "updatedAt": now()})
+    return {"job_id": job_id, "context_urls": list(context_urls or [])}
+
+
 def get_job(job_id: str) -> dict[str, Any]:
     snapshot = job_ref(job_id).get()
     if not snapshot.exists:
@@ -545,7 +556,8 @@ def _job_summary(job_id: str, doc: dict[str, Any]) -> dict[str, Any]:
 
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
                original_name: str, size_bytes: int, content_type: str = "",
-               metadata_language: str = "en") -> dict[str, Any]:
+               metadata_language: str = "en",
+               context_urls: list[str] | None = None) -> dict[str, Any]:
     payload = {
         "ownerUid": owner_uid,
         "title": title,
@@ -553,6 +565,10 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         # What the analysis writes its prose in. Stored on the job so re-reading
         # it years later still says which language its descriptions are in.
         "metadataLanguage": metadata_language or "en",
+        # Pages the editor says are about this recording. Evidence for
+        # grounding, not a fetch target: the Equipe pages it will usually name
+        # are JavaScript shells, and what they steer is the search.
+        "contextUrls": list(context_urls or []),
         "status": "uploaded",
         "stage": "ingest",
         "progress": 0,
