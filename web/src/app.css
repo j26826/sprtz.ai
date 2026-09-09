@@ -1322,6 +1322,83 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   overflow: hidden;
 }
 
+/* ── Rides, inside the game popup ─────────────────────────────────────── */
+
+/* The detail grid is key/value; a table of rides needs the whole width, so
+   its header and body each span both columns. */
+.rides-section { grid-column: 1 / -1; }
+
+/* Numbers in mono, names in the sans: the marks, the placings and the
+   timecodes are the model's readings — what the mono face is for — and the
+   people are people. Tabular figures keep a column of percentages aligned. */
+.rides {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content minmax(0, 1.2fr);
+  column-gap: var(--space-4);
+  padding: 0 14px var(--space-3);
+  font-size: 12px;
+}
+.ride { display: contents; }
+.ride > span {
+  padding: 7px 0;
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+  min-width: 0;
+  align-self: center;
+}
+.ride:last-child > span { border-bottom: 0; }
+
+.ride-head > span {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+
+.ride-num, .ride-total, .ride-place {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ride-num { color: var(--color-neutral-600); }
+.ride-rider { display: block; font-weight: 700; line-height: 1.25; }
+.ride-horse {
+  display: block;
+  font-size: 10.5px;
+  color: var(--color-neutral-700);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.ride-test { font-size: 11px; color: var(--color-neutral-700); }
+
+/* Where a total came from, when it was not the screen. */
+.ride-tag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  border-radius: var(--radius-sm);
+  border: var(--rule-hair) solid var(--color-rule);
+  color: var(--color-neutral-700);
+  vertical-align: 1px;
+}
+/* A published figure beside a displayed one, never in its place. */
+.ride-published {
+  display: block;
+  font-size: 10px;
+  color: var(--color-neutral-600);
+}
+
+/* Failure is not the accent. A total that failed its own check is a warning
+   and takes the accent-2 ramp, which reads as an error in both themes rather
+   than as a highlight; a confirmation is quiet. */
+.ride-check { font-size: 10.5px; line-height: 1.35; color: var(--color-neutral-700); }
+.ride-check[data-tone="failed"] { color: var(--color-accent-2); font-weight: 700; }
+.ride-check[data-tone="confirmed"] { color: var(--color-neutral-800); }
+
+.not-confirmed { line-height: 1.45; }
+.not-confirmed + .not-confirmed { margin-top: var(--space-2); }
+
 /* The popup's two columns share the card's corners rather than having their
    own, so the player rounds on the left only. */
 .detail-player { border-radius: var(--radius-lg) 0 0 var(--radius-lg); }

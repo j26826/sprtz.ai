@@ -1307,6 +1307,80 @@ function gameCard() {
 }
 
 
+/**
+ * What a ride's score check means, for display.
+ *
+ * The check string is written by the pipeline for people, and the three states
+ * it can be in want three different treatments: a mismatch is a warning, a
+ * confirmation is quiet reassurance, and plain "ok" needs nothing said.
+ */
+function rideCheck(ride) {
+  const text = String(ride.score_check || '');
+  if (/^mismatch|disagrees/.test(text)) return { text, tone: 'failed' };
+  if (/^ok, confirmed/.test(text)) return { text, tone: 'confirmed' };
+  return { text: '', tone: '' };
+}
+
+
+/**
+ * The day's rounds, in running order, inside the game popup.
+ *
+ * A competition day is a list of rides before it is anything else, so this is
+ * the table an editor scans — who rode, when, what they scored, whether the
+ * number can be trusted. A published total sits in its own column beside the
+ * displayed one rather than replacing it; a total that failed its own check is
+ * flagged rather than hidden, because a wrong number that is invisible is
+ * worse than one that is marked.
+ */
+function ridesTable(g) {
+  const rides = Array.isArray(g.rides) ? g.rides : [];
+  if (!rides.length) return '';
+  return `
+    <div class="detail-key rides-section">${esc(t('game.rides'))} · ${rides.length}</div>
+    <div class="rides-section rides">
+      <div class="ride ride-head">
+        <span>#</span><span>${esc(t('ride.rider'))} / ${esc(t('ride.horse'))}</span>
+        <span>${esc(t('ride.test'))}</span><span>${esc(t('ride.total'))}</span>
+        <span>${esc(t('ride.place'))}</span><span>${esc(t('ride.check'))}</span>
+      </div>
+      ${rides.map((r) => {
+        const check = rideCheck(r);
+        const test = r.test_type ? t(`ride.${r.test_type}`) : '';
+        const total = r.total_pct == null ? '' : Number(r.total_pct).toFixed(3);
+        const published = r.grounded_total_pct == null ? '' : Number(r.grounded_total_pct).toFixed(3);
+        // The published spelling qualifies the on-screen one; it never replaces it.
+        const who = [r.grounded_rider, r.grounded_horse].filter(Boolean).join(' / ');
+        return `
+        <div class="ride">
+          <span class="ride-num">${esc(String(r.order ?? ''))}</span>
+          <span class="ride-who" ${who ? `title="${esc(who)}"` : ''}>
+            <span class="ride-rider">${esc(r.rider || '—')}</span>
+            <span class="ride-horse">${esc(r.horse || '')} · ${clock(r.start_sec || 0)}</span>
+          </span>
+          <span class="ride-test">${esc(test)}</span>
+          <span class="ride-total">${esc(total)}${r.score_source && r.score_source !== 'observed'
+            ? `<span class="ride-tag">${esc(r.score_source)}</span>` : ''}${
+            published && published !== total ? `<span class="ride-published">${esc(published)}</span>` : ''}</span>
+          <span class="ride-place">${esc(r.final_place == null ? '' : String(r.final_place))}</span>
+          <span class="ride-check" data-tone="${check.tone}">${esc(check.text)}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+
+/** What the analysis looked for and did not find. An absence is a finding. */
+function notConfirmedBlock(g) {
+  const items = Array.isArray(g.notConfirmed) ? g.notConfirmed : [];
+  if (!items.length) return '';
+  return `
+    <div class="detail-key">${esc(t('game.notConfirmed'))}</div>
+    <div class="detail-value">${items.map((n) => `
+      <div class="not-confirmed"><b>${esc(n.momentType || '')}</b>${
+        (n.notes || []).length ? ` — ${esc((n.notes || []).join(' '))}` : ''}</div>`).join('')}</div>`;
+}
+
+
 function openGameDetails(game) {
   const g = game || state.game;
   if (!g) return;
@@ -1327,7 +1401,8 @@ function openGameDetails(game) {
   $('details-title').textContent = gameHeadline(g);
   $('details-body').innerHTML = rows.map(([label, value]) => `
     <div class="detail-key">${esc(label)}</div>
-    <div class="detail-value">${esc(String(value))}</div>`).join('') + sources;
+    <div class="detail-value">${esc(String(value))}</div>`).join('')
+    + ridesTable(g) + notConfirmedBlock(g) + sources;
 
   // The two share one dialog, so a game opened after a moment would otherwise
   // inherit that moment's video — playing, beside a record it has nothing to
