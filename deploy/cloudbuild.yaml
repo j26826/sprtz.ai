@@ -37,6 +37,85 @@ timeout: 3600s
 
 steps:
 
+  # ---------- Serialise --------------------------------------------------------
+  # Wait for any older build on this trigger to finish before this one deploys.
+  #
+  # Two builds at once is not hypothetical: merging twice inside the pipeline's
+  # own runtime does it, and it has happened. Three things are then shared, and
+  # only one of them is protected. Terraform's GCS backend takes a state lock,
+  # so the applies cannot interleave. Nothing locks the Cloud Run images or the
+  # Agent Runtime engine.
+  #
+  # The engine is the loud failure: update() is refused outright while the
+  # engine is UPDATING, so the second build dies with FAILED_PRECONDITION having
+  # deployed nothing wrong.
+  #
+  # The images are the quiet one, and the reason this step exists. Terraform
+  # applies image_tag=$SHORT_SHA, and a state lock guarantees mutual exclusion,
+  # not order. Whichever build applies *last* decides what is served — so an
+  # older build finishing second rolls production back to the older commit while
+  # main says otherwise, with a green build and nothing anywhere to say so. It
+  # missed by about four minutes the first time.
+  #
+  # Waiting for older builds fixes both, and fixes them in the right direction:
+  # the older one applies first and the newest commit is always the one left
+  # serving.
+  #
+  # Only WORKING blocks. A build PENDING manual approval is not running and may
+  # never run, and waiting on one would hang every later build behind a decision
+  # nobody has made.
+
+  - id: serialise
+    name: gcr.io/cloud-builders/gcloud
+    waitFor: ["-"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -eu
+
+        # gcloud writes "filter keys were not present in any resource" to stderr
+        # when nothing matches. Merged into stdout it reads as a build id, and
+        # the loop below would never end. Every call here discards stderr.
+        MINE=$$(gcloud builds describe "$BUILD_ID" --region="$LOCATION" \
+                  --format='value(createTime)' 2>/dev/null || true)
+        TRIG=$$(gcloud builds describe "$BUILD_ID" --region="$LOCATION" \
+                  --format='value(buildTriggerId)' 2>/dev/null || true)
+
+        # Fail open. If this build cannot read its own record the gate cannot
+        # tell whether anything is ahead of it, and blocking the pipeline on a
+        # question it cannot answer is worse than the race it is guarding.
+        if [ -z "$$MINE" ] || [ -z "$$TRIG" ]; then
+          echo "cannot read this build's own record; not gating"
+          exit 0
+        fi
+
+        # Bounded well inside the hour this build is allowed, and it costs no
+        # wall-clock in the normal case: this runs while the images build.
+        DEADLINE=$$(( $$(date +%s) + 1500 ))
+
+        # Built in one piece: a backslash continuation inside the quotes would
+        # fold the next line's indentation into the filter itself.
+        FILTER="buildTriggerId=$$TRIG AND status=WORKING AND createTime<$$MINE"
+
+        while :; do
+          OLDER=$$(gcloud builds list --region="$LOCATION" --ongoing \
+                     --filter="$$FILTER" --format='value(id)' 2>/dev/null || true)
+          [ -z "$$OLDER" ] && break
+
+          if [ "$$(date +%s)" -ge "$$DEADLINE" ]; then
+            echo "gave up after 25 minutes. Still running:"
+            echo "$$OLDER" | sed 's/^/  /'
+            echo "Failing rather than racing them. Re-run once they finish."
+            exit 1
+          fi
+          echo "waiting for older build(s):"
+          echo "$$OLDER" | sed 's/^/  /'
+          sleep 20
+        done
+
+        echo "nothing older in flight; clear to deploy"
+
   # ---------- Preflight --------------------------------------------------------
   # Region support is checked before Terraform creates anything, because
   # Firestore's location is immutable and Vertex is not in every region.
@@ -210,7 +289,7 @@ steps:
 
   - id: terraform-apply
     name: hashicorp/terraform:1.9
-    waitFor: ["push-images", "preflight", "agent-tests", "api-tests"]
+    waitFor: ["push-images", "preflight", "agent-tests", "api-tests", "serialise"]
     entrypoint: sh
     args:
       - -c
