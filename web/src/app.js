@@ -763,8 +763,13 @@ function momentsHead(view, index, inReel) {
  * gone against a bright floor. The star is the exception, and only because a
  * filled amber disc carries its own contrast wherever it lands.
  */
-function momentTile(m) {
-  const clip = state.clips.find((c) => c.momentId === m.momentId);
+function momentTile(m, opts = {}) {
+  // A moment from another game cannot be played or added through the open
+  // match's listeners, which do not hold it. opts.open routes the thumbnail
+  // and Details through the row payload instead, opts.add selects that game
+  // first, and opts.game puts the match on the tile — across the desk a
+  // moment without its match is a sentence without a subject.
+  const clip = opts.open ? null : state.clips.find((c) => c.momentId === m.momentId);
   const meta = [
     // H.No and rider first: on a competition day that is what a tile is
     // scanned for. A schedule-inferred name is marked with a tilde.
@@ -776,20 +781,25 @@ function momentTile(m) {
 
   return `
     <div class="tile">
-      <button class="thumb" data-play="${esc(m.momentId)}" title="${esc(t('moment.play'))}"
-              ${m.thumbUri && !state.thumbs.urls[m.momentId] ? `data-thumb="${esc(m.momentId)}"` : ''}>
+      <button class="thumb" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-play="${esc(m.momentId)}"`}
+              title="${esc(t('moment.play'))}"
+              ${m.thumbUri && !state.thumbs.urls[m.momentId]
+                ? `data-thumb="${esc(m.momentId)}"${m.jobId && m.jobId !== state.jobId ? ` data-thumb-job="${esc(m.jobId)}"` : ''}`
+                : ''}>
         ${state.thumbs.urls[m.momentId]
           ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
           : '<span class="thumb-stripes"></span>'}
         ${clip ? `<span class="tile-star" title="${esc(t('moment.inReel'))}">${STAR}</span>` : ''}
         <span class="thumb-clock">${clock(m.startSec)}</span>
       </button>
+      ${opts.game ? `<div class="tile-game">${esc(opts.game.title || m.jobId || '')}${
+        opts.game.discipline || opts.game.sport ? ` · ${esc(opts.game.discipline || opts.game.sport)}` : ''}</div>` : ''}
       <div class="tile-name">${esc(m.summary || m.label || m.momentType)}</div>
       <div class="tile-meta">${esc(meta)}</div>
       ${m.rerankReason ? `<div class="tile-why">${esc(m.rerankReason)}</div>` : ''}
       <div class="tile-actions">
-        <button class="link-btn" data-details="${esc(m.momentId)}">${esc(t('moment.details'))}</button>
-        ${clip
+        <button class="link-btn" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-details="${esc(m.momentId)}"`}>${esc(t('moment.details'))}</button>
+        ${opts.add ? `<button class="btn-outline" data-desk-add="${esc(opts.add)}">${esc(t('moment.add'))}</button>` : clip
           ? `<button class="btn-outline" data-remove-clip="${esc(m.momentId)}">${esc(t('moment.remove'))}</button>`
           : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
       </div>
@@ -1674,6 +1684,7 @@ function deskMomentsCard(msg, index) {
   if (msg.deskLoading) {
     return `<div class="list"><div class="ctx-muted">${esc(t('desk.loading'))}</div></div>`;
   }
+  const rows = Array.isArray(msg.searchResults) ? msg.searchResults : [];
   const running = Array.isArray(msg.running) ? msg.running : [];
   const note = running.length
     ? `<div class="desk-running">${running.map((id) => {
@@ -1682,7 +1693,23 @@ function deskMomentsCard(msg, index) {
         return esc(g ? (g.title || gameHeadline(g)) : id);
       }).join(', ')} — ${esc(t('desk.running'))}</div>`
     : '';
-  return searchCard(msg, index, t('desk.title')) + note;
+  if (!rows.length) return emptyCard(t('search.none')) + note;
+
+  // The same tiles as the open match's key moments, with the game on each.
+  // Rows arrive snake_case from the store; the tile reads the camelCase the
+  // listeners produce, so they are mapped once here rather than in the tile.
+  const camel = (row) => Object.fromEntries(Object.entries(row).map(([k, v]) =>
+    [k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), v]));
+  return `
+    <div class="list">
+      <div class="list-head">
+        <div class="panel-head-title">${esc(t('desk.title'))}</div>
+        <div class="panel-head-meta"><span class="list-count">${rows.length}</span></div>
+      </div>
+      <div class="tile-row">${rows.map((row, k) =>
+        momentTile(camel(row), { game: row.game || {}, open: `${index}:${k}`, add: `${index}:${k}` })).join('')}</div>
+      ${note}
+    </div>`;
 }
 
 
@@ -1948,29 +1975,42 @@ function render() {
  * chase each other, and a failure would retry for ever.
  */
 async function loadThumbs() {
-  const jobId = state.jobId;
-  if (!jobId || !state.user) return;
+  if (!state.user) return;
 
-  const wanted = [...document.querySelectorAll('[data-thumb]')]
-    .map((el) => el.dataset.thumb)
-    .filter((id) => id && !state.thumbs.asked.has(id))
-    .slice(0, 50);
-  if (!wanted.length) return;
-
-  wanted.forEach((id) => state.thumbs.asked.add(id));
-  try {
-    const res = await api(`/api/jobs/${jobId}/thumbnails`, {
-      method: 'POST',
-      body: JSON.stringify({ moment_ids: wanted }),
-    });
-    if (state.jobId !== jobId) return;   // the editor opened another match meanwhile
-    Object.assign(state.thumbs.urls, res.thumbnails || {});
-    render();
-  } catch (err) {
-    // A still that will not sign is a placeholder, which is what the row showed
-    // before any of this existed. It is not worth an error in the transcript.
-    console.warn('could not sign moment thumbnails', err);
+  // Stills are signed by path — jobs/<job>/moments/<id>.png — so every id has
+  // to go to the route of the job it belongs to. A tile says which with
+  // data-thumb-job; one that does not is the open match's. Grouping is what
+  // lets a card of moments from several games get its pictures at all.
+  const groups = new Map();
+  for (const el of document.querySelectorAll('[data-thumb]')) {
+    const id = el.dataset.thumb;
+    const jobId = el.dataset.thumbJob || state.jobId;
+    if (!id || !jobId || state.thumbs.asked.has(id)) continue;
+    if (!groups.has(jobId)) groups.set(jobId, []);
+    if (groups.get(jobId).length < 50) groups.get(jobId).push(id);
   }
+  if (!groups.size) return;
+
+  for (const ids of groups.values()) ids.forEach((id) => state.thumbs.asked.add(id));
+  let got = false;
+  await Promise.all([...groups].map(async ([jobId, ids]) => {
+    try {
+      const res = await api(`/api/jobs/${encodeURIComponent(jobId)}/thumbnails`, {
+        method: 'POST',
+        body: JSON.stringify({ moment_ids: ids }),
+      });
+      // Moment ids are unique across the desk, so a response for any job can
+      // be merged whatever match is open now. selectJob resets this cache, so
+      // a response that lands after a switch simply fills a fresh map.
+      Object.assign(state.thumbs.urls, res.thumbnails || {});
+      got = true;
+    } catch (err) {
+      // A still that will not sign is a placeholder, which is what the row
+      // showed before any of this existed. Not worth an error in the transcript.
+      console.warn('could not sign moment thumbnails', err);
+    }
+  }));
+  if (got) render();
 }
 
 /* ───────────────────────────────────────────────── inline playback ── */
@@ -2520,7 +2560,8 @@ document.addEventListener('click', (event) => {
     + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
     + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs],'
     + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel],'
-    + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open]');
+    + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
+    + '[data-desk-add]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -2623,6 +2664,17 @@ document.addEventListener('click', (event) => {
       msg.searchResults = null;
     }
     render();
+    return;
+  }
+  if (hit.dataset.deskAdd) {
+    // The reel is the open match's, so a moment from another game is added
+    // by opening that game first; the agent then reads the same job the
+    // moment belongs to.
+    const [i, k] = hit.dataset.deskAdd.split(':').map(Number);
+    const row = state.msgs[i]?.searchResults?.[k];
+    if (!row) return;
+    if (row.job_id && row.job_id !== state.jobId) selectJob(row.job_id);
+    ask(`Add the ${row.label || 'moment'} at ${clock(row.start_sec || 0)} to the reel.`);
     return;
   }
   if (hit.dataset.searchRun) { runSearch(Number(hit.dataset.searchRun)); return; }
