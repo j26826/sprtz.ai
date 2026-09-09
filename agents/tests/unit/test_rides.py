@@ -7,7 +7,12 @@ exist mostly to prove the same answers come out without one.
 import pytest
 
 from sprtz_agents.tools.rides import (
-    canonical_identity, check_total, fuse, high_scoring, match_watchlist, normalise_name,
+    canonical_identity,
+    check_total,
+    fuse,
+    high_scoring,
+    match_watchlist,
+    normalise_name,
 )
 
 
@@ -148,6 +153,7 @@ class TestItIsActuallyWired:
 
     def test_the_fusion_runs_inside_the_analysis_merge(self):
         import inspect
+
         from sprtz_agents.tools import analysis
         assert "_rides_of" in inspect.getsource(analysis.merge_segment_results) or \
             "_rides_of" in inspect.getsource(analysis), "fusion has no call site"

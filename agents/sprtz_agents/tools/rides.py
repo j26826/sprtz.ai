@@ -230,3 +230,78 @@ def match_watchlist(rides: list[dict], watchlist: list[str]) -> list[dict]:
         ):
             hits.append(ride)
     return hits
+
+
+# --- Grounding ----------------------------------------------------------------
+
+# A published total and a displayed one are both rounded to three places, so
+# they should agree to the last digit. Anything wider than a rounding wobble is
+# one of them being wrong, and the record has to say which it believes.
+_GROUND_TOLERANCE = 0.05
+
+
+def apply_grounding(rides: list[dict], published: list[dict], *, source: str) -> list[dict]:
+    """Attach published results to the rides they belong to.
+
+    Matched by name on both halves of the combination, because a rider with two
+    horses in the same class is ordinary and a horse with two riders is not
+    unheard of. Nothing observed is ever overwritten: a published value lands in
+    its own field beside the one read off the screen, so anyone can see what
+    the camera showed and what the search suggested. Where both exist and
+    disagree, the disagreement is recorded rather than resolved — that is a
+    finding, and it is the reason to keep both.
+
+    A ride that had no displayed total takes the published one as its total,
+    labelled by source. Filling an empty field is not overwriting one, and a
+    round that was ridden but whose graphic was never on screen still scored
+    something.
+    """
+    out = []
+    for ride in rides:
+        ride = dict(ride)
+        rider = normalise_name(ride.get("rider", ""))
+        horse = normalise_name(ride.get("horse", ""))
+        hit = None
+        for row in published:
+            pr = normalise_name(row.get("rider", ""))
+            ph = normalise_name(row.get("horse", ""))
+            if not (pr or ph):
+                continue
+            horse_match = bool(horse and ph) and _similar(horse, ph) >= _SAME_COMBINATION
+            rider_match = bool(rider and pr) and _similar(rider, pr) >= _SAME_COMBINATION
+            # The horse decides. A horse goes once per class under one rider,
+            # so its name is as good as a start number — and lower thirds
+            # abbreviate riders ("A-M Bork Eppers") in ways a published results
+            # page never does, so a rider comparison fails on real data the
+            # horse comparison passes. The rider alone still matches when the
+            # horse was never read, provided the published horse does not
+            # contradict one that was.
+            if horse_match or (rider_match and not (horse and ph)):
+                hit = row
+                break
+        if hit is None:
+            out.append(ride)
+            continue
+
+        ride["grounded_rider"] = (hit.get("rider") or "").strip()
+        ride["grounded_horse"] = (hit.get("horse") or "").strip()
+        place = hit.get("finalPlace", hit.get("final_place"))
+        ride["final_place"] = int(place) if isinstance(place, (int, float)) and place else None
+        total = hit.get("totalPct", hit.get("total_pct"))
+        grounded_total = float(total) if isinstance(total, (int, float)) else None
+        ride["grounded_total_pct"] = grounded_total
+        ride["grounded_source"] = source
+
+        if grounded_total is not None:
+            if ride.get("total_pct") is None:
+                ride["total_pct"] = grounded_total
+                ride["score_source"] = source
+            elif abs(float(ride["total_pct"]) - grounded_total) > _GROUND_TOLERANCE:
+                ride["score_check"] = (
+                    f"{source} disagrees: shown {float(ride['total_pct']):.3f}, "
+                    f"published {grounded_total:.3f}"
+                )
+            elif not ride.get("score_check") or ride.get("score_check") == "ok":
+                ride["score_check"] = f"ok, confirmed by {source}"
+        out.append(ride)
+    return out
