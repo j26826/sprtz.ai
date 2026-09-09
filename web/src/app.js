@@ -711,22 +711,83 @@ function filterTitle(view, index, fallback) {
 }
 
 
-/** The games list's head. No sort toggle: a desk of matches has one order. */
-function filterHead(view, index) {
-  if (!view.narrowed && !view.missed) return '';
-  return `<div class="panel-head">${filterTitle(view, index, '')}</div>`;
+
+/* A star, for a moment that is already in the reel. */
+const STAR = '<svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+  + '<path d="M12 2l2.9 6.6L22 9.6l-5 4.9 1.2 7L12 18.1 5.8 21.5 7 14.5l-5-4.9 7.1-1z"/></svg>';
+
+
+/**
+ * A list panel's head: what it is showing, how many, and any controls.
+ *
+ * filterTitle carries the three filter states — narrowed, nothing matched, or
+ * no filter at all — and the count sits opposite it, because "42 of 346" and
+ * "42" answer different questions and both are worth having on screen.
+ */
+function listHead(view, index, fallback, extra = '') {
+  return `
+    <div class="list-head">
+      ${filterTitle(view, index, fallback)}
+      <div class="panel-head-meta">
+        ${view.narrowed || view.missed ? '' : `<span class="list-count">${view.list.length}</span>`}
+        ${extra}
+      </div>
+    </div>`;
 }
 
 
-function momentsHead(view, index) {
+function momentsHead(view, index, inReel) {
   const sort = view.sort === 'time' ? 'time' : 'score';
+  const stars = inReel
+    ? `<span class="list-count" title="${esc(t('moment.inReel'))}">${STAR} ${inReel}</span>`
+    : '';
+  return listHead(view, index, t('moments.title'), stars + ['score', 'time'].map((key) => `
+    <button class="link-btn" data-sort="${index}:${key}"
+            aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join(''));
+}
+
+
+/**
+ * One moment as a tile.
+ *
+ * The summary is still the headline, as it is in the row this replaces — the
+ * line an editor scans by is who did what, not what the taxonomy calls it — so
+ * the class drops into the meta line underneath. It is clamped rather than
+ * truncated at a character count, because where a sentence can be cut without
+ * losing its subject depends on the sentence.
+ *
+ * Confidence goes in that meta line rather than on the picture. The design
+ * puts a badge in the corner of the frame, but a still from a match is not a
+ * flat colour: text laid straight onto it is legible against a dark crowd and
+ * gone against a bright floor. The star is the exception, and only because a
+ * filled amber disc carries its own contrast wherever it lands.
+ */
+function momentTile(m) {
+  const clip = state.clips.find((c) => c.momentId === m.momentId);
+  const meta = [
+    m.label || m.momentType,
+    `${Math.round(m.endSec - m.startSec)}s`,
+    m.confidence == null ? '' : `${Math.round(m.confidence * 100)}%`,
+  ].filter(Boolean).join(' \u00b7 ');
+
   return `
-    <div class="panel-head">
-      ${filterTitle(view, index, t('moments.sortBy'))}
-      <div class="panel-head-meta">
-        ${['score', 'time'].map((key) => `
-          <button class="link-btn" data-sort="${index}:${key}"
-                  aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
+    <div class="tile">
+      <button class="thumb" data-play="${esc(m.momentId)}" title="${esc(t('moment.play'))}"
+              ${m.thumbUri && !state.thumbs.urls[m.momentId] ? `data-thumb="${esc(m.momentId)}"` : ''}>
+        ${state.thumbs.urls[m.momentId]
+          ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
+          : '<span class="thumb-stripes"></span>'}
+        ${clip ? `<span class="tile-star" title="${esc(t('moment.inReel'))}">${STAR}</span>` : ''}
+        <span class="thumb-clock">${clock(m.startSec)}</span>
+      </button>
+      <div class="tile-name">${esc(m.summary || m.label || m.momentType)}</div>
+      <div class="tile-meta">${esc(meta)}</div>
+      ${m.rerankReason ? `<div class="tile-why">${esc(m.rerankReason)}</div>` : ''}
+      <div class="tile-actions">
+        <button class="link-btn" data-details="${esc(m.momentId)}">${esc(t('moment.details'))}</button>
+        ${clip
+          ? `<button class="btn-outline" data-remove-clip="${esc(m.momentId)}">${esc(t('moment.remove'))}</button>`
+          : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
       </div>
     </div>`;
 }
@@ -737,45 +798,20 @@ function momentsCard(msg, index) {
   if (!found.list.length) return emptyCard(t('moments.none'));
 
   const view = pageOf(found.list, msg.page);
-  return `<div class="panel-light">${momentsHead({ ...found, sort: msg.sort }, index)}${view.slice.map((m) => {
-    const clip = state.clips.find((c) => c.momentId === m.momentId);
-    const meta = [
-      m.label || m.momentType,
-      m.category,
-      `${Math.round(m.endSec - m.startSec)}s`,
-      (m.highlightScore ?? 0).toFixed(2),
-    ].filter(Boolean).join(' · ');
-    // The summary is the line an editor scans by — who did what — so it takes
-    // the emphasis. The type and category drop into the meta line beneath,
-    // where they are still there to filter on but are not the headline.
-    const headline = m.summary || m.label || m.momentType;
+  const inReel = found.list
+    .filter((m) => state.clips.some((c) => c.momentId === m.momentId)).length;
 
-    return `
-      <div class="row">
-        <div class="moment-row">
-          <button class="thumb" data-play="${esc(m.momentId)}" title="${esc(t('moment.play'))}"
-                  ${m.thumbUri && !state.thumbs.urls[m.momentId] ? `data-thumb="${esc(m.momentId)}"` : ''}>
-            ${state.thumbs.urls[m.momentId]
-              ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
-              : '<span class="thumb-stripes"></span>'}
-            <span class="thumb-clock">${clock(m.startSec)}</span>
-          </button>
-          <div style="min-width:0">
-            <div class="moment-label">${esc(headline)}</div>
-            <div class="moment-meta">${esc(meta)}</div>
-            ${m.rerankReason ? `<div class="rerank-why">${esc(m.rerankReason)}</div>` : ''}
-          </div>
-          <div class="moment-actions">
-            <button class="link-btn" data-details="${esc(m.momentId)}">${esc(t('moment.details'))}</button>
-            ${clip
-              ? `<button class="btn-outline" data-remove-clip="${esc(m.momentId)}">${esc(t('moment.remove'))}</button>`
-              : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
-          </div>
-        </div>
-      </div>`;
-  }).join('')}${pagerRow(view, index)}</div>`;
+  // The row scrolls sideways within a page rather than instead of one. A match
+  // yields a couple of hundred moments, and one scroller holding all of them is
+  // the truncation problem in the other axis: everything present, nothing
+  // findable, and no way to tell how much is left.
+  return `
+    <div class="list">
+      ${momentsHead({ ...found, sort: msg.sort }, index, inReel)}
+      <div class="tile-row">${view.slice.map(momentTile).join('')}</div>
+      ${pagerRow(view, index)}
+    </div>`;
 }
-
 
 
 /**
@@ -1118,38 +1154,121 @@ function gameRows(g) {
 }
 
 
+/**
+ * A game's status, read from its job.
+ *
+ * The design shows a tick and a duration, or a spinner and "Analyzing". Both
+ * of those are the job's, not the game record's — a game document is only
+ * written once an analysis has produced one — so this reads the job the record
+ * shares an id with, and shows nothing at all when there is no job to read
+ * rather than inventing a state for it.
+ */
+function gameStatus(g) {
+  const job = state.jobs.find((j) => j.id === (g.jobId || g.id));
+  if (!job) return '';
+
+  const running = ['analyzing', 'transcoding', 'uploaded'].includes(job.status);
+  const stalled = running && isStalled(job);
+  const tone = job.status === 'failed' || stalled ? 'failed' : running ? 'running' : 'idle';
+  const text = stalled ? t('jobs.stalled')
+    : running && job.progress ? `${job.status} \u00b7 ${Math.round(job.progress)}%`
+      : (job.status || '');
+
+  return text ? `<span class="job-status" data-tone="${tone}">${esc(text)}</span>` : '';
+}
+
+
+/**
+ * One match as a tile.
+ *
+ * The whole tile opens the record rather than a Details button inside it: at
+ * this width a button is most of the tile anyway, and the design has no such
+ * button because the card itself is the target.
+ *
+ * The picture slot stays empty on purpose. A game record is written from the
+ * whole match rather than from a frame of it, so there is no still to put
+ * there — the design's coloured rectangle stands in for one, and filling it
+ * with a moment's thumbnail would be a picture of one play captioned as the
+ * fixture. It keeps the texture a moment's thumbnail shows before its own
+ * picture arrives, which already means "no frame here".
+ */
+function gameTile(g) {
+  const id = g.jobId || g.id;
+  const meta = [
+    g.sport,
+    g.discipline,
+    g.competition || g.groundedCompetition,
+    g.finalScore,
+  ].filter(Boolean).join(' \u00b7 ');
+
+  return `
+    <button class="tile" data-open-game="${esc(id)}"
+            ${id === state.jobId ? 'aria-current="true"' : ''}>
+      <span class="tile-thumb"></span>
+      <span class="tile-name">${esc(gameHeadline(g))}</span>
+      <span class="tile-meta">${esc(meta || t('game.notIdentified'))}</span>
+      ${gameStatus(g)}
+    </button>`;
+}
+
+
+/** Which match the moments below belong to, when one is open. */
+function focusCaption() {
+  const g = state.games.find((x) => (x.jobId || x.id) === state.jobId);
+  if (!g) return '';
+  return `<div class="focus-caption">${esc(t('games.viewing'))} <b>${esc(gameHeadline(g))}</b></div>`;
+}
+
+
 function gamesCard(msg, index) {
   if (!state.games.length) return emptyCard(t('games.none'));
 
-  // Three at a time when the records are open: ten of them is a dozen rows
-  // each, and a page nobody can see the end of is not a page.
-  const view = pageOf(state.games, msg.page, msg.expandGames ? 3 : PAGE_SIZE);
+  // selectGames has existed since the games list learned to filter, and until
+  // now nothing called it: "show all handball games" was answered with every
+  // game on the desk, which is the same answer as no filter and reads as one
+  // that ran and matched everything. The module was tested; the call site was
+  // never made, which is exactly the failure a tested pure function cannot
+  // catch on its own.
+  const found = selectGames(state.games, { terms: msg.showAll ? [] : (msg.terms || []) });
+
+  // Asking for the records opens them in place, and a two-column detail table
+  // does not fit a 190px tile — so the expanded view keeps the row layout it
+  // was built for. Three at a time there, because ten records of a dozen rows
+  // each is a page nobody can see the end of.
+  if (msg.expandGames) {
+    const rows = pageOf(found.list, msg.page, 3);
+    return `
+      <div class="list">
+        ${listHead(found, index, t('games.title'))}
+        <div class="panel-light">
+          ${rows.slice.map((g) => `
+            <div class="row">
+              <div class="game-row">
+                <div style="min-width:0">
+                  <div class="moment-label">${esc(gameHeadline(g))}</div>
+                  <div class="moment-meta">${esc([g.sport, g.discipline,
+                    g.competition || g.groundedCompetition, g.finalScore, g.mood]
+                    .filter(Boolean).join(' \u00b7 ') || t('game.notIdentified'))}</div>
+                </div>
+                <div class="moment-actions">
+                  <button class="link-btn" data-open-game="${esc(g.jobId || g.id)}">
+                    ${esc(t('moment.details'))}
+                  </button>
+                </div>
+              </div>
+              ${gameRows(g)}
+            </div>`).join('')}
+          ${pagerRow(rows, index)}
+        </div>
+      </div>`;
+  }
+
+  const view = pageOf(found.list, msg.page);
   return `
-    <div class="panel-light">
-      ${view.slice.map((g) => {
-        const meta = [
-          g.sport,
-          g.discipline,
-          g.competition || g.groundedCompetition,
-          g.finalScore,
-          g.mood,
-        ].filter(Boolean).join(' · ');
-        return `
-          <div class="row">
-            <div class="game-row">
-              <div style="min-width:0">
-                <div class="moment-label">${esc(gameHeadline(g))}</div>
-                <div class="moment-meta">${esc(meta || t('game.notIdentified'))}</div>
-              </div>
-              <div class="moment-actions">
-                <button class="link-btn" data-open-game="${esc(g.jobId || g.id)}">
-                  ${esc(t('moment.details'))}
-                </button>
-              </div>
-            </div>
-            ${msg.expandGames ? gameRows(g) : ''}
-          </div>`;
-      }).join('')}
+    <div class="list">
+      ${listHead(found, index, t('games.title'))}
+      <div class="tile-row">${view.slice.map(gameTile).join('')}</div>
+      ${focusCaption()}
       ${pagerRow(view, index)}
     </div>`;
 }
