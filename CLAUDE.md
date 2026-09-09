@@ -1110,6 +1110,33 @@ for a whole analysis.
 - `E2_HIGHCPU_8` had no capacity in us-south1 — accepted, then `PENDING`
   forever with no error. The pipeline sets no `machineType`.
 - A trigger service account with **no roles** also sits in `PENDING` silently.
+- **Two builds at once deploy over each other.** Merging twice inside the
+  pipeline's ~12-minute runtime runs both, and three things are shared while
+  only one is protected. Terraform's GCS backend takes a state lock, so the
+  applies cannot interleave. Nothing locks the Cloud Run images or the Agent
+  Runtime engine.
+
+  The engine fails loudly: `update()` is refused with `FAILED_PRECONDITION ...
+  Current state: UPDATING`, and that build dies having deployed nothing wrong.
+  The images fail quietly, which is the one that matters. Terraform applies
+  `image_tag=$SHORT_SHA`, and a state lock guarantees mutual exclusion, not
+  order — whichever build applies *last* decides what is served, so an older
+  build finishing second rolls production back to the older commit while `main`
+  says otherwise, with a green build and nothing to say so. It missed by about
+  four minutes the first time it happened.
+
+  The `serialise` step waits for older `WORKING` builds on the same trigger
+  before `terraform-apply` runs, which fixes both and in the right direction:
+  the older one applies first, so the newest commit is always what is left
+  serving. Only `WORKING` blocks — a build `PENDING` approval is not running and
+  waiting on one would hang every later build behind a decision nobody made. It
+  runs while the images build, so it normally costs no wall-clock, and it fails
+  open: a gate that cannot read the API lets the build through rather than
+  blocking the pipeline on a question it cannot answer.
+
+  `gcloud builds list` writes "filter keys were not present in any resource" to
+  **stderr** when nothing matches. Merged into stdout that reads as a build id
+  and the wait never ends, so every call in that step discards stderr.
 
 **CI permissions.** `roles/editor` is not enough. Also needs
 `resourcemanager.projectIamAdmin`, `iap.admin`, `firebaserules.admin`,
