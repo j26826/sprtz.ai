@@ -295,6 +295,11 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict
         # silently — which is why a schema field alone is not enough to store
         # something.
         "notConfirmed": game.get("not_confirmed", []),
+        # The day's rounds, in running order. Stored on the game rather than as
+        # a subcollection: they are always read with it, there are tens rather
+        # than thousands, and filtering them is a Python pass over a list the
+        # caller already has — the same reasoning as list_jobs and its status.
+        "rides": game.get("rides", []),
         "homeTeam": game.get("home_team", ""),
         "awayTeam": game.get("away_team", ""),
         "competition": game.get("competition", ""),

@@ -301,6 +301,86 @@ class NotConfirmed(BaseModel):
     )
 
 
+class ObservedRide(BaseModel):
+    """One competitor's turn, as a single segment saw it.
+
+    A dressage competition day is many rounds in sequence rather than one
+    contest, so the unit that matters sits between the recording and the
+    moments: a *ride*. This is what one fifteen-minute window can say about the
+    ones it contains.
+
+    It is reported per segment rather than derived from the moments afterwards
+    because the moments are sparse. A ride with nothing clippable in it produces
+    no moments at all, and reconstructing boundaries from detections alone would
+    make such a ride disappear — which is exactly the ride somebody searching
+    for a competitor wants to be told about.
+
+    Names are transcribed, never corrected. The lower third is the only thing
+    that knows how they are spelt, and a model tidying "Woodcroft Royal Charter"
+    into something more plausible has invented a horse.
+    """
+
+    rider: str = Field(
+        default="",
+        description=(
+            "Rider's name exactly as the lower third prints it. Empty if no "
+            "graphic named them — do not infer a name from commentary alone."
+        ),
+    )
+    horse: str = Field(
+        default="",
+        description="Horse's name exactly as printed. Empty if not shown.",
+    )
+    start_tc: str = Field(
+        description=(
+            "MM:SS within this clip where this combination's round begins — the "
+            "entry or the opening halt, not the first thing they do well."
+        )
+    )
+    end_tc: str = Field(
+        description=(
+            "MM:SS where the round ends: the final halt and salute, or where "
+            "they leave the arena. Use the end of the clip if they are still "
+            "going when it stops."
+        )
+    )
+    test_type: str = Field(
+        default="",
+        description=(
+            "'freestyle' if the round is ridden to music, 'straight' for a "
+            "conventional test, empty if the footage does not say. Music alone "
+            "is not enough — arenas play music between rounds too."
+        ),
+    )
+    scoreboard_text: str = Field(
+        default="",
+        description=(
+            "The results graphic verbatim, if one was displayed for this "
+            "combination. Copy it as printed including the row labels, because "
+            "the label is what says whether a number is a technical mark, an "
+            "artistic mark or a total."
+        ),
+    )
+    judge_marks: list[float] = Field(
+        default_factory=list,
+        description=(
+            "Each judge's percentage in the order shown, left to right. Empty "
+            "unless a graphic actually displayed them. Do not compute these."
+        ),
+    )
+    total_pct: float | None = Field(
+        default=None,
+        description=(
+            "The overall percentage as displayed. Null if no graphic showed one "
+            "— never averaged from the judges' marks yourself, because a "
+            "computed total is one nobody put on screen."
+        ),
+    )
+    rank: int | None = Field(
+        default=None, description="Placing as displayed at that moment, or null."
+    )
+
+
 class EquestrianSegmentAnalysis(SegmentAnalysis):
     """A segment of equestrian footage, which also says what it is.
 
@@ -318,6 +398,15 @@ class EquestrianSegmentAnalysis(SegmentAnalysis):
         description=(
             "Which discipline this footage shows, using the code exactly as given "
             "in the catalogue. Empty if the footage genuinely does not settle it."
+        ),
+    )
+    rides: list[ObservedRide] = Field(
+        default_factory=list,
+        description=(
+            "Every competitor whose round appears in this clip, in the order "
+            "they ride. A round running past the end of the clip still counts, "
+            "and so does one already under way when it starts — the windows "
+            "overlap and the halves are stitched back together afterwards."
         ),
     )
     not_confirmed: list[NotConfirmed] = Field(
@@ -454,6 +543,10 @@ class GameDetails(BaseModel):
     # rather than derived from their absence, because "no pirouette in this
     # test" and "nobody looked" are the same empty list and opposite answers.
     not_confirmed: list[dict] = Field(default_factory=list)
+    # The competitors, in running order, for a recording that is a day of rounds
+    # rather than one contest. Empty for a sport where the whole video is the
+    # unit — a handball match has no rides.
+    rides: list[dict] = Field(default_factory=list)
     home_team: str = Field(default="", description="As printed on the score bug.")
     away_team: str = Field(default="", description="As printed on the score bug.")
     competition: str = Field(default="", description="League or competition, if named on screen.")

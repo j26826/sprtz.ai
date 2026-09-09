@@ -19,6 +19,7 @@ from sprtz_agents.config import get_settings
 from sprtz_agents.schemas import GameDetails, Moment
 from sprtz_agents.sports import get_profile, list_sports
 from sprtz_agents.tools import game_summary, grounding, mcp_client
+from sprtz_agents.tools import rides as rides_tool
 from sprtz_agents.tools.analysis import (
     analyse_segments,
     apply_team_names,
@@ -540,6 +541,7 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         discipline=discipline_label,
         discipline_confidence=float(found_discipline.get("confidence", 0.0)),
         not_confirmed=result.get("not_confirmed", []),
+        rides=result.get("rides", []),
         teams_are_constant=profile.teams_are_constant,
     )
 
@@ -588,6 +590,7 @@ async def _record_game_details(
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
     fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
     not_confirmed: list[dict] | None = None,
+    rides: list[dict] | None = None,
     teams_are_constant: bool = True,
 ) -> GameDetails | None:
     """Build and store the match-level record.
@@ -604,6 +607,7 @@ async def _record_game_details(
             fallback_title=fallback_title,
             discipline=discipline, discipline_confidence=discipline_confidence,
             not_confirmed=not_confirmed or [],
+            rides=rides or [],
             teams_are_constant=teams_are_constant,
         )
 
@@ -1202,6 +1206,68 @@ async def find_games(query: str, limit: int = 5) -> dict:
         return result
     return {"status": "success", "games": result.get("games", []),
             "count": result.get("count", 0), "matched": "meaning"}
+
+
+async def list_rides(
+    job_id: str,
+    min_score: float = 0.0,
+    watchlist: str = "",
+    high_scoring_only: bool = False,
+) -> dict:
+    """Return a competition day's rounds, in running order, optionally narrowed.
+
+    An equestrian recording is a day of rounds rather than one contest, so this
+    is the list an editor actually works from: who rode, when, and what they
+    scored. Use it for "clip the tests that scored over 75", "show me Becky
+    Moody's round", or just to see the running order.
+
+    Args:
+        job_id: Identifier of the job.
+        min_score: Only rides whose displayed total is at least this percentage.
+            0 returns every ride, scored or not.
+        watchlist: Comma-separated riders, horses or combinations of interest.
+            Matches either half of a combination, so a horse's name finds the
+            ride as readily as its rider's.
+        high_scoring_only: Apply the standard bars instead of `min_score` — 75%
+            for a straight test, 80% for a freestyle, because an artistic mark
+            lifts a freestyle total and the two are not the same achievement.
+
+    Returns:
+        dict with `rides`, each carrying order, rider, horse, startSec, endSec,
+        testType, judgeMarks, totalPct, rank, scoreCheck and scoreSource. A ride
+        whose `scoreCheck` reports a mismatch has a total that does not equal the
+        mean of its own displayed judge marks: something was misread, and the
+        number should not be acted on without someone looking.
+    """
+    result = await mcp_client.call_tool("catalog", "get_game", {"job_id": job_id})
+    if result.get("status") == "error":
+        return result
+
+    found = (result.get("game") or {}).get("rides") or []
+    if not found:
+        return {"status": "success", "job_id": job_id, "rides": [], "count": 0,
+                "note": "No rides recorded for this job. Only equestrian "
+                        "recordings are split into rounds."}
+
+    narrowed = rides_tool.high_scoring(found) if high_scoring_only else found
+    if min_score > 0 and not high_scoring_only:
+        narrowed = [
+            r for r in narrowed
+            if r.get("total_pct") is not None
+            and not str(r.get("score_check", "")).startswith("mismatch")
+            and float(r["total_pct"]) >= min_score
+        ]
+    wanted = [w.strip() for w in watchlist.split(",") if w.strip()]
+    if wanted:
+        narrowed = rides_tool.match_watchlist(narrowed, wanted)
+
+    return {
+        "status": "success",
+        "job_id": job_id,
+        "rides": narrowed,
+        "count": len(narrowed),
+        "total_rides": len(found),
+    }
 
 
 async def list_action_plays(job_id: str, limit: int = 500) -> dict:
