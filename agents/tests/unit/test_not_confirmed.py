@@ -7,8 +7,8 @@ when the game record is built.
 """
 
 from sprtz_agents.schemas import EquestrianSegmentAnalysis, GameDetails, NotConfirmed
-from sprtz_agents.tools.analysis import _not_confirmed_of
 from sprtz_agents.tools import game_summary
+from sprtz_agents.tools.analysis import _not_confirmed_of
 
 
 class _Plan:

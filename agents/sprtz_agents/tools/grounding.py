@@ -64,6 +64,50 @@ leagues.\
 """
 
 
+_SHOW_PROMPT = """\
+An equestrian {discipline} recording was analysed from video. These are the only \
+things actually read off the screen:
+
+{observed}
+
+Use Google Search to identify this show and class. Results for this sport are \
+published on online.equipe.com — prefer that site, and cite the show, class or \
+start page you actually used. Then reply with a single JSON object, and nothing \
+else:
+
+{{
+  "show": "full name of the show as the organiser publishes it, or \"\"",
+  "className": "the class or test these rounds were in, or \"\"",
+  "venue": "venue name, or \"\"",
+  "date": "YYYY-MM-DD of the class, or \"\"",
+  "equipeUrl": "the online.equipe.com page for the show or class, or \"\"",
+  "rides": [
+    {{
+      "rider": "rider's full name as published",
+      "horse": "horse's full name as published",
+      "finalPlace": 3,
+      "totalPct": 68.957
+    }}
+  ],
+  "notes": "one sentence on what this class was, or \"\""
+}}
+
+Only include a ride in `rides` if the published results plainly correspond to \
+one of the combinations read off the screen — same rider, same horse. Copy the \
+published spelling; do not correct the on-screen one. Use null for a placing or \
+percentage the page does not show.
+
+If the search does not identify the show with reasonable confidence, return \
+empty strings and an empty rides list. An empty answer is correct here; a \
+plausible one is not, because it will be stored as though somebody had read it, \
+and a rider credited with a placing from a different class is worse than no \
+placing at all.\
+"""
+
+
+EQUIPE_HOST = "online.equipe.com"
+
+
 def _client() -> Any:
     from google import genai
 
@@ -186,3 +230,123 @@ async def identify_fixture(
         "sources": sources,
         "queries": search_queries(response),
     }
+
+
+
+def observed_show_lines(
+    *, competition: str, venue: str, rides: list[dict], scoreboards: list[str],
+) -> str:
+    """The evidence for a show search: who rode, and whatever named the event."""
+    lines = []
+    if competition:
+        lines.append(f"- Caption naming a competition: {competition}")
+    if venue:
+        lines.append(f"- Caption naming a venue: {venue}")
+    seen = 0
+    for ride in rides:
+        rider, horse = (ride.get("rider") or "").strip(), (ride.get("horse") or "").strip()
+        if not (rider or horse):
+            continue
+        marks = f" — displayed total {ride['total_pct']}%" if ride.get("total_pct") is not None else ""
+        lines.append(f"- Lower third: {rider or '?'} / {horse or '?'}{marks}")
+        seen += 1
+        # Enough to pin the class; a search does not need all forty.
+        if seen >= 12:
+            break
+    for raw in scoreboards[:3]:
+        if raw and raw.strip():
+            lines.append(f"- Raw results graphic: {raw.strip()}")
+    return "\n".join(lines) if lines else "- Nothing legible was read from the screen."
+
+
+def cites_equipe(sources: list[dict[str, str]]) -> bool:
+    """Whether the answer actually came from Equipe, rather than being steered there.
+
+    A prompt can prefer a site; it cannot make the search return it. The
+    returned citations say where the answer really came from, and that is what
+    decides whether a placing is recorded as Equipe's or as the web's.
+    """
+    return any(EQUIPE_HOST in (src.get("uri") or "") for src in sources)
+
+
+async def identify_show(
+    *, discipline: str, competition: str, venue: str,
+    rides: list[dict], scoreboards: list[str],
+) -> dict[str, Any]:
+    """Resolve an equestrian competition day against online.equipe.com. Never raises.
+
+    Search grounding rather than a page fetch, and that is not a preference.
+    Equipe's show and class pages are JavaScript shells — a direct GET returns
+    the navigation and the footer and nothing else, and `.json` on them is 406.
+    Googlebot renders the JavaScript, so the results exist in the *index*, and
+    the index is what search grounding reads. Handing the model the URL would
+    have it grounding on an empty page and confabulating around the title.
+
+    One call per show, not per ride. A class results page carries every
+    combination at once, so a single grounded answer fills all of them.
+    """
+    from google.genai import types
+
+    settings = get_settings()
+    observed = observed_show_lines(
+        competition=competition, venue=venue, rides=rides, scoreboards=scoreboards)
+    if observed.startswith("- Nothing legible"):
+        return {"grounded": False, "reason": "nothing legible to ground on"}
+
+    try:
+        response = await _client().aio.models.generate_content(
+            model=settings.model,
+            contents=_SHOW_PROMPT.format(
+                discipline=(discipline or "").replace("_", " ") or "equestrian",
+                observed=observed),
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                http_options=types.HttpOptions(timeout=2 * 60 * 1000),
+            ),
+        )
+    except Exception as exc:
+        logger.warning("show grounding failed: %s", exc, exc_info=True)
+        return {"grounded": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    fields = parse_show(getattr(response, "text", "") or "")
+    sources = extract_sources(response)
+    if not fields.get("show") and not fields.get("rides"):
+        return {"grounded": False, "reason": "search did not identify the show"}
+
+    return {
+        "grounded": True,
+        "from_equipe": cites_equipe(sources),
+        "show": fields.get("show", ""),
+        "class_name": fields.get("className", ""),
+        "venue": fields.get("venue", ""),
+        "match_date": fields.get("date", ""),
+        "equipe_url": fields.get("equipeUrl", ""),
+        "rides": fields.get("rides", []),
+        "notes": fields.get("notes", ""),
+        "sources": sources,
+        "queries": search_queries(response),
+    }
+
+
+def parse_show(text: str) -> dict[str, Any]:
+    """The show answer, with its ride list kept as a list rather than flattened."""
+    match = _JSON_BLOCK.search(text or "")
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        if key == "rides":
+            # A list of rows or nothing. A string here would be iterated by
+            # apply_grounding one character at a time.
+            if isinstance(value, list):
+                out["rides"] = [r for r in value if isinstance(r, dict)]
+        elif isinstance(value, str):
+            out[key] = value.strip()
+    return out

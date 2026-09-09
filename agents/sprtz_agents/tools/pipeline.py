@@ -612,25 +612,52 @@ async def _record_game_details(
         )
 
         judgement = await _judge_game(sport, moments, segment_summaries)
-        found = await grounding.identify_fixture(
-            sport=sport,
-            home_team=game.home_team, away_team=game.away_team,
-            final_score=game.final_score,
-            competition=game.competition, venue=game.venue,
-            scoreboards=[m.scoreboard or "" for m in moments if m.scoreboard],
-        )
+        scoreboards = [m.scoreboard or "" for m in moments if m.scoreboard]
+
+        # Decided by the data rather than the sport's name: a recording that
+        # produced rides is a competition day, and what identifies one is the
+        # published class results, not a fixture. Everything else is a match.
+        if game.rides:
+            found = await grounding.identify_show(
+                discipline=game.discipline, competition=game.competition,
+                venue=game.venue, rides=game.rides, scoreboards=scoreboards,
+            )
+            source = "equipe" if found.get("from_equipe") else "web"
+            grounded_rides = rides_tool.apply_grounding(
+                game.rides, found.get("rides") or [], source=source,
+            ) if found.get("grounded") else game.rides
+            update = {
+                "rides": grounded_rides,
+                "grounded_competition": " — ".join(
+                    x for x in (found.get("show", ""), found.get("class_name", "")) if x),
+                "grounded_venue": found.get("venue", ""),
+                "grounded_home_team": "",
+                "grounded_away_team": "",
+                "match_date": found.get("match_date", ""),
+            }
+        else:
+            found = await grounding.identify_fixture(
+                sport=sport,
+                home_team=game.home_team, away_team=game.away_team,
+                final_score=game.final_score,
+                competition=game.competition, venue=game.venue,
+                scoreboards=scoreboards,
+            )
+            update = {
+                "grounded_competition": found.get("competition", ""),
+                "grounded_venue": found.get("venue", ""),
+                "grounded_home_team": found.get("home_team_full_name", ""),
+                "grounded_away_team": found.get("away_team_full_name", ""),
+                "match_date": found.get("match_date", ""),
+            }
 
         game = game.model_copy(update={
             "sentiment": (judgement.get("sentiment") or game.sentiment),
             "mood": (judgement.get("mood") or game.mood),
             "summary": (judgement.get("summary") or game.summary),
             "grounded": bool(found.get("grounded")),
-            "grounded_competition": found.get("competition", ""),
-            "grounded_venue": found.get("venue", ""),
-            "grounded_home_team": found.get("home_team_full_name", ""),
-            "grounded_away_team": found.get("away_team_full_name", ""),
-            "match_date": found.get("match_date", ""),
             "grounding_sources": found.get("sources", []),
+            **update,
         })
 
         await mcp_client.call_tool("catalog", "upsert_game", {
