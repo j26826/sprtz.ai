@@ -1632,14 +1632,14 @@ function searchPanel(msg, index) {
  * response rather than from the open match's listeners, which only hold the
  * moments of the match that is open.
  */
-function searchCard(msg, index) {
+function searchCard(msg, index, head = '') {
   const rows = msg.searchResults;
   if (rows === null || rows === undefined) return '';
   if (!rows.length) return emptyCard(t('search.none'));
   return `
     <div class="list">
       <div class="list-head">
-        <div class="panel-head-title">${esc(t('search.results'))}</div>
+        <div class="panel-head-title">${esc(head || t('search.results'))}</div>
         <div class="panel-head-meta"><span class="list-count">${rows.length}</span></div>
       </div>
       <div class="panel-light">
@@ -1660,6 +1660,48 @@ function searchCard(msg, index) {
         }).join('')}
       </div>
     </div>`;
+}
+
+
+/**
+ * The desk's key moments, best first.
+ *
+ * Drawn from the response rather than the open match's listeners, which hold
+ * only the open match. Games still analysing are named as such: their moments
+ * do not exist yet, which is not the same as their having none.
+ */
+function deskMomentsCard(msg, index) {
+  if (msg.deskLoading) {
+    return `<div class="list"><div class="ctx-muted">${esc(t('desk.loading'))}</div></div>`;
+  }
+  const running = Array.isArray(msg.running) ? msg.running : [];
+  const note = running.length
+    ? `<div class="desk-running">${running.map((id) => {
+        const g = state.games.find((x) => (x.jobId || x.id) === id)
+          || state.jobs.find((x) => x.id === id);
+        return esc(g ? (g.title || gameHeadline(g)) : id);
+      }).join(', ')} — ${esc(t('desk.running'))}</div>`
+    : '';
+  return searchCard(msg, index, t('desk.title')) + note;
+}
+
+
+async function loadDeskMoments(index) {
+  const msg = state.msgs[index];
+  if (!msg) return;
+  try {
+    const res = await api('/api/jobs/top-moments', {
+      method: 'POST', body: JSON.stringify({ limit: 20 }),
+    });
+    msg.searchResults = res.moments || [];
+    msg.running = res.running || [];
+  } catch (err) {
+    msg.searchResults = [];
+    say(`${t('desk.title')}: ${err.message || err}`);
+  } finally {
+    msg.deskLoading = false;
+    render();
+  }
 }
 
 
@@ -1862,6 +1904,7 @@ function render() {
       <div class="msg-label">${agent ? 'Agent' : 'You'}</div>
       ${cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
       ${m.showSearch ? searchPanel(m, i) + searchCard(m, i) : ''}
+      ${m.showDeskMoments ? deskMomentsCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showIngest ? ingestCard() : ''}
       ${m.showReel ? reelCard(m, i) : ''}
@@ -2163,7 +2206,18 @@ function attachCards(index, question) {
   // once it has been chosen.
   const card = chooseCard(question);
 
-  if (card === 'search') {
+  if (card === 'desk-moments' && !gameNamedIn(question)) {
+    // The ranked shortlist with no match named is a question about the desk.
+    msg.showDeskMoments = true;
+    msg.searchResults = null;
+    msg.deskLoading = true;
+    loadDeskMoments(index);
+  } else if (card === 'desk-moments') {
+    // A match was named, so it is that match's shortlist after all.
+    msg.showMoments = true;
+    msg.showActions = true;
+    msg.sort = 'score';
+  } else if (card === 'search') {
     // The route only fires on scope words, so the panel opens set to the
     // whole desk; the editor can pull it back to the open match.
     msg.showSearch = true;

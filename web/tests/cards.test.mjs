@@ -59,7 +59,8 @@ describe('one match', () => {
 
 describe('the plays inside a match', () => {
   routes({
-    'show me the best moments': 'moments',
+    // Moved to the desk: no match is named, so it is the desk's shortlist.
+    'show me the best moments': 'desk-moments',
     'show all goals': 'moments',
     'show every penalties': 'moments',
     'every wing shot in the 1st half': 'moments',
@@ -122,5 +123,27 @@ describe('a search for plays across the desk', () => {
     'list all the matches': 'games',
     // Getting a recording in is still ingest even with "all" in it.
     'upload all the games from yesterday': 'ingest',
+  });
+});
+
+
+describe("the desk's key moments", () => {
+  // The ranked shortlist with no match named is a question about everything
+  // on the desk. Answering it from whichever match was open is how "no key
+  // moments were found" got said about a desk full of them.
+  routes({
+    'show all key moments': 'desk-moments',
+    'show me the best moments': 'desk-moments',
+    'what are the highlights': 'desk-moments',
+    'the top plays': 'desk-moments',
+    // A type is a filter on the open match, and stays there.
+    'show all goals': 'moments',
+    'show me every save': 'moments',
+    'find the double save': 'moments',
+    // A named match is that match's shortlist; the override is in app.js,
+    // which holds the game list, but the route itself is moments.
+    'show all moments of the FAG v TVB match': 'moments',
+    // A scope wins over the shortlist words: this is a search.
+    'find the best saves across all games': 'search',
   });
 });

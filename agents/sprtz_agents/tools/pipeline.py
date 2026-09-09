@@ -1375,6 +1375,42 @@ async def list_rides(
     }
 
 
+async def list_top_moments(limit: int = 20, sport: str = "", job_ids: str = "") -> dict:
+    """The key moments across every game on the desk, best first, each naming its game.
+
+    Use this for "show all key moments", "the best moments", "highlights" and
+    the like when the editor has not named a match — the question is about the
+    desk, not the open job. Each result carries `game` (title, sport,
+    discipline); say which match every moment is from.
+
+    Args:
+        limit: Most moments to return.
+        sport: Keep only games of this sport, e.g. "equestrian". Empty for all.
+        job_ids: Comma-separated job ids to keep. Empty for every game.
+
+    Returns:
+        dict with `moments` (best first, each with `game`), `running` (job ids
+        still analysing — their moments do not exist yet, which is not the same
+        as having none) and `games_searched`.
+    """
+    result = await mcp_client.call_tool("catalog", "list_top_moments", {
+        "limit": limit, "sport": sport,
+        "job_ids": [x.strip() for x in job_ids.split(",") if x.strip()],
+    })
+    if result.get("status") == "error":
+        return result
+    running = result.get("running") or []
+    return {
+        "status": "success",
+        "moments": result.get("moments", []),
+        "count": len(result.get("moments", [])),
+        "games_searched": result.get("games_searched", 0),
+        "running": running,
+        "note": (f"{len(running)} game(s) are still analysing and have no moments yet."
+                 if running else ""),
+    }
+
+
 async def list_action_plays(job_id: str, limit: int = 500) -> dict:
     """Return every detected moment for a job as ActionPlay records, in match order.
 
@@ -1417,10 +1453,22 @@ async def get_job_summary(job_id: str) -> dict:
         mcp_client.call_tool("catalog", "list_moments", {"job_id": job_id, "limit": 20, "min_score": 0.0}),
         mcp_client.call_tool("catalog", "list_clips", {"job_id": job_id, "limit": 50}),
     )
+    top = moments.get("moments", [])
+    # A job still analysing has written no moments yet — they land when every
+    # segment has finished. Without this note the tool result is an empty list
+    # beside a status field, and the model reads the list and says "none were
+    # found", which is the wrong answer: nothing has been looked for yet.
+    note = ""
+    if not top and job.get("status") in ("uploaded", "transcoding", "analyzing"):
+        note = (f"Analysis is still running (stage {job.get('stage') or 'analysis'}, "
+                f"{round(float(job.get('progress') or 0))}%). Moments are written when it "
+                "finishes; an empty list now does not mean none were found.")
+
     return {
         "status": "success",
         "job": job,
-        "top_moments": moments.get("moments", []),
+        "top_moments": top,
+        "note": note,
         "clips": clips.get("clips", []),
     }
 

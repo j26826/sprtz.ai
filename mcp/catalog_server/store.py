@@ -1078,6 +1078,54 @@ def _rerank(query: str, candidates: list[dict[str, Any]], limit: int) -> list[di
     return ranked[:limit]
 
 
+def _merge_top(per_job: dict[str, list[dict[str, Any]]], games: dict[str, dict[str, Any]],
+               *, sport: str = "", limit: int = 20) -> list[dict[str, Any]]:
+    """The best moments across several games, as one list.
+
+    Each game's own listing is already in score order; this joins the game on,
+    drops the sports not asked for, and takes the top of the union. Pure, so
+    it can be tested without a database — the fan-out that fills per_job is
+    the only part that reads one.
+    """
+    want = (sport or "").strip().lower()
+    out: list[dict[str, Any]] = []
+    for job_id, moments in per_job.items():
+        game = games.get(job_id, {"job_id": job_id, "title": "", "sport": "", "discipline": ""})
+        if want and (game.get("sport", "") or "").lower() != want:
+            continue
+        for m in moments:
+            m = dict(m)
+            m["game"] = game
+            out.append(m)
+    out.sort(key=lambda m: float(m.get("highlight_score") or 0.0), reverse=True)
+    return out[:limit]
+
+
+def list_top_moments(limit: int = 20, sport: str = "", job_ids: list[str] | None = None,
+                     max_games: int = 60) -> dict[str, Any]:
+    """The key moments across the desk, best first, each naming its game.
+
+    A fan-out of the per-job listing rather than one collection-group query:
+    that listing is served by an index that exists, ordering a collection group
+    by score is not, and the desk is tens of games, not thousands. Games still
+    analysing are reported rather than silently counted as empty — "no
+    moments" and "not finished yet" are different answers.
+    """
+    if job_ids:
+        jobs = [{"job_id": j, "status": get_job(j).get("status", "")} for j in job_ids[:max_games]]
+    else:
+        jobs = [{"job_id": j.get("job_id") or j.get("id"), "status": j.get("status", "")}
+                for j in list_jobs(limit=max_games)]
+    running = [j["job_id"] for j in jobs if j["status"] in RUNNING_STATUSES]
+    per_job = {j["job_id"]: list_moments(j["job_id"], limit=limit, min_score=0.0) for j in jobs if j["job_id"]}
+    games = get_games_by_ids(list(per_job))
+    return {
+        "moments": _merge_top(per_job, games, sport=sport, limit=limit),
+        "running": running,
+        "games_searched": len(per_job),
+    }
+
+
 def _filter_candidates(candidates: list[dict[str, Any]], *, sport: str = "",
                        job_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Narrow a candidate set by sport or by game, in Python.

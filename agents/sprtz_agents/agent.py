@@ -117,6 +117,16 @@ earlier turns:
 - `list_jobs` for what exists, what is still running, or what failed. Editors do
   not know job ids, so never ask for one — list the jobs and name them by title.
   Pass status="running" when they ask what is still processing.
+- `list_top_moments` for "show all key moments", "the best moments" or
+  "highlights" when the editor has **not named a match**: that question is
+  about the whole desk, and answering it from whichever match happens to be
+  open is how "no key moments were found" was said about a desk full of them.
+  Name the game on every moment. Its `running` list is the games still
+  analysing — say they are in progress, not that they have nothing.
+- A job that is still analysing has written no moments yet. When
+  `get_job_summary` returns an empty list with a `note`, report the note —
+  "analysis is at 60%" — never "no moments were found". Nothing has been
+  looked for yet, and the two answers send the editor in opposite directions.
 - `get_job_summary` for status, media properties and what has been found
 - `search_moments` to find moments by meaning; prefer it over scanning a list.
   With `job_id` empty it searches **every match on the desk**, and that is what
@@ -249,6 +259,7 @@ def _build_tools() -> list:
         pipeline.get_job_summary,
         pipeline.list_action_plays,
         pipeline.list_rides,
+        pipeline.list_top_moments,
         pipeline.get_game_details,
         pipeline.find_games,
         pipeline.reanalyse_job,

@@ -274,6 +274,25 @@ def update_job_context(job_id: str, context_urls: list[str]) -> dict:
 
 
 @mcp.tool
+def list_top_moments(limit: int = 20, sport: str = "", job_ids: list[str] | None = None) -> dict:
+    """The key moments across every game on the desk, best first, each naming its game.
+
+    Args:
+        limit: Most moments to return.
+        sport: Keep only games of this sport, e.g. "equestrian". Empty for all.
+        job_ids: Keep only these games. Empty for every game on the desk.
+
+    Returns:
+        dict with `moments` (each carrying `game`), `running` (job ids still
+        analysing, whose moments do not exist yet) and `games_searched`.
+    """
+    try:
+        return {"status": "success", **store.list_top_moments(limit=limit, sport=sport, job_ids=job_ids or [])}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
+@mcp.tool
 def update_moment_identity(job_id: str, identities: list[dict]) -> dict:
     """Set who was riding on moments that already exist.
 
