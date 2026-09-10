@@ -821,10 +821,18 @@ async fn run(args: &Args, reporter: &Arc<StatusWriter>) -> Result<bool> {
     if parallel > 1 {
         println!("-> Distributed download: {parallel} parallel segment fetches");
     }
-    type FetchedPair = Result<(Vec<u8>, Option<Vec<u8>>)>;
+    // `None` is a segment the origin no longer has. A live playlist with a
+    // DVR window expires segments from its far edge while a download is still
+    // walking it, and one 404 out of 3228 used to end the whole recording.
+    type FetchedPair = Result<Option<(Vec<u8>, Option<Vec<u8>>)>>;
     let mut inflight: std::collections::VecDeque<tokio::task::JoinHandle<FetchedPair>> =
         std::collections::VecDeque::new();
     let mut next_spawn = 0usize;
+    // Skipping a few is a gap in the recording; skipping most of them means
+    // the playlist no longer describes anything the origin has, and writing
+    // the remains as a finished download would be a false success.
+    let mut missing_segments = 0usize;
+    let missing_allowed = (work.len() / 20).max(10);
     for w in &work {
         // Keep the pipeline full up to the concurrency cap.
         while inflight.len() < parallel && next_spawn < work.len() {
@@ -833,27 +841,45 @@ async fn run(args: &Args, reporter: &Arc<StatusWriter>) -> Result<bool> {
             let video_url = nw.video_url.clone();
             let audio_url = nw.audio_url.clone();
             inflight.push_back(tokio::spawn(async move {
-                let v = net::fetch_bytes(&client, &video_url, 3)
+                let v = match net::fetch_bytes_optional(&client, &video_url, 3)
                     .await
-                    .with_context(|| format!("downloading segment {video_url}"))?;
+                    .with_context(|| format!("downloading segment {video_url}"))?
+                {
+                    Some(bytes) => bytes,
+                    // Gone from the edge. Its audio is skipped with it: half a
+                    // segment is worse than none, because the tracks would
+                    // drift by exactly its length from here on.
+                    None => return Ok(None),
+                };
                 let a = match &audio_url {
-                    Some(u) => Some(
-                        net::fetch_bytes(&client, u, 3)
-                            .await
-                            .with_context(|| format!("downloading audio segment {u}"))?,
-                    ),
+                    Some(u) => net::fetch_bytes_optional(&client, u, 3)
+                        .await
+                        .with_context(|| format!("downloading audio segment {u}"))?,
                     None => None,
                 };
-                Ok((v, a))
+                Ok(Some((v, a)))
             }));
             next_spawn += 1;
         }
 
-        let (mut seg_bytes, audio_bytes) = inflight
+        let fetched = inflight
             .pop_front()
             .expect("pipeline primed")
             .await
             .context("segment download task failed")??;
+        let (mut seg_bytes, audio_bytes) = match fetched {
+            Some(pair) => pair,
+            None => {
+                missing_segments += 1;
+                eprintln!(
+                    "-> [{}/{}] segment {} is gone from the origin; skipping it",
+                    w.index + 1,
+                    total_segments,
+                    w.label
+                );
+                continue;
+            }
+        };
         println!(
             "[{}/{}] Streaming segment to cloud: {}",
             w.index + 1,
@@ -971,7 +997,25 @@ async fn run(args: &Args, reporter: &Arc<StatusWriter>) -> Result<bool> {
         }
     }
 
+    // Skipping a few segments is a gap in the recording and worth saying;
+    // skipping many means the playlist no longer describes what the origin
+    // has, and publishing the remains as a finished download would be a false
+    // success — the one thing this job must never report.
+    if missing_segments > missing_allowed {
+        return Err(anyhow!(
+            "{missing_segments} of {} segment(s) were gone from the origin \
+             (at most {missing_allowed} tolerated) — the playlist has outrun its window",
+            work.len()
+        ));
+    }
+
     // 5. Finalize the Multipart Cloud Upload
+    if missing_segments > 0 {
+        println!(
+            "-> {missing_segments} segment(s) were gone from the origin and are missing \
+             from the recording."
+        );
+    }
     if skipped_ads > 0 {
         println!("-> Removed {skipped_ads} ad segment(s).");
     }

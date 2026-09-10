@@ -48,3 +48,7 @@ Thumbs.db
 .idea/
 .vscode/
 .claude
+
+# Rust build output from the vendored HLS downloader. The Docker build
+# ignores it too; a stale local target/ is a multi-gigabyte upload.
+**/target/

@@ -157,7 +157,17 @@ that is one core decoding the whole recording after the download, an hour on
 a 3.75-hour match, where Transcoder spreads it and reads the bucket directly.
 The download job pulls sixteen segments at once (`MAX_PARALLEL`, streamed
 straight into GCS, so the bound is the instance's network); eight managed 28
-MB/s on a 6.9 GB recording. **The playlist is asked before the execution is
+MB/s on a 6.9 GB recording. **A segment the origin no longer has is skipped, not fatal.** A live playlist
+with a DVR window (`vbegin=`) expires segments from its far edge while a
+download is still walking it, and one 404 at segment 1447 of 3228 ended the
+whole recording — `fetch_bytes` retried a permanent status three times and
+then aborted. `fetch_bytes_optional` tells "not there" (404/410) from "could
+not answer", the downloader counts the misses and carries on, and its audio
+is dropped with it so the tracks cannot drift. More than 5% missing, or ten,
+fails the job: publishing the remains of a playlist that has outrun its
+window would be a false success.
+
+**The playlist is asked before the execution is
 started** (`check_playlist`): a signed CDN link expires — JW Player's carries
 `exp=` — and without the check the job spent a three-minute cold start to say
 "the job did not succeed", with the 403 only in its own log.
