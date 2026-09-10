@@ -144,10 +144,19 @@ execution with per-run env (`download_hls`) and the ingest stage polls it
 lands under `hls/<job>/source/` in the uploads bucket as `.mp4` (CMAF) or
 `.ts` (MPEG-TS) — which is not known until the playlist is read, so the status
 call lists the prefix rather than assuming a name — and `set_source` puts it
-on the job. **With it comes the 1 fps 480p proxy** (`--proxy-1fps`, audio
-kept), stored as `source.analysisUri`: the analysis reads that, because it is
-the same picture Gemini samples anyway at a fraction of the bytes. Thumbnails
-and clips still read `source.gcsUri`; a still from a 480p proxy is not a still.
+on the job. **Then the 1 fps 480p proxy is made from it on Transcoder**
+(`make_analysis_proxy`, polled with `transcode_status` like the package),
+stored as `source.analysisUri`: the analysis reads that, because it is the
+same picture Gemini samples anyway at a fraction of the bytes. The download
+tool can make the proxy itself (`--proxy-1fps`) and the first release let it —
+that is one core decoding the whole recording after the download, an hour on
+a 3.75-hour match, where Transcoder spreads it and reads the bucket directly.
+The object goes on the job *before* the proxy is attempted, and a proxy that
+fails is a warning: the analysis then cuts the source into windows as it does
+for an upload. The Transcoder service agent needs write on the media bucket
+for it (`transcoder_media_write`), the same minutes-in failure as the
+package's grants. Thumbnails and clips still read `source.gcsUri`; a still
+from a 480p proxy is not a still.
 
 **A live event is a recorder plus a tick, never one long process.** A live
 playlist is a sliding window of a few segments — 20 to 30 seconds — so the

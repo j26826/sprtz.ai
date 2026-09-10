@@ -640,40 +640,38 @@ def _proxy_prefix(job_id: str) -> str:
 
 
 @mcp.tool
-def download_hls(job_id: str, hls_url: str, proxy: bool = True) -> dict:
+def download_hls(job_id: str, hls_url: str) -> dict:
     """Start downloading an HLS (.m3u8) source into the uploads bucket.
 
     Runs `jobs/hls2mp4` as a Cloud Run Job execution and returns at once: a
-    long recording is minutes of download and, with the proxy, a decode of the
-    whole thing, neither of which belongs inside a request. Poll it with
-    `hls_download_status`.
+    long recording is minutes of download, which does not belong inside a
+    request. Poll it with `hls_download_status`.
 
     The tool writes a progressive MP4 for a CMAF stream and a .ts for an
     MPEG-TS one; which is only known once it has read the playlist, so the
     status call resolves the object rather than this one naming it.
 
+    Only the download. The 1 fps analysis proxy is a Transcoder job started
+    with `make_analysis_proxy` once the object is in the bucket — the tool
+    can make one itself, but that is a single core decoding the whole
+    recording after the download, an hour on a long one.
+
     Args:
         job_id: Job the source belongs to.
         hls_url: https:// URL of the multivariant or media playlist.
-        proxy: Also produce the constant-1 fps 480p proxy the analysis reads.
-            It keeps the audio and is a fraction of the bytes.
     """
     if not HLS2MP4_JOB:
         return {"status": "error", "error": "HLS2MP4_JOB is not configured."}
-    if not UPLOADS_BUCKET or not MEDIA_BUCKET:
-        return {"status": "error", "error": "UPLOADS_BUCKET and MEDIA_BUCKET must be configured."}
+    if not UPLOADS_BUCKET:
+        return {"status": "error", "error": "UPLOADS_BUCKET is not configured."}
     try:
         # Anything already here is from an attempt that did not finish.
         gcs.delete_prefix(UPLOADS_BUCKET, _hls_source_prefix(job_id))
-        gcs.delete_prefix(MEDIA_BUCKET, _proxy_prefix(job_id))
         env = {
             "EXT_SOURCE_URI": hls_url,
             "AIS_SOURCE_URI": f"gs://{UPLOADS_BUCKET}/{_hls_source_prefix(job_id)}source.mp4",
             "EVENT_ID": "source",
         }
-        if proxy:
-            env["PROXY_1FPS"] = "true"
-            env["AIS_PREVIEW_URI"] = f"gs://{MEDIA_BUCKET}/{_proxy_prefix(job_id).rstrip('/')}"
         execution = runjobs.run(HLS2MP4_JOB, env)
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not start the HLS download for %s", job_id)
@@ -683,7 +681,7 @@ def download_hls(job_id: str, hls_url: str, proxy: bool = True) -> dict:
 
 @mcp.tool
 def hls_download_status(execution: str, job_id: str) -> dict:
-    """Where an HLS download is, and the objects it produced once it is done.
+    """Where an HLS download is, and the object it produced once it is done.
 
     Args:
         execution: The execution name `download_hls` returned.
@@ -705,20 +703,42 @@ def hls_download_status(execution: str, job_id: str) -> dict:
         return {"status": "failed", "execution": execution,
                 "error": "the download finished but wrote no source object"}
 
-    analysis_uri = ""
-    for blob in gcs.client().list_blobs(MEDIA_BUCKET, prefix=_proxy_prefix(job_id)):
-        if blob.name.endswith("_proxy_1fps.mp4"):
-            analysis_uri = f"gs://{MEDIA_BUCKET}/{blob.name}"
-            break
-
     return {
         "status": "succeeded", "execution": execution, "job_id": job_id,
         "gcs_uri": f"gs://{UPLOADS_BUCKET}/{source.name}",
         "bytes": int(source.size or 0),
         "content_type": source.content_type or ("video/mp2t" if source.name.endswith(".ts") else "video/mp4"),
         "original_name": source.name.rsplit("/", 1)[-1],
-        "analysis_uri": analysis_uri,
     }
+
+
+@mcp.tool
+def make_analysis_proxy(gcs_uri: str, job_id: str) -> dict:
+    """Start the 1 fps 480p proxy the analysis reads, and return immediately.
+
+    A Transcoder job, like the playback package: it reads the source from
+    the bucket and writes the proxy to the media bucket itself, so no video
+    byte passes through here and a long recording is split across the
+    service's own encoders rather than decoded by one core. Poll it with
+    `transcode_status`. The proxy's URI is known up front — Transcoder names
+    the file from the mux stream key — so the caller can record it as soon as
+    the encode succeeds without listing the prefix.
+
+    Args:
+        gcs_uri: gs:// URI of the source video.
+        job_id: Job the proxy belongs to; becomes the object prefix.
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+    try:
+        # A proxy left by an attempt that did not finish, or by the download
+        # job's own encoder in an earlier release.
+        gcs.delete_prefix(MEDIA_BUCKET, _proxy_prefix(job_id))
+        started = transcoder.create_proxy_job(gcs_uri, MEDIA_BUCKET, job_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not start a proxy encode for %s", gcs_uri)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+    return {"status": "started", "job_id": job_id, **started}
 
 
 @mcp.tool

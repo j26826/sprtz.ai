@@ -121,6 +121,15 @@ resource "google_storage_bucket_iam_member" "transcoder_hls_write" {
   member = "serviceAccount:${google_project_service_identity.transcoder.email}"
 }
 
+# The 1 fps analysis proxy is a Transcoder job too, and it lands in the media
+# bucket beside the analysis windows. Same failure mode as the package: the
+# job is accepted and fails once the encode tries to write.
+resource "google_storage_bucket_iam_member" "transcoder_media_write" {
+  bucket = google_storage_bucket.media.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_project_service_identity.transcoder.email}"
+}
+
 resource "google_storage_bucket_iam_member" "media_worker_media_write" {
   bucket = google_storage_bucket.media.name
   role   = "roles/storage.objectAdmin"

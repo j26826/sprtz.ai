@@ -15,7 +15,9 @@ How it is used here:
   MPEG-TS stream, so the media server lists that prefix afterwards rather than
   assuming a name.
 - `PROXY_1FPS=true` with `AIS_PREVIEW_URI=gs://<media>/jobs/<job>/proxy` — the
-  constant-1 fps 480p H.264 proxy the analysis reads instead of the source.
+  constant-1 fps 480p H.264 proxy. Supported, but **not requested here**: it is
+  one core decoding the whole recording after the download, so the media
+  service makes the proxy on Transcoder instead (`make_analysis_proxy`).
   Audio is kept. It is a fraction of the bytes, which is what Gemini's
   whole-object fetch limit cares about.
 

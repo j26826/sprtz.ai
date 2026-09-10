@@ -212,7 +212,7 @@ package — bigger than any sensible instance. So:
 ### Cloud Run Jobs beside the service
 
 Two pieces of media work are the wrong shape for a request: downloading a
-whole HLS playlist (and transcoding its 1 fps proxy), and following a live
+whole HLS playlist (its 1 fps proxy is then a Transcoder job), and following a live
 playlist for the length of an event. Both run as Cloud Run *Jobs* — the
 `jobs/hls2mp4` Rust downloader, and `media_server.live_capture` on the same
 image as the service with a `command` override. The service starts executions
