@@ -243,6 +243,28 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
 _DOWNLOAD_BAND = (0.1, 0.5)
 
 
+# How many polls in a row may fail to reach the media service before a wait
+# gives up. A poll is a question about work happening elsewhere — on a Cloud
+# Run Job or on Transcoder — so the service being unreachable for a while
+# says nothing about that work.
+_MAX_UNREACHABLE_POLLS = 10
+
+
+async def _poll_tool(server: str, tool: str, args: dict) -> dict:
+    """A status call that reports the service being unreachable as a status.
+
+    ``{"status": "unreachable"}`` rather than an exception, so a wait loop can
+    keep waiting: the first playback wait to meet a retired media instance
+    took the exception as a dead encode and marked the job failed with
+    "ConnectError: " while Transcoder carried on for another half hour.
+    """
+    try:
+        return await mcp_client.call_tool(server, tool, args)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("poll %s.%s failed: %s", server, tool, exc)
+        return {"status": "unreachable", "error": f"{type(exc).__name__}: {exc}"}
+
+
 async def _download_hls_source(job_id: str, hls_url: str) -> dict:
     """Fetch an HLS playlist into the uploads bucket and put it on the job.
 
@@ -278,12 +300,19 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
     last_note = time.monotonic()
     interval = 15.0
     quarters_noted = 0
+    unreachable = 0
     while True:
         await asyncio.sleep(interval)
         interval = min(interval * 1.5, 60.0)
-        probe = await mcp_client.call_tool(
+        probe = await _poll_tool(
             "media", "hls_download_status", {"execution": execution, "job_id": job_id})
         state = probe.get("status")
+        if state == "unreachable":
+            unreachable += 1
+            if unreachable > _MAX_UNREACHABLE_POLLS:
+                return await fail(f"The media service could not be reached: {probe.get('error')}")
+            continue
+        unreachable = 0
         if state == "succeeded":
             break
         if state in ("failed", "error"):
@@ -369,14 +398,19 @@ async def _mux_audio(job_id: str, gcs_uri: str, audio_playlist_url: str,
     execution = started.get("execution", "")
     interval = 15.0
     since_heartbeat = 0.0
+    unreachable = 0
     while True:
         await asyncio.sleep(interval)
         since_heartbeat += interval
         interval = min(interval * 1.5, 60.0)
-        probe = await mcp_client.call_tool("media", "mux_status", {
+        probe = await _poll_tool("media", "mux_status", {
             "execution": execution, "output_uri": started.get("output_uri", ""),
             "original_uri": gcs_uri})
         state = probe.get("status")
+        if state == "unreachable" and unreachable < _MAX_UNREACHABLE_POLLS:
+            unreachable += 1
+            continue
+        unreachable = 0
         if state == "succeeded":
             await _emit(job_id, "ingest", "Added the audio rendition to the recording.",
                         bytes=int(probe.get("bytes") or 0))
@@ -567,10 +601,10 @@ async def _await_transcode(job_id: str, transcoder_job: str, stage: str = "trans
             await _progress(job_id, *heartbeat)
             since_heartbeat = 0.0
 
-        status = await mcp_client.call_tool(
+        status = await _poll_tool(
             "media", "transcode_status", {"transcoder_job": transcoder_job}
         )
-        if status.get("status") == "error":
+        if status.get("status") in ("error", "unreachable"):
             # A failed poll is not a failed encode; the job may well still be
             # running. Keep waiting rather than declaring it dead.
             logger.warning("could not poll %s: %s", transcoder_job, status.get("error"))
