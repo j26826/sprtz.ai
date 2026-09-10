@@ -97,6 +97,16 @@ against the live project. Treat a merge as a deploy.
   only filled for the class form, so every site parses `response.text` itself.
   `TestResponseSchemasAreJsonSchema` reads the three sources and fails on a
   regression, because no unit test can see the difference.
+- **The merge is near-linear, and it had to become so.** An engine worker was
+  killed between the last window and "Found N key moments" on a 3.75-hour
+  recording: `merge_segment_results` scanned everything merged so far for
+  every candidate and then scanned again to find the match's index, which is
+  cubic in the worst case — and a model that over-produces on a competition
+  day is exactly that worst case. Candidates are sorted by start, so the only
+  entries one can overlap are the recent ones; the scan walks back from the
+  end and stops once even the longest moment seen could no longer reach the
+  candidate's start. It also logs how many detections it was given, because
+  that number is the first thing anyone will want when this happens again.
 - A match is split into **15-minute segments overlapping by 20s**, analysed
   concurrently, then merged with temporal IoU per moment type. A 3-hour
   recording is 13 segments.
