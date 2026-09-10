@@ -97,6 +97,70 @@ class TestTheDownload:
         assert not [t for t, _ in media["calls"] if t == "make_analysis_proxy"]
 
 
+class TestASeparateAudioRendition:
+    """The recording lands silent; the audio is muxed in by a second job."""
+
+    def _call(self, state, mux_state="succeeded"):
+        async def call(server, tool, args=None):
+            state["calls"].append((tool, args or {}))
+            if tool == "download_hls":
+                return {"status": "started", "execution": "exec-9",
+                        "audio_playlist_url": "https://x.test/audio.m3u8"}
+            if tool == "hls_download_status":
+                return DOWNLOADED
+            if tool == "mux_audio":
+                return {"status": "started", "execution": "exec-mux",
+                        "output_uri": "gs://uploads/hls/j1/muxed/source.ts"}
+            if tool == "mux_status":
+                state["mux_polls"] += 1
+                if state["mux_polls"] < 2:
+                    return {"status": "running"}
+                if mux_state == "failed":
+                    return {"status": "failed", "error": "ffmpeg exited 1"}
+                return {"status": "succeeded", "gcs_uri": "gs://uploads/hls/j1/muxed/source.ts",
+                        "bytes": 7_000_000_000, "content_type": "video/mp2t"}
+            if tool == "make_analysis_proxy":
+                return {"status": "error", "error": "off"}
+            return {"status": "success"}
+        return call
+
+    @pytest.mark.asyncio
+    async def test_the_muxed_recording_becomes_the_source(self):
+        state = {"calls": [], "mux_polls": 0}
+        with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=self._call(state))), \
+             patch.object(pipeline.asyncio, "sleep", AsyncMock()):
+            out = await pipeline._download_hls_source("j1", "https://x.test/vod.m3u8")
+        assert out["gcs_uri"].endswith("muxed/source.ts")
+        mux = [a for t, a in state["calls"] if t == "mux_audio"][0]
+        assert mux["gcs_uri"] == DOWNLOADED["gcs_uri"]
+        assert mux["audio_playlist_url"] == "https://x.test/audio.m3u8"
+        status = [a for t, a in state["calls"] if t == "mux_status"][-1]
+        assert status["original_uri"] == DOWNLOADED["gcs_uri"], "the silent original is replaced"
+        sources = set_sources(state)
+        assert sources[0]["gcs_uri"] == DOWNLOADED["gcs_uri"], "the download is recorded first"
+        assert sources[-1]["gcs_uri"].endswith("muxed/source.ts")
+        assert sources[-1]["size_bytes"] == 7_000_000_000
+        proxy = [a for t, a in state["calls"] if t == "make_analysis_proxy"][0]
+        assert proxy["gcs_uri"].endswith("muxed/source.ts"), "the proxy is made from the muxed one"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_mux_leaves_the_silent_recording_with_a_warning(self):
+        state = {"calls": [], "mux_polls": 0}
+        with patch.object(pipeline.mcp_client, "call_tool",
+                          AsyncMock(side_effect=self._call(state, mux_state="failed"))), \
+             patch.object(pipeline.asyncio, "sleep", AsyncMock()):
+            out = await pipeline._download_hls_source("j1", "https://x.test/vod.m3u8")
+        assert out["status"] == "success"
+        assert out["gcs_uri"] == DOWNLOADED["gcs_uri"]
+        warnings = [a for t, a in state["calls"] if t == "emit_event" and a.get("level") == "warning"]
+        assert any("stays silent" in w["message"] for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_a_muxed_source_needs_no_second_fetch(self, media):
+        await pipeline._download_hls_source("j1", "https://x.test/vod.m3u8")
+        assert not [t for t, _ in media["calls"] if t == "mux_audio"]
+
+
 class TestTheProxy:
     @pytest.mark.asyncio
     async def test_it_is_made_on_transcoder_from_the_downloaded_object(self, media):

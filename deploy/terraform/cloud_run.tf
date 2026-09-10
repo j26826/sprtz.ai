@@ -166,6 +166,10 @@ resource "google_cloud_run_v2_service" "mcp_media" {
         value = google_cloud_run_v2_job.live_capture.id
       }
       env {
+        name  = "REMUX_JOB"
+        value = google_cloud_run_v2_job.remux.id
+      }
+      env {
         name  = "LIVE_CHUNK_SECONDS"
         value = tostring(var.live_chunk_seconds)
       }

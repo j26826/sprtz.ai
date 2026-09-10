@@ -107,3 +107,45 @@ class TestParsePdt:
     def test_garbage_is_none(self):
         assert hls.parse_pdt("yesterday") is None
         assert hls.parse_pdt("") is None
+
+
+DEMUXED_MASTER = """#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-aacl-100",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="manifest-audio_0=100848.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-aacl-100",NAME="Commentary",DEFAULT=NO,URI="manifest-audio_1=100848.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=854x480,CODECS="avc1.4d401f",AUDIO="audio-aacl-100"
+manifest-video_0=1100000.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=4060000,RESOLUTION=1920x1080,CODECS="avc1.640028",AUDIO="audio-aacl-100"
+manifest-video_0=3945178.m3u8
+"""
+
+
+class TestASeparateAudioRendition:
+    """JW Player and Unified Streaming keep the audio out of the variant.
+
+    A download of the variant alone is a silent recording; the group the
+    variant names is where the sound is.
+    """
+
+    def test_the_variant_names_its_audio_group(self):
+        variants = hls.parse_master(DEMUXED_MASTER, "https://cdn.example.com/x/manifest.m3u8")
+        assert hls.pick_variant(variants).audio_group == "audio-aacl-100"
+        assert hls.pick_variant(hls.parse_master(MASTER, "https://cdn.example.com/")).audio_group == ""
+
+    def test_the_renditions_are_read_and_resolved(self):
+        found = hls.parse_audio_renditions(DEMUXED_MASTER, "https://cdn.example.com/x/manifest.m3u8")
+        assert [r.name for r in found] == ["English", "Commentary"]
+        assert found[0].default and not found[1].default
+        assert found[0].url == "https://cdn.example.com/x/manifest-audio_0=100848.m3u8"
+
+    def test_the_default_rendition_of_the_variants_group_is_chosen(self):
+        url = hls.separate_audio_url(DEMUXED_MASTER, "https://cdn.example.com/x/manifest.m3u8")
+        assert url.endswith("manifest-audio_0=100848.m3u8")
+
+    def test_a_muxed_master_needs_nothing(self):
+        assert hls.separate_audio_url(MASTER, "https://cdn.example.com/") == ""
+
+    def test_a_rendition_without_a_uri_is_muxed_audio(self):
+        text = DEMUXED_MASTER.replace(',URI="manifest-audio_0=100848.m3u8"', "").replace(
+            ',URI="manifest-audio_1=100848.m3u8"', "")
+        assert hls.parse_audio_renditions(text, "https://cdn.example.com/") == []
+        assert hls.separate_audio_url(text, "https://cdn.example.com/") == ""

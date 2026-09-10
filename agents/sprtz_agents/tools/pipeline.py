@@ -324,9 +324,61 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
                 bytes=int(probe.get("bytes") or 0))
     await _progress(job_id, "ingest", _DOWNLOAD_BAND[1])
 
+    if started.get("audio_playlist_url"):
+        muxed = await _mux_audio(job_id, gcs_uri, started["audio_playlist_url"], deadline)
+        if muxed:
+            gcs_uri = muxed["gcs_uri"]
+            await mcp_client.call_tool("catalog", "set_source", {
+                "job_id": job_id, "gcs_uri": gcs_uri,
+                "size_bytes": int(muxed.get("bytes") or 0),
+                "content_type": muxed.get("content_type", ""),
+            })
+
     analysis_uri = await _make_analysis_proxy(job_id, gcs_uri)
     return {"status": "success", "job_id": job_id, "gcs_uri": gcs_uri,
             "analysis_uri": analysis_uri}
+
+
+async def _mux_audio(job_id: str, gcs_uri: str, audio_playlist_url: str,
+                     deadline: float) -> dict | None:
+    """Mux a separate audio rendition into a silent recording, on a job.
+
+    Returns the muxed object, or None when the recording stays as it was.
+    Silent is a warning rather than a failure — the analysis, the preview and
+    the clips all still work, without sound — and the feed says so.
+    """
+    await _emit(job_id, "ingest", "Adding the audio rendition to the recording.")
+    started = await mcp_client.call_tool("media", "mux_audio", {
+        "job_id": job_id, "gcs_uri": gcs_uri, "audio_playlist_url": audio_playlist_url})
+    if started.get("status") != "started":
+        await _emit(job_id, "ingest",
+                    "The audio could not be added; the recording stays silent "
+                    f"({started.get('error', 'unknown error')}).", level="warning")
+        return None
+
+    execution = started.get("execution", "")
+    interval = 15.0
+    since_heartbeat = 0.0
+    while True:
+        await asyncio.sleep(interval)
+        since_heartbeat += interval
+        interval = min(interval * 1.5, 60.0)
+        probe = await mcp_client.call_tool("media", "mux_status", {
+            "execution": execution, "output_uri": started.get("output_uri", ""),
+            "original_uri": gcs_uri})
+        state = probe.get("status")
+        if state == "succeeded":
+            await _emit(job_id, "ingest", "Added the audio rendition to the recording.",
+                        bytes=int(probe.get("bytes") or 0))
+            return probe
+        if state in ("failed", "error") or time.monotonic() > deadline:
+            await _emit(job_id, "ingest",
+                        "The audio could not be added; the recording stays silent "
+                        f"({probe.get('error') or 'the mux did not finish'}).", level="warning")
+            return None
+        if since_heartbeat >= _HEARTBEAT_SECONDS:
+            await _progress(job_id, "ingest", _DOWNLOAD_BAND[1])
+            since_heartbeat = 0.0
 
 
 async def _make_analysis_proxy(job_id: str, gcs_uri: str) -> str:

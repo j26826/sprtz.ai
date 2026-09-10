@@ -173,11 +173,19 @@ Anything else is probed in place over HTTPS, and `bytes` always comes from the
 object. **A source with no audio track is encoded without one**: Transcoder
 asked for an AAC stream from a silent file fails minutes in with "does not
 have any inputs with an audio track", so `transcode_hls` and
-`make_analysis_proxy` read the head first (`_source_has_audio`). An HLS
+`make_analysis_proxy` read the head first (`_source_has_audio`). **An HLS
 recording whose audio is a separate rendition — JW Player's are — arrives
-from the download tool as video-only MPEG-TS, because it muxes a separate
-audio rendition only into CMAF; until that is handled the analysis, the
-preview and the clips of such a source are silent.
+from the download tool as video-only MPEG-TS**, because it muxes a separate
+audio rendition only into CMAF. `download_hls` reads the master it already
+fetched for the check, and when the chosen variant names an `EXT-X-MEDIA`
+audio group and its media playlist is TS, it reports the audio playlist;
+the ingest stage then runs `mux_audio` — a Cloud Run Job on the media image
+(`media_server.remux`) that fetches the audio segments to the memory-backed
+disk and has one ffmpeg stream-copy video from the bucket and audio from
+disk into a new transport stream, piped straight back to the bucket — and
+polls `mux_status`, which hands over the muxed object and deletes the silent
+one. A mux that fails is a warning and the recording stays silent; the
+analysis, the preview and the clips all still run.
 
 **A live event is a recorder plus a tick, never one long process.** A live
 playlist is a sliding window of a few segments — 20 to 30 seconds — so the

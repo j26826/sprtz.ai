@@ -122,3 +122,7 @@ output "hls2mp4_job" {
 output "live_capture_job" {
   value = google_cloud_run_v2_job.live_capture.id
 }
+
+output "remux_job" {
+  value = google_cloud_run_v2_job.remux.id
+}

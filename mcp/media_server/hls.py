@@ -34,6 +34,17 @@ class Variant:
     bandwidth: int
     resolution: str = ""
     codecs: str = ""
+    # The EXT-X-MEDIA group this variant's audio lives in, when the audio is
+    # a separate rendition rather than muxed into the variant's own segments.
+    audio_group: str = ""
+
+
+@dataclass(frozen=True)
+class AudioRendition:
+    group: str
+    url: str
+    name: str = ""
+    default: bool = False
 
 
 def parse_master(text: str, base_url: str) -> list[Variant]:
@@ -55,9 +66,51 @@ def parse_master(text: str, base_url: str) -> list[Variant]:
                 bandwidth=int(pending.get("BANDWIDTH") or pending.get("AVERAGE-BANDWIDTH") or 0),
                 resolution=pending.get("RESOLUTION", ""),
                 codecs=pending.get("CODECS", ""),
+                audio_group=pending.get("AUDIO", ""),
             ))
             pending = None
     return variants
+
+
+def parse_audio_renditions(text: str, base_url: str) -> list[AudioRendition]:
+    """Every ``EXT-X-MEDIA:TYPE=AUDIO`` entry that names its own playlist.
+
+    A rendition without a URI is audio muxed into the variant's segments and
+    needs nothing done; one with a URI is a second stream to fetch.
+    """
+    found: list[AudioRendition] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("#EXT-X-MEDIA"):
+            continue
+        attrs = attributes(line)
+        if attrs.get("TYPE", "").upper() != "AUDIO" or not attrs.get("URI"):
+            continue
+        found.append(AudioRendition(
+            group=attrs.get("GROUP-ID", ""),
+            url=urljoin(base_url, attrs["URI"]),
+            name=attrs.get("NAME", ""),
+            default=attrs.get("DEFAULT", "").upper() == "YES",
+        ))
+    return found
+
+
+def separate_audio_url(text: str, base_url: str, variant: Variant | None = None) -> str:
+    """The playlist of the audio a variant relies on, or "" when it carries its own.
+
+    JW Player and Unified Streaming publish video-only variants with the audio
+    in an EXT-X-MEDIA group — a download of the variant alone is silent. The
+    default rendition of the variant's group wins; failing that, the first.
+    """
+    if variant is None:
+        variant = pick_variant(parse_master(text, base_url))
+    if variant is None or not variant.audio_group:
+        return ""
+    group = [r for r in parse_audio_renditions(text, base_url) if r.group == variant.audio_group]
+    if not group:
+        return ""
+    chosen = next((r for r in group if r.default), group[0])
+    return chosen.url
 
 
 def is_master(text: str) -> bool:
