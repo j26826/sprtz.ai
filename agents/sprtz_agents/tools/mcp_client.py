@@ -141,6 +141,14 @@ def build_catalog_toolset() -> McpToolset | None:
 # --- Direct client ------------------------------------------------------------
 
 
+# A connection that could not be made is retried; a request that was sent is
+# not. Cloud Run retires an instance when a revision is replaced and takes a
+# hundred seconds to start the next, and one refused connection in the middle
+# of a two-hour playback wait marked the whole job failed with "ConnectError: ".
+_CONNECT_ATTEMPTS = 4
+_CONNECT_BACKOFF = (5, 15, 30)
+
+
 async def call_tool(server: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Invoke one MCP tool directly and return its decoded JSON result.
 
@@ -168,10 +176,22 @@ async def call_tool(server: str, tool: str, arguments: dict[str, Any]) -> dict[s
         "params": {"name": tool, "arguments": arguments},
     }
 
+    url = f"{base_url.rstrip('/')}{_MCP_PATH}"
     async with httpx.AsyncClient(timeout=httpx.Timeout(15 * 60)) as client:
-        response = await client.post(
-            f"{base_url.rstrip('/')}{_MCP_PATH}", json=payload, headers=headers
-        )
+        for attempt in range(_CONNECT_ATTEMPTS):
+            try:
+                response = await client.post(url, json=payload, headers=headers)
+                break
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                # The request never reached the server, so sending it again
+                # cannot do anything twice — and a Cloud Run instance being
+                # retired or cold-starting is exactly what this looks like.
+                if attempt == _CONNECT_ATTEMPTS - 1:
+                    raise
+                delay = _CONNECT_BACKOFF[min(attempt, len(_CONNECT_BACKOFF) - 1)]
+                logger.warning("could not connect to %s for %s.%s (%s); retry %d/%d in %ss",
+                               server, server, tool, exc, attempt + 1, _CONNECT_ATTEMPTS, delay)
+                await asyncio.sleep(delay)
         response.raise_for_status()
         body = _decode(response.text)
 

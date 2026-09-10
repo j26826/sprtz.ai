@@ -1184,6 +1184,18 @@ is what proved concurrency alone was not the fix. The variable's old "keep at or
 below 1GiB per CPU" description was the disproved ratio theory and is gone; it
 would have pushed the limit the wrong way.
 
+**A poll that cannot reach the media service is not news about the work.**
+The playback wait met a retired Cloud Run instance one poll in — a deploy had
+replaced the media service twenty minutes earlier — took the exception as a
+dead encode, and marked the job failed with "ConnectError: " while Transcoder
+carried on for another half hour. Every wait on a job or an encode polls
+through `_poll_tool`, which reports the service as `unreachable` rather than
+raising, and the loop keeps waiting up to `_MAX_UNREACHABLE_POLLS` in a row.
+Underneath, `call_tool` retries a connection that was never made (four
+attempts, 5/15/30 s) — a request that never reached the server cannot have
+done anything, so that retry is safe for every tool; a request that was sent
+is never retried.
+
 **A stream of only keep-alives is a dead server, not a decoding problem.** When
 a container is killed mid-response the SSE body arrives as `: ping` comments and
 nothing else. `_decode` used to report "Could not decode MCP response" and quote
