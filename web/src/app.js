@@ -926,7 +926,7 @@ function openDetails(momentId, range = null) {
   // times, or a clip's trim — so the play is seen in its context. Every way
   // into the player comes through here: the row's thumbnail, the details
   // button, and the reel's Play.
-  const duration = Number(state.jobs.find((j) => j.jobId === (m.jobId || state.jobId))?.media?.durationSec || 0);
+  const duration = Number(state.jobs.find((j) => j.id === (m.jobId || state.jobId))?.media?.durationSec || 0);
   state.playing = {
     momentId,
     ...playRange(range?.start ?? m.startSec, range?.end ?? m.endSec, { duration }),
