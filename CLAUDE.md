@@ -48,6 +48,13 @@ cd api && ENVIRONMENT=local uvicorn app.main:app --reload   # bypasses IAP
 cd deploy/terraform && terraform fmt -recursive && terraform validate
 ```
 
+**A test must not pin "now" to a literal instant.** `test_live_event.py` fixed
+`NOW` at 2026-09-10 12:00 UTC, and the window validator refuses an event that
+has already ended — so the suite passed until that wall-clock time and failed
+every build after it, an hour later the same day, naming a validation error
+rather than a clock. Relative windows come from `datetime.now(UTC)`; a test
+that needs a literal date picks one far enough ahead to stay ahead.
+
 `ENVIRONMENT=local` is the only thing that bypasses IAP verification, and
 Terraform sets `ENVIRONMENT` in every deployed environment, so that branch is
 unreachable in the cloud.

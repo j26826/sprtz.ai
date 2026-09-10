@@ -19,7 +19,11 @@ from app.core import auth
 from app.routers import live
 from app.routers.jobs import LiveEventRequest, _clean_hls_url
 
-NOW = datetime.datetime(2026, 9, 10, 12, 0, tzinfo=datetime.UTC)
+# The real clock, not a fixed instant. The window validator refuses an event
+# that has already ended, so a hard-coded "now" makes these tests pass until
+# that wall-clock time and fail for ever after — which is exactly what
+# happened, an hour after the date they named.
+NOW = datetime.datetime.now(datetime.UTC)
 
 
 def _at(minutes: float) -> str:
@@ -50,7 +54,9 @@ class TestTheWindow:
         return LiveEventRequest(**base)
 
     def test_a_future_window_passes_and_is_normalised_to_utc(self):
-        req = self._req(event_start="2026-09-10T15:00:00+02:00", event_end="2026-09-10T16:00:00+02:00")
+        # A date far enough ahead that the window cannot fall into the past
+        # while anyone is still running this suite.
+        req = self._req(event_start="2099-01-01T15:00:00+02:00", event_end="2099-01-01T16:00:00+02:00")
         assert req.event_start.tzinfo == datetime.UTC
         assert req.event_start.hour == 13
 
