@@ -68,22 +68,52 @@ def _cleanup(path: Path) -> None:
 # Containers whose header states the duration. A prefix of one of these is
 # the whole answer; a prefix of anything else is a shorter file.
 _HEADER_DURATION_CONTAINERS = ("mp4", "mov", "3gp")
+# MPEG-TS packets are 188 bytes from the start of the file, so a tail slice
+# that begins on a packet boundary probes clean.
+_TS_PACKET = 188
+
+
+def _slice_probe(gcs_uri: str, start_byte: int, end_byte: int) -> dict:
+    """ffprobe one byte range of an object, downloaded to scratch."""
+    work = _scratch()
+    try:
+        part = work / "part.bin"
+        gcs.download_range(gcs_uri, part, end_byte, start_byte=start_byte)
+        return ffmpeg_ops.probe(part)
+    finally:
+        _cleanup(work)
 
 
 def _head_probe(gcs_uri: str) -> dict:
-    """ffprobe the first ``_HEADER_BYTES`` of an object, downloaded to scratch."""
-    work = _scratch()
-    try:
-        head = work / "head.bin"
-        gcs.download_range(gcs_uri, head, _HEADER_BYTES)
-        return ffmpeg_ops.probe(head)
-    finally:
-        _cleanup(work)
+    """ffprobe the first ``_HEADER_BYTES`` of an object."""
+    return _slice_probe(gcs_uri, 0, _HEADER_BYTES)
 
 
 def _header_states_duration(info: dict) -> bool:
     container = (info.get("container") or "").lower()
     return any(name in container for name in _HEADER_DURATION_CONTAINERS)
+
+
+def _ends_probe(gcs_uri: str, head: dict, size: int) -> dict:
+    """The duration of a stream with no header, from its first and last bytes.
+
+    A transport stream's length is the last timestamp minus the first, and
+    those live in the first and last packets. Two range reads, the same size
+    as the header read, and no dependence on how a given ffmpeg seeks over
+    HTTPS — the service's ffmpeg 7.1 read a 6.9 GB recording to the end for
+    a question ffmpeg 9 answered with one seek in a second, and the probe
+    timed out at ten minutes.
+    """
+    start = max(0, size - _HEADER_BYTES)
+    if "mpegts" in (head.get("container") or "").lower():
+        start -= start % _TS_PACKET
+    tail = _slice_probe(gcs_uri, start, size)
+    end_sec = float(tail.get("start_sec") or 0.0) + float(tail.get("duration_sec") or 0.0)
+    duration = end_sec - float(head.get("start_sec") or 0.0)
+    if duration <= 0:
+        raise RuntimeError(f"could not place the ends of {gcs_uri}: head {head.get('start_sec')}, "
+                           f"tail {tail.get('start_sec')}+{tail.get('duration_sec')}")
+    return {**head, "duration_sec": round(duration, 3), "bytes": size}
 
 
 @mcp.tool
@@ -96,31 +126,39 @@ def probe_media(gcs_uri: str) -> dict:
     has no header to state its length, ffprobe reports the duration of what it
     was given, and the first 32 MiB of a 6.9 GB recording probed as a
     149-second video: the analysis then ran on one window and found nothing.
-    Anything that is not an MP4 family container is probed in place over
-    HTTPS, where ffprobe range-reads the tail for the last timestamp, and the
-    size always comes from the object rather than from what was read.
+    A container with no header is measured from its two ends instead — the
+    last packet's time minus the first's, two range reads — and a
+    non-faststart MP4 is probed in place over HTTPS, where ffprobe range-reads
+    the moov from the tail. The size always comes from the object.
 
     Args:
         gcs_uri: gs:// URI of the video.
     """
     try:
+        try:
+            size = gcs.object_size(gcs_uri)
+        except Exception:  # noqa: BLE001
+            size = 0
         info: dict | None = None
+        head: dict | None = None
         try:
             head = _head_probe(gcs_uri)
             if head["duration_sec"] > 0 and _header_states_duration(head):
                 info = head
         except Exception as exc:  # noqa: BLE001
-            logger.info("header probe failed (%s); probing over HTTPS", exc)
+            logger.info("header probe failed (%s)", exc)
+
+        if info is None and head is not None and size and not _header_states_duration(head):
+            try:
+                info = _ends_probe(gcs_uri, head, size)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ends probe failed (%s); probing over HTTPS", exc)
 
         if info is None:
-            # Non-faststart MP4, or a container with no header to read: probe
-            # it in place over HTTPS. The object never lands on local disk.
+            # Non-faststart MP4, or a stream whose ends could not be read:
+            # probe it in place over HTTPS. The object never lands on disk.
             info = ffmpeg_ops.probe(gcs.https_url(gcs_uri), bearer_token=gcs.bearer_token())
 
-        try:
-            size = gcs.object_size(gcs_uri)
-        except Exception:  # noqa: BLE001
-            size = 0
         if size:
             info["bytes"] = size
         return {"status": "success", "gcs_uri": gcs_uri, "partial_read": True, **info}
