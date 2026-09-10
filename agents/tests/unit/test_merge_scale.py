@@ -15,13 +15,16 @@ from sprtz_agents.schemas import DetectedMoment, SegmentAnalysis
 from sprtz_agents.tools.analysis import SegmentPlan, merge_segment_results
 
 
+def _tc(sec: int) -> str:
+    return f"{sec // 60:02d}:{sec % 60:02d}"
+
+
 def _analysis(count: int, *, spread_sec: int = 900) -> SegmentAnalysis:
     moments = []
     for i in range(count):
         at = (i * spread_sec) // max(count, 1)
-        tc = lambda sec: "%02d:%02d" % (sec // 60, sec % 60)  # noqa: E731
         moments.append(DetectedMoment(
-            moment_type="jump_shot", start_tc=tc(at), peak_tc=tc(at + 2), end_tc=tc(at + 4),
+            moment_type="jump_shot", start_tc=_tc(at), peak_tc=_tc(at + 2), end_tc=_tc(at + 4),
             confidence=0.9, excitement=0.5, description="d",
         ))
     return SegmentAnalysis(moments=moments, segment_summary="")
