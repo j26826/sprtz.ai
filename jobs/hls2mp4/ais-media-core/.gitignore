@@ -1,0 +1,7 @@
+# Crate-local ignores. The repo root .gitignore covers the shared rules; this
+# file keeps the crate self-contained if it is ever split out of the monorepo.
+target/
+*.rs.bk
+.DS_Store
+.env
+.env.*

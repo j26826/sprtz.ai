@@ -107,3 +107,37 @@ async def current_user(
         detail="Sign in required.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def _verify_scheduler(token: str, audience: str, expected_email: str) -> str:
+    """Verify a Google-signed ID token from Cloud Scheduler.
+
+    Audience and email both have to match: the audience is the tick URL, so a
+    token minted for some other service cannot be replayed here, and the email
+    is the scheduler's own service account, so nothing else in the project
+    that can mint an ID token for this audience is accepted either.
+    """
+    claims = id_token.verify_oauth2_token(token, _request, audience=audience)
+    email = claims.get("email", "")
+    if not email or email != expected_email or not claims.get("email_verified", False):
+        raise ValueError(f"token is for {email or 'nobody'}, not the scheduler")
+    return email
+
+
+async def scheduler_caller(
+    authorization: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> str:
+    """Admit the live tick only from Cloud Scheduler."""
+    if settings.is_local:
+        return "local-scheduler"
+    if not settings.scheduler_service_account or not settings.live_tick_audience:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        try:
+            return _verify_scheduler(
+                token, settings.live_tick_audience, settings.scheduler_service_account)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rejected scheduler token: %s", exc)
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Scheduler only.")

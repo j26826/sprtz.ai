@@ -26,7 +26,7 @@ from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from media_server import ffmpeg_ops, gcs, transcoder
+from media_server import ffmpeg_ops, gcs, runjobs, transcoder
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("mcp-media")
@@ -35,6 +35,11 @@ UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET", "")
 MEDIA_BUCKET = os.environ.get("MEDIA_BUCKET", "")
 HLS_BUCKET = os.environ.get("HLS_BUCKET", "")
 CDN_BASE_URL = os.environ.get("CDN_BASE_URL", "").rstrip("/")
+# The two Cloud Run Jobs this service starts, as full resource names. Empty
+# means the deployment has none, and the tools that need them say so.
+HLS2MP4_JOB = os.environ.get("HLS2MP4_JOB", "")
+LIVE_CAPTURE_JOB = os.environ.get("LIVE_CAPTURE_JOB", "")
+LIVE_CHUNK_SECONDS = int(os.environ.get("LIVE_CHUNK_SECONDS", "300") or 300)
 # Cloud Run's writable filesystem is memory-backed, so scratch is only ever
 # used for small artefacts: playlists in flight, thumbnails, rendered clips.
 # Multi-gigabyte sources are read over HTTPS and never land here.
@@ -114,6 +119,11 @@ def delete_job_media(job_id: str, gcs_uri: str = "") -> dict:
             removed["failed"] = counts["failed"]
         if gcs_uri:
             removed["source_deleted"] = gcs.delete_object(gcs_uri)
+        if UPLOADS_BUCKET:
+            # An HLS source was downloaded here by the hls2mp4 job rather than
+            # uploaded under the owner's prefix; the caller's URI names only
+            # the file, not the run's other artefacts.
+            gcs.delete_prefix(UPLOADS_BUCKET, f"hls/{job_id}/")
 
         # Objects that were already gone are not a problem — the caller wanted
         # them gone. Only ones that refused to delete leave the prefix dirty,
@@ -616,6 +626,159 @@ def render_preview(gcs_uri: str, job_id: str, start_sec: float, end_sec: float) 
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
     finally:
         _cleanup(work)
+
+
+# --- HLS sources and live events (Cloud Run Jobs) ------------------------------
+
+
+def _hls_source_prefix(job_id: str) -> str:
+    return f"hls/{job_id}/"
+
+
+def _proxy_prefix(job_id: str) -> str:
+    return f"jobs/{job_id}/proxy/"
+
+
+@mcp.tool
+def download_hls(job_id: str, hls_url: str, proxy: bool = True) -> dict:
+    """Start downloading an HLS (.m3u8) source into the uploads bucket.
+
+    Runs `jobs/hls2mp4` as a Cloud Run Job execution and returns at once: a
+    long recording is minutes of download and, with the proxy, a decode of the
+    whole thing, neither of which belongs inside a request. Poll it with
+    `hls_download_status`.
+
+    The tool writes a progressive MP4 for a CMAF stream and a .ts for an
+    MPEG-TS one; which is only known once it has read the playlist, so the
+    status call resolves the object rather than this one naming it.
+
+    Args:
+        job_id: Job the source belongs to.
+        hls_url: https:// URL of the multivariant or media playlist.
+        proxy: Also produce the constant-1 fps 480p proxy the analysis reads.
+            It keeps the audio and is a fraction of the bytes.
+    """
+    if not HLS2MP4_JOB:
+        return {"status": "error", "error": "HLS2MP4_JOB is not configured."}
+    if not UPLOADS_BUCKET or not MEDIA_BUCKET:
+        return {"status": "error", "error": "UPLOADS_BUCKET and MEDIA_BUCKET must be configured."}
+    try:
+        # Anything already here is from an attempt that did not finish.
+        gcs.delete_prefix(UPLOADS_BUCKET, _hls_source_prefix(job_id))
+        gcs.delete_prefix(MEDIA_BUCKET, _proxy_prefix(job_id))
+        env = {
+            "EXT_SOURCE_URI": hls_url,
+            "AIS_SOURCE_URI": f"gs://{UPLOADS_BUCKET}/{_hls_source_prefix(job_id)}source.mp4",
+            "EVENT_ID": "source",
+        }
+        if proxy:
+            env["PROXY_1FPS"] = "true"
+            env["AIS_PREVIEW_URI"] = f"gs://{MEDIA_BUCKET}/{_proxy_prefix(job_id).rstrip('/')}"
+        execution = runjobs.run(HLS2MP4_JOB, env)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not start the HLS download for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+    return {"status": "started", "job_id": job_id, "execution": execution}
+
+
+@mcp.tool
+def hls_download_status(execution: str, job_id: str) -> dict:
+    """Where an HLS download is, and the objects it produced once it is done.
+
+    Args:
+        execution: The execution name `download_hls` returned.
+        job_id: Job the download belongs to.
+    """
+    try:
+        state = runjobs.execution_state(execution)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
+    if state["state"] != "succeeded":
+        return {"status": state["state"], **state}
+
+    source = None
+    for blob in gcs.client().list_blobs(UPLOADS_BUCKET, prefix=f"{_hls_source_prefix(job_id)}source/"):
+        if blob.name.endswith((".mp4", ".ts")) and "_proxy_" not in blob.name:
+            if source is None or (blob.size or 0) > (source.size or 0):
+                source = blob
+    if source is None:
+        return {"status": "failed", "execution": execution,
+                "error": "the download finished but wrote no source object"}
+
+    analysis_uri = ""
+    for blob in gcs.client().list_blobs(MEDIA_BUCKET, prefix=_proxy_prefix(job_id)):
+        if blob.name.endswith("_proxy_1fps.mp4"):
+            analysis_uri = f"gs://{MEDIA_BUCKET}/{blob.name}"
+            break
+
+    return {
+        "status": "succeeded", "execution": execution, "job_id": job_id,
+        "gcs_uri": f"gs://{UPLOADS_BUCKET}/{source.name}",
+        "bytes": int(source.size or 0),
+        "content_type": source.content_type or ("video/mp2t" if source.name.endswith(".ts") else "video/mp4"),
+        "original_name": source.name.rsplit("/", 1)[-1],
+        "analysis_uri": analysis_uri,
+    }
+
+
+@mcp.tool
+def start_live_capture(job_id: str, hls_url: str, event_end: str, chunk_sec: int = 0) -> dict:
+    """Start recording a live HLS stream into fixed-length chunks.
+
+    One Cloud Run Job execution follows the playlist until `event_end` (or the
+    stream's own end) and records each closed chunk under the job in Firestore
+    for the live tick to analyse. Returns at once; poll with
+    `live_capture_status`.
+
+    Args:
+        job_id: The live event's job.
+        hls_url: https:// URL of the live playlist.
+        event_end: ISO 8601 time the recording stops.
+        chunk_sec: Chunk length in seconds; the deployment default when 0.
+    """
+    if not LIVE_CAPTURE_JOB:
+        return {"status": "error", "error": "LIVE_CAPTURE_JOB is not configured."}
+    try:
+        gcs.delete_prefix(MEDIA_BUCKET, f"jobs/{job_id}/live/")
+        execution = runjobs.run(LIVE_CAPTURE_JOB, {
+            "JOB_ID": job_id,
+            "HLS_URL": hls_url,
+            "EVENT_END": event_end,
+            "CHUNK_SEC": str(int(chunk_sec) or LIVE_CHUNK_SECONDS),
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not start the live capture for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+    return {"status": "started", "job_id": job_id, "execution": execution,
+            "chunk_sec": int(chunk_sec) or LIVE_CHUNK_SECONDS}
+
+
+@mcp.tool
+def live_capture_status(execution: str) -> dict:
+    """Whether a live capture execution is still running.
+
+    Args:
+        execution: The execution name `start_live_capture` returned.
+    """
+    try:
+        state = runjobs.execution_state(execution)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
+    return {"status": state["state"], **state}
+
+
+@mcp.tool
+def cancel_live_capture(execution: str) -> dict:
+    """Stop a live capture early. Chunks already closed stay where they are.
+
+    Args:
+        execution: The execution name `start_live_capture` returned.
+    """
+    try:
+        runjobs.cancel(execution)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
+    return {"status": "cancelled", "execution": execution}
 
 
 @mcp.custom_route("/healthz", methods=["GET"])

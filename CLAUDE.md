@@ -24,6 +24,7 @@ mcp/         MCP tool servers (private Cloud Run)
   catalog_server/                Firestore, embeddings, KNN + Gemini rerank
 api/         FastAPI behind IAP: signed uploads, signed CDN URLs, agent SSE proxy
 web/         Arenos editor SPA (chat-first, Arenos design system)
+jobs/        Cloud Run Jobs: hls2mp4 (vendored Rust HLS downloader + its core crate)
 deploy/      cloudbuild.yaml, terraform/, scripts/{preflight,bootstrap}.sh
 ```
 
@@ -38,7 +39,7 @@ uv run ruff check sprtz_agents                          # must be clean
 # MCP servers
 cd mcp && uv run --with pytest --with fastmcp --with google-cloud-firestore \
   --with google-genai --with google-cloud-storage --with google-auth \
-  --with pydantic pytest tests -q                       # 17 tests
+  --with pydantic --with requests pytest tests -q       # 145 tests
 
 # API
 cd api && ENVIRONMENT=local uvicorn app.main:app --reload   # bypasses IAP
@@ -123,6 +124,92 @@ against the live project. Treat a merge as a deploy.
 - The model reports **`MM:SS` timecodes within the clip**, not float seconds.
   Out-of-window values are rejected, never clamped — a clamp puts a moment at a
   timestamp nobody observed.
+
+
+### HLS sources, live events, and the watchdog
+
+Three kinds of job, told apart by `kind`: `upload` (a file in the bucket),
+`hls` (a recorded playlist URL), `live` (a playlist URL and a time window).
+
+**An HLS source is downloaded by a Cloud Run Job, not by the media service.**
+`jobs/hls2mp4` is the `vod-hls2mp4` tool vendored from ais-media-services
+with its `ais-media-core` sibling; its Dockerfile's runtime takes ffmpeg from
+Debian rather than from upstream's shared base image, which takes an hour to
+build and this pipeline does not want. The build context is `jobs/hls2mp4`,
+not the crate — the Dockerfile COPYs the two crates as siblings. It is the
+longest build step by far, so it starts first and reuses the previous image's
+dependency layer through `--cache-from`. The media service starts an
+execution with per-run env (`download_hls`) and the ingest stage polls it
+(`hls_download_status`), the same shape as a Transcoder encode. The download
+lands under `hls/<job>/source/` in the uploads bucket as `.mp4` (CMAF) or
+`.ts` (MPEG-TS) — which is not known until the playlist is read, so the status
+call lists the prefix rather than assuming a name — and `set_source` puts it
+on the job. **With it comes the 1 fps 480p proxy** (`--proxy-1fps`, audio
+kept), stored as `source.analysisUri`: the analysis reads that, because it is
+the same picture Gemini samples anyway at a fraction of the bytes. Thumbnails
+and clips still read `source.gcsUri`; a still from a 480p proxy is not a still.
+
+**A live event is a recorder plus a tick, never one long process.** A live
+playlist is a sliding window of a few segments — 20 to 30 seconds — so the
+capture cannot be something that looks once a minute, and nothing on the
+engine survives a deploy, so it cannot be an agent run either. The recorder
+is `media_server.live_capture`, run as a Cloud Run Job execution on the
+mcp-media image (`command` override): it follows the playlist until the end
+time or `EXT-X-ENDLIST`, writes each media segment to the media bucket, and
+joins them **server-side with GCS compose** into five-minute chunks
+(`live_chunk_seconds`) — no bytes pass through the container. Each closed
+chunk is one document under `jobs/{job}/chunks/{index}` carrying its first and
+last media-sequence numbers, its programme-date-time span, and what the
+recorder saw slide past. That is the media service's second Firestore writer,
+on purpose: a recorder that has to wait on the catalog's request path is a
+recorder that drops segments while it waits.
+
+The tick is **Cloud Scheduler → `POST /api/live/tick` → `live_event_agent`**,
+once a minute. The route is the one on the API not for an editor: it admits a
+Google-signed ID token for exactly that audience from exactly the scheduler's
+service account (`scheduler_caller`), and 404s when neither is configured.
+The API lists live jobs, wakes the agent only for the ones due — a scheduled
+event from `live_lead_seconds` before its start, a running one always — and
+`live_tick` does one step: start the capture, or analyse every chunk the
+recorder has closed, or finish. A chunk is analysed **through `_analyse_one`,
+the same call an uploaded match's windows go through**, as a file that starts
+at 00:00 with the plan's `start_sec` set to the chunk's offset, so the merged
+timestamps are absolute and the event reads as one timeline. Claiming a chunk
+is a Firestore transaction and the tick holds a lock on the job, because the
+scheduler fires on the minute whatever the last tick is still doing and five
+minutes analysed twice is every moment in them saved twice.
+
+**Continuity is checked two-sided.** The recorder notes what it saw; the tick
+checks each chunk against the previous one *as stored* — sequence numbers that
+do not follow on, wall clock that does not agree — because a gap between two
+recorder executions is exactly the gap the recorder cannot see. A gap is a
+warning event naming the chunk, never a silent join.
+
+**The same clock is the watchdog.** Nothing on the engine retries a run that
+dies with its process, and the job then reads as running for ever — so the
+tick also asks the catalog for running jobs nothing has written to in fifteen
+minutes and hands each to `recover_job`, which confirms the silence from the
+job's own `updatedAt`, counts the restart on the job (`recovery.attempts`,
+capped at two — a job that dies every time is saying something), clears the
+previous findings, and tells the root agent to run `analysis_pipeline` again.
+The live tick does the equivalent for its own parts: a failed chunk is put
+back to `captured` up to three times, and a recorder execution that has died
+or stopped reporting for five minutes while the event is still on is
+restarted, up to three times; a restarted recorder **resumes its chunk
+numbering** from what is on record, or the second execution's chunk 0 would
+sit on top of the first's. Inside a VOD analysis, segments that failed get a
+second pass on their own once the burst is over — what the HTTP retry cannot
+cover is a response that came back unparseable, and a window asked again with
+the quota free usually answers.
+
+Three figures are mirrored and must move together: the lead-in
+(`SPRTZ_LIVE_LEAD_SECONDS`, `LIVE_LEAD_SECONDS` on the API, `LIVE_LEAD_SEC` in
+`web/src/live.js`) and the chunk length (`live_chunk_seconds` in Terraform,
+reaching the recorder, the media service and the engine) — the web's copies
+only decide what a row says before the job document carries its own.
+
+The scheduler lives in `scheduler_region` (default `us-central1`): Cloud
+Scheduler serves fewer regions than Cloud Run and the job can target any URL.
 
 ### The prompt is the product
 
@@ -1044,15 +1131,19 @@ publish" reads as a match with no highlights in it. `finalize_job` marks the job
 `failed` with a reason when there are no clips *and* no moments — a quiet match
 still only needs attention, because that is a real outcome.
 
-**Nothing retries a run that dies.** A deploy replaces the Agent Runtime engine
-and kills whatever it was doing. Progress reporting dies with it, so the job
-keeps the status it had and reads as running for ever. The editor shows a
-running job with no movement for 15 minutes as `stalled` and offers Retry; the
-agent is told that a stale `updated_at` under a running status means a dead run,
-because otherwise it correctly refuses to start "a second run".
+**Nothing on the engine retries a run that dies.** A deploy replaces the Agent
+Runtime engine and kills whatever it was doing. Progress reporting dies with it,
+so the job keeps the status it had and reads as running for ever. The editor
+shows a running job with no movement for 15 minutes as `stalled` and offers
+Retry; the agent is told that a stale `updated_at` under a running status means
+a dead run, because otherwise it correctly refuses to start "a second run". The
+watchdog tick (see *HLS sources, live events, and the watchdog*) now restarts
+such a run on its own, twice at most, through `recover_job`.
 
-Merging during an analysis therefore costs that analysis. It is not lost data —
-the upload is still in the bucket and the job can be re-run.
+Merging during an analysis therefore costs that analysis some minutes rather
+than the whole run: the upload is still in the bucket and the watchdog re-runs
+it. Still do not deploy over a live *event*: the recorder is a job and survives,
+but the tick's analysis of the chunk in flight does not.
 
 **The agent scopes `list_jobs` from the session, not from a parameter.**
 Editors never see a job id, so the agent has to be able to list their jobs to

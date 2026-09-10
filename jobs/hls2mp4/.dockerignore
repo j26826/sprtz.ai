@@ -1,0 +1,9 @@
+# The build context is jobs/hls2mp4 (this directory): the Dockerfile COPYs
+# ais-media-core and vod-hls2mp4/src as siblings, so this is the only ignore
+# file Docker consults. A stale local target/ is a multi-gigabyte upload.
+**/target
+.git
+.DS_Store
+**/*.md
+**/*.mp4
+**/*.ts

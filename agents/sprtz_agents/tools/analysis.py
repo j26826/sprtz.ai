@@ -246,6 +246,7 @@ async def analyse_segments(
     metadata_language: str = "en",
     on_segment_done: Callable[[int, int], Awaitable[None]] | None = None,
     segment_uris: dict[int, str] | None = None,
+    retry_failed: bool = True,
 ) -> dict:
     """Analyse every segment of a video concurrently and merge the results.
 
@@ -283,6 +284,23 @@ async def analyse_segments(
         return outcome
 
     results = await asyncio.gather(*(run(plan) for plan in plans))
+
+    # A second pass over whatever failed. The HTTP retry inside each call
+    # covers a 429 or a 503; what it cannot cover is a response that came
+    # back and would not parse, or a call that failed after its last retry
+    # while the others were still holding the quota. Asked again on its own,
+    # with the burst over, a window that failed usually answers — and the
+    # alternative is reporting fifteen minutes of match as empty.
+    failed_plans = [plan for plan, analysis, _ in results if analysis is None]
+    if failed_plans and retry_failed:
+        logger.warning("retrying %d segment(s) that failed", len(failed_plans))
+        again = await asyncio.gather(*(
+            _analyse_one(gcs_uri, plan, len(plans), sport, semaphore, metadata_language,
+                         (segment_uris or {}).get(plan.index, ""))
+            for plan in failed_plans
+        ))
+        second = {plan.index: outcome for outcome in again for plan in [outcome[0]]}
+        results = [second.get(plan.index, outcome) for outcome in results for plan in [outcome[0]]]
 
     analyses: list[tuple[SegmentPlan, SegmentAnalysis]] = []
     failures: list[dict] = []

@@ -1567,3 +1567,12 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 /* The send button is flush against the input's edge, so it keeps the corners
    on that side square whatever the theme does. */
 .composer-send { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+
+
+/* Live events: the start/end pair in the ingest panel, and the game record a
+   finished event shows in its job row. */
+.live-times { display: flex; gap: 8px; margin-top: 14px; }
+.live-times label { flex: 1; min-width: 0; display: block; }
+.live-times .composer-input { margin-top: 6px; width: 100%; }
+.live-error { margin-bottom: 4px; }
+.live-game { margin-top: 10px; padding-top: 10px; border-top: var(--rule-hair) solid var(--color-rule); }

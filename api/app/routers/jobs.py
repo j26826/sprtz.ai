@@ -12,7 +12,7 @@ import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from google.auth.transport import requests as google_requests
 from google.cloud import storage
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.core import cdn, clients
@@ -316,6 +316,161 @@ async def create_job_from_source(
             "content_type": blob.content_type or "",
             "metadata_language": body.metadata_language,
             "context_urls": body.context_urls,
+        },
+    )
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+    return result
+
+
+# An HLS source is an https URL to a playlist. https only: the media job fetches
+# whatever is given here from inside the project, and a plain-http URL can be
+# steered at the metadata server. Nothing else about it is validated — a token
+# in the query string is normal, and whether it is a playlist at all is settled
+# by the downloader reading it.
+_HLS_URL = re.compile(r"^https://[^\s/?#]+[^\s]{0,1500}$")
+
+
+def _clean_hls_url(url: str) -> str:
+    url = (url or "").strip()
+    if not _HLS_URL.match(url) or any(ord(c) < 32 for c in url):
+        raise ValueError("Not an HLS URL. Expected https://…/playlist.m3u8")
+    return url
+
+
+class HlsSourceRequest(BaseModel):
+    hls_url: str = Field(min_length=10, max_length=1600)
+    title: str = Field(min_length=1, max_length=200)
+    sport: str = Field(default="handball")
+    metadata_language: str = Field(default="en", max_length=8)
+    context_urls: list[str] = Field(default_factory=list)
+    # The 1 fps proxy the analysis reads instead of the source. Off only for
+    # a source that is already small.
+    proxy: bool = True
+
+    @field_validator("hls_url")
+    @classmethod
+    def _hls(cls, v: str) -> str:
+        return _clean_hls_url(v)
+
+    @field_validator("context_urls")
+    @classmethod
+    def _context_urls(cls, v: list[str]) -> list[str]:
+        return _clean_context_urls(v)
+
+
+@router.post("/from-hls", status_code=status.HTTP_201_CREATED)
+async def create_job_from_hls(
+    body: HlsSourceRequest,
+    user: CallerIdentity = Depends(current_user),
+) -> dict:
+    """Register a job against an HLS playlist.
+
+    The job has no source object yet: the ingest stage downloads the playlist
+    into the uploads bucket with `jobs/hls2mp4` — a progressive MP4 for a
+    CMAF stream, a .ts for MPEG-TS — and the 1 fps proxy the analysis reads,
+    then carries on as for an upload. So the URL is the only thing checked
+    here; the bytes are validated where they land.
+    """
+    result = await clients.call_mcp(
+        "catalog",
+        "create_job",
+        {
+            "job_id": uuid.uuid4().hex[:16],
+            "owner_uid": user.uid,
+            "title": body.title,
+            "sport": body.sport,
+            "gcs_uri": "",
+            "original_name": body.hls_url.rsplit("/", 1)[-1].split("?", 1)[0] or "stream.m3u8",
+            "size_bytes": 0,
+            "content_type": "application/vnd.apple.mpegurl",
+            "metadata_language": body.metadata_language,
+            "context_urls": body.context_urls,
+            "kind": "hls",
+            "hls_url": body.hls_url,
+        },
+    )
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+    return result
+
+
+# A live event is bounded: the recorder follows the playlist for this long at
+# most, and a window longer than a competition day is a typo.
+MAX_LIVE_EVENT_HOURS = 12
+
+
+class LiveEventRequest(BaseModel):
+    hls_url: str = Field(min_length=10, max_length=1600)
+    title: str = Field(min_length=1, max_length=200)
+    sport: str = Field(default="handball")
+    event_start: datetime.datetime
+    event_end: datetime.datetime
+    metadata_language: str = Field(default="en", max_length=8)
+    context_urls: list[str] = Field(default_factory=list)
+
+    @field_validator("hls_url")
+    @classmethod
+    def _hls(cls, v: str) -> str:
+        return _clean_hls_url(v)
+
+    @field_validator("context_urls")
+    @classmethod
+    def _context_urls(cls, v: list[str]) -> list[str]:
+        return _clean_context_urls(v)
+
+    @field_validator("event_start", "event_end")
+    @classmethod
+    def _aware(cls, v: datetime.datetime) -> datetime.datetime:
+        # A time with no zone is a time in somebody's head. The browser sends
+        # UTC; anything else is refused rather than guessed at.
+        if v.tzinfo is None:
+            raise ValueError("Event times must carry a timezone (send UTC with a Z).")
+        return v.astimezone(datetime.timezone.utc)
+
+    @model_validator(mode="after")
+    def _window(self) -> "LiveEventRequest":
+        if self.event_end <= self.event_start:
+            raise ValueError("The event must end after it starts.")
+        hours = (self.event_end - self.event_start).total_seconds() / 3600
+        if hours > MAX_LIVE_EVENT_HOURS:
+            raise ValueError(f"A live event is at most {MAX_LIVE_EVENT_HOURS} hours.")
+        if self.event_end <= datetime.datetime.now(datetime.timezone.utc):
+            raise ValueError("The event has already ended.")
+        return self
+
+
+@router.post("/live", status_code=status.HTTP_201_CREATED)
+async def create_live_event(
+    body: LiveEventRequest,
+    user: CallerIdentity = Depends(current_user),
+) -> dict:
+    """Schedule a live event.
+
+    Nothing runs now. The job is a document with a URL and a window; the live
+    tick — Cloud Scheduler, once a minute, through `/api/live/tick` — finds it
+    when its start is five minutes away, starts the capture, and analyses each
+    five-minute chunk as the recorder closes it. An event whose start is
+    already in the past is picked up on the next tick.
+    """
+    result = await clients.call_mcp(
+        "catalog",
+        "create_job",
+        {
+            "job_id": uuid.uuid4().hex[:16],
+            "owner_uid": user.uid,
+            "title": body.title,
+            "sport": body.sport,
+            "gcs_uri": "",
+            "original_name": "",
+            "size_bytes": 0,
+            "content_type": "application/vnd.apple.mpegurl",
+            "metadata_language": body.metadata_language,
+            "context_urls": body.context_urls,
+            "kind": "live",
+            "hls_url": body.hls_url,
+            "event_start": body.event_start.isoformat(),
+            "event_end": body.event_end.isoformat(),
         },
     )
     if result.get("status") == "error":

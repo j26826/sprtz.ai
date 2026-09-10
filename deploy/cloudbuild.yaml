@@ -265,23 +265,45 @@ steps:
       - build
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/mcp-media:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/hls2mp4:$SHORT_SHA
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/mcp-media:latest
       - -f
       - mcp/media_server/Dockerfile
       - mcp
 
-  # ---------- Push -------------------------------------------------------------
-
-  - id: push-images
+  # The HLS downloader is a Rust build, and a Rust build from cold is the
+  # longest step in this pipeline by some distance. It starts first, waits for
+  # nothing, and reuses the previous image's dependency layer: Cargo.lock
+  # unchanged means the crates are not recompiled. The pull fails harmlessly on
+  # a fresh registry.
+  - id: build-hls2mp4
     name: gcr.io/cloud-builders/docker
-    waitFor: ["build-api", "build-web", "build-mcp-catalog", "build-mcp-media", "bootstrap"]
+    waitFor: ["-"]
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        for image in api web mcp-catalog mcp-media; do
+        IMAGE=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/hls2mp4
+        docker pull "$$IMAGE:latest" || echo "no previous hls2mp4 image to cache from"
+        DOCKER_BUILDKIT=1 docker build \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from "$$IMAGE:latest" \
+          -t "$$IMAGE:$SHORT_SHA" -t "$$IMAGE:latest" \
+          -f jobs/hls2mp4/vod-hls2mp4/Dockerfile jobs/hls2mp4
+
+  # ---------- Push -------------------------------------------------------------
+
+  - id: push-images
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["build-api", "build-web", "build-mcp-catalog", "build-mcp-media", "build-hls2mp4", "bootstrap"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        for image in api web mcp-catalog mcp-media hls2mp4; do
           docker push --all-tags ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$$image
         done
 
@@ -384,6 +406,7 @@ steps:
           --env "SPRTZ_MODEL=$$(tf gemini_model)" \
           --env "SPRTZ_ANALYSIS_MODEL=$$(tf analysis_model)" \
           --env "SPRTZ_ANALYSIS_LOCATION=$$(tf analysis_location)" \
+          --env "SPRTZ_LIVE_CHUNK_SECONDS=$$(tf live_chunk_seconds)" \
           --env "SPRTZ_EMBEDDING_MODEL=$$(tf embedding_model)" \
           --env "SPRTZ_EMBEDDING_DIMENSIONS=$$(tf embedding_dimensions)" \
           --env "MCP_CATALOG_URL=$$(tf mcp_catalog_url)" \
@@ -431,3 +454,4 @@ images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/web:$SHORT_SHA
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/mcp-catalog:$SHORT_SHA
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/mcp-media:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/hls2mp4:$SHORT_SHA

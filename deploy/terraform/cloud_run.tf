@@ -157,6 +157,18 @@ resource "google_cloud_run_v2_service" "mcp_media" {
         name  = "TRANSCODER_LOCATION"
         value = var.region
       }
+      env {
+        name  = "HLS2MP4_JOB"
+        value = google_cloud_run_v2_job.hls2mp4.id
+      }
+      env {
+        name  = "LIVE_CAPTURE_JOB"
+        value = google_cloud_run_v2_job.live_capture.id
+      }
+      env {
+        name  = "LIVE_CHUNK_SECONDS"
+        value = tostring(var.live_chunk_seconds)
+      }
 
       startup_probe {
         http_get {
@@ -263,6 +275,16 @@ resource "google_cloud_run_v2_service" "api" {
       env {
         name  = "IAP_AUDIENCE"
         value = ""
+      }
+      # The live tick's caller. The route accepts a Google-signed ID token for
+      # this audience from this account and nothing else.
+      env {
+        name  = "SCHEDULER_SERVICE_ACCOUNT"
+        value = google_service_account.scheduler.email
+      }
+      env {
+        name  = "LIVE_TICK_AUDIENCE"
+        value = "${local.app_url}/api/live/tick"
       }
       env {
         name  = "IDENTITY_PLATFORM_API_KEY"
