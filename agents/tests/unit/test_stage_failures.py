@@ -161,6 +161,28 @@ class TestAFailedRunStops:
         assert not _status_updates(mock), "the reason on the job is the earlier stage's"
 
     @pytest.mark.asyncio
+    async def test_a_cancelled_job_stops_the_stages_after_it(self):
+        # Cancelling is what an editor does to a run they want stopped, and
+        # the stages after the cancelled one carried on and marked the job
+        # failed with "the analysis produced no moments" — the one thing
+        # cancelling promises not to do is report the run as broken.
+        ran = []
+
+        @pipeline.stage("captions", skip_if_failed=True)
+        async def later(job_id: str) -> dict:
+            ran.append(job_id)
+            return {"status": "success"}
+
+        for status in ("cancelled", "cancelling"):
+            ran.clear()
+            mock = self._job(status)
+            with patch.object(pipeline.mcp_client, "call_tool", mock):
+                out = await later("job-1")
+            assert out["status"] == "skipped", status
+            assert not ran, status
+            assert not _status_updates(mock), "the row keeps the cancel, not a failure"
+
+    @pytest.mark.asyncio
     async def test_a_running_job_goes_through(self):
         @pipeline.stage("clips", skip_if_failed=True)
         async def later(job_id: str) -> dict:

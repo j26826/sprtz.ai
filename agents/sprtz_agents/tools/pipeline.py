@@ -95,6 +95,11 @@ async def _progress(job_id: str, stage_name: str, fraction: float = 1.0,
         logger.warning("could not report progress for %s", job_id, exc_info=True)
 
 
+# What a run reads as when it is over and the stages after it have nothing
+# to do: an error the editor has to see, or a stop the editor asked for.
+_STOPPED_STATUSES = ("failed", "cancelled", "cancelling")
+
+
 def stage(name: str, skip_if_failed: bool = False):
     """Mark the job failed if a stage raises, instead of leaving it running.
 
@@ -110,6 +115,12 @@ def stage(name: str, skip_if_failed: bool = False):
     analysis produced no moments" over the real reason, and the editor was
     told to re-run a job whose link had expired. Ingest is left out — a
     re-run starts there on a job that is failed by definition.
+
+    ``cancelled`` counts the same way, and for a sharper reason: cancelling
+    is what an editor does to a run they want stopped, and the stages after
+    the cancelled one carried on and marked the job *failed* with "the
+    analysis produced no moments" — the one thing cancelling promises not to
+    do is report the run as broken.
     """
     def decorate(func):
         @functools.wraps(func)
@@ -117,10 +128,13 @@ def stage(name: str, skip_if_failed: bool = False):
             job_id = kwargs.get("job_id") or (args[0] if args else "")
             if skip_if_failed and job_id:
                 job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
-                if job.get("status") == "failed":
-                    logger.info("stage %s skipped: job %s already failed", name, job_id)
+                if job.get("status") in _STOPPED_STATUSES:
+                    logger.info("stage %s skipped: job %s is %s",
+                                name, job_id, job.get("status"))
                     return {"status": "skipped", "job_id": job_id,
-                            "error": job.get("error") or "an earlier stage failed"}
+                            "job_status": job.get("status"),
+                            "error": job.get("error")
+                            or f"the run was {job.get('status')} before this stage"}
             try:
                 return await func(*args, **kwargs)
             except Exception as exc:

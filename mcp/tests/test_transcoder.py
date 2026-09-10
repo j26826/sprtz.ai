@@ -176,6 +176,27 @@ class TestASilentSource:
         assert "audio-aac" in cfg.mux_streams[0].elementary_streams
 
 
+class TestAGapInTheSource:
+    """A real recording can be missing frames in the middle of a stream.
+
+    A LeMieux upload has two minutes with no audio at 01:32:00, and without
+    this Transcoder refuses the whole encode for it — no preview and no
+    analysis proxy because of two silent minutes.
+    """
+
+    def test_both_jobs_fill_content_gaps(self):
+        for maker, args in ((transcoder.create_preview_job, ("gs://up/v.mp4", "hls", "j1")),
+                            (transcoder.create_proxy_job, ("gs://up/v.mp4", "media", "j1"))):
+            fake = MagicMock()
+            created = MagicMock()
+            created.name = "projects/p/locations/l/jobs/x"
+            fake.create_job.return_value = created
+            with patch.object(transcoder, "client", return_value=fake):
+                maker(*args)
+            sent = fake.create_job.call_args.kwargs["job"]
+            assert sent.fill_content_gaps is True, maker.__name__
+
+
 class TestJobLifecycle:
     def _client(self, state_name: str, message: str = ""):
         job = MagicMock()
