@@ -199,6 +199,13 @@ def delete_object(gcs_uri: str) -> bool:
     return True
 
 
+def object_size(gcs_uri: str) -> int:
+    """The object's size in bytes, from its metadata — no bytes are read."""
+    bucket, name = split_uri(gcs_uri)
+    blob = client().bucket(bucket).get_blob(name)
+    return int(blob.size or 0) if blob else 0
+
+
 def object_exists(bucket: str, name: str) -> bool:
     """Whether one object is actually there."""
     return client().bucket(bucket).blob(name).exists()

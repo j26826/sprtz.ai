@@ -164,6 +164,21 @@ for it (`transcoder_media_write`), the same minutes-in failure as the
 package's grants. Thumbnails and clips still read `source.gcsUri`; a still
 from a 480p proxy is not a still.
 
+**A prefix of an MPEG-TS is a shorter file.** `probe_media` reads the first
+32 MiB and trusts the result only for an MP4-family container, whose header
+states the duration; a transport stream has no such header, ffprobe reports
+the length of what it was given, and 32 MiB of a 6.9 GB recording probed as a
+149-second video — the analysis ran on one window and found nothing, twice.
+Anything else is probed in place over HTTPS, and `bytes` always comes from the
+object. **A source with no audio track is encoded without one**: Transcoder
+asked for an AAC stream from a silent file fails minutes in with "does not
+have any inputs with an audio track", so `transcode_hls` and
+`make_analysis_proxy` read the head first (`_source_has_audio`). An HLS
+recording whose audio is a separate rendition — JW Player's are — arrives
+from the download tool as video-only MPEG-TS, because it muxes a separate
+audio rendition only into CMAF; until that is handled the analysis, the
+preview and the clips of such a source are silent.
+
 **A live event is a recorder plus a tick, never one long process.** A live
 playlist is a sliding window of a few segments — 20 to 30 seconds — so the
 capture cannot be something that looks once a minute, and nothing on the

@@ -99,15 +99,14 @@ def output_uri(bucket: str, job_id: str) -> str:
     return f"gs://{bucket}/jobs/{job_id}/hls/"
 
 
-def build_preview_config(out_uri: str) -> Any:
-    """A single-rendition 480p HLS package."""
+def build_preview_config(out_uri: str, audio: bool = True) -> Any:
+    """A single-rendition 480p HLS package. ``audio=False`` for a silent source."""
     from google.cloud.video import transcoder_v1
     from google.protobuf import duration_pb2
 
     segment = duration_pb2.Duration(seconds=SEGMENT_SECONDS)
 
-    return transcoder_v1.types.JobConfig(
-        elementary_streams=[
+    streams = [
             transcoder_v1.types.ElementaryStream(
                 key="video-480p",
                 video_stream=transcoder_v1.types.VideoStream(
@@ -125,19 +124,17 @@ def build_preview_config(out_uri: str) -> Any:
                     ),
                 ),
             ),
-            transcoder_v1.types.ElementaryStream(
-                key="audio-aac",
-                audio_stream=transcoder_v1.types.AudioStream(
-                    codec="aac",
-                    bitrate_bps=AUDIO_BITRATE_BPS,
-                ),
-            ),
-        ],
+    ]
+    if audio:
+        streams.append(_audio_stream("audio-aac", AUDIO_BITRATE_BPS))
+
+    return transcoder_v1.types.JobConfig(
+        elementary_streams=streams,
         mux_streams=[
             transcoder_v1.types.MuxStream(
                 key="hls-480p",
                 container="ts",
-                elementary_streams=["video-480p", "audio-aac"],
+                elementary_streams=[s.key for s in streams],
                 segment_settings=transcoder_v1.types.SegmentSettings(
                     segment_duration=segment,
                     # Without this the container is written as one file and
@@ -161,45 +158,55 @@ def proxy_output_uri(bucket: str, job_id: str) -> str:
     return f"gs://{bucket}/jobs/{job_id}/proxy/"
 
 
-def build_proxy_config(out_uri: str) -> Any:
-    """One 480p, 1 fps MP4 with the audio kept — the file the analysis reads."""
+def _audio_stream(key: str, bitrate_bps: int) -> Any:
+    from google.cloud.video import transcoder_v1
+
+    return transcoder_v1.types.ElementaryStream(
+        key=key,
+        audio_stream=transcoder_v1.types.AudioStream(codec="aac", bitrate_bps=bitrate_bps),
+    )
+
+
+def build_proxy_config(out_uri: str, audio: bool = True) -> Any:
+    """One 480p, 1 fps MP4 with the audio kept — the file the analysis reads.
+
+    ``audio=False`` for a source with no audio track: Transcoder asked for an
+    AAC stream from one fails rather than writing a silent file.
+    """
     from google.cloud.video import transcoder_v1
     from google.protobuf import duration_pb2
 
+    streams = [
+        transcoder_v1.types.ElementaryStream(
+            key="video-1fps",
+            video_stream=transcoder_v1.types.VideoStream(
+                h264=transcoder_v1.types.VideoStream.H264CodecSettings(
+                    height_pixels=PROXY_HEIGHT,
+                    width_pixels=PROXY_WIDTH,
+                    bitrate_bps=PROXY_BITRATE_BPS,
+                    frame_rate=PROXY_FRAME_RATE,
+                    gop_duration=duration_pb2.Duration(seconds=PROXY_GOP_SECONDS),
+                ),
+            ),
+        ),
+    ]
+    if audio:
+        streams.append(_audio_stream("audio-aac", PROXY_AUDIO_BITRATE_BPS))
     return transcoder_v1.types.JobConfig(
-        elementary_streams=[
-            transcoder_v1.types.ElementaryStream(
-                key="video-1fps",
-                video_stream=transcoder_v1.types.VideoStream(
-                    h264=transcoder_v1.types.VideoStream.H264CodecSettings(
-                        height_pixels=PROXY_HEIGHT,
-                        width_pixels=PROXY_WIDTH,
-                        bitrate_bps=PROXY_BITRATE_BPS,
-                        frame_rate=PROXY_FRAME_RATE,
-                        gop_duration=duration_pb2.Duration(seconds=PROXY_GOP_SECONDS),
-                    ),
-                ),
-            ),
-            transcoder_v1.types.ElementaryStream(
-                key="audio-aac",
-                audio_stream=transcoder_v1.types.AudioStream(
-                    codec="aac",
-                    bitrate_bps=PROXY_AUDIO_BITRATE_BPS,
-                ),
-            ),
-        ],
+        elementary_streams=streams,
         mux_streams=[
             transcoder_v1.types.MuxStream(
                 key=PROXY_STREAM_KEY,
                 container="mp4",
-                elementary_streams=["video-1fps", "audio-aac"],
+                elementary_streams=[s.key for s in streams],
             ),
         ],
         output=transcoder_v1.types.Output(uri=out_uri),
     )
 
 
-def create_proxy_job(source_uri: str, media_bucket: str, job_id: str) -> dict[str, Any]:
+def create_proxy_job(source_uri: str, media_bucket: str, job_id: str,
+                     audio: bool = True) -> dict[str, Any]:
     """Start the 1 fps analysis proxy encode. Returns as soon as it is accepted."""
     from google.cloud.video import transcoder_v1
 
@@ -207,7 +214,7 @@ def create_proxy_job(source_uri: str, media_bucket: str, job_id: str) -> dict[st
     job = transcoder_v1.types.Job(
         input_uri=source_uri,
         output_uri=out_uri,
-        config=build_proxy_config(out_uri),
+        config=build_proxy_config(out_uri, audio=audio),
         ttl_after_completion_days=7,
         labels={"sprtz_job": job_id[:63], "sprtz_kind": "proxy"},
     )
@@ -220,7 +227,8 @@ def create_proxy_job(source_uri: str, media_bucket: str, job_id: str) -> dict[st
     }
 
 
-def create_preview_job(source_uri: str, hls_bucket: str, job_id: str) -> dict[str, Any]:
+def create_preview_job(source_uri: str, hls_bucket: str, job_id: str,
+                       audio: bool = True) -> dict[str, Any]:
     """Start the 480p HLS encode. Returns as soon as it is accepted."""
     from google.cloud.video import transcoder_v1
 
@@ -228,7 +236,7 @@ def create_preview_job(source_uri: str, hls_bucket: str, job_id: str) -> dict[st
     job = transcoder_v1.types.Job(
         input_uri=source_uri,
         output_uri=out_uri,
-        config=build_preview_config(out_uri),
+        config=build_preview_config(out_uri, audio=audio),
         # Let finished jobs age out on their own. The package lives in GCS; the
         # job record is only interesting while it is running or has just failed.
         ttl_after_completion_days=7,

@@ -64,37 +64,87 @@ def _cleanup(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+# Containers whose header states the duration. A prefix of one of these is
+# the whole answer; a prefix of anything else is a shorter file.
+_HEADER_DURATION_CONTAINERS = ("mp4", "mov", "3gp")
+
+
+def _head_probe(gcs_uri: str) -> dict:
+    """ffprobe the first ``_HEADER_BYTES`` of an object, downloaded to scratch."""
+    work = _scratch()
+    try:
+        head = work / "head.bin"
+        gcs.download_range(gcs_uri, head, _HEADER_BYTES)
+        return ffmpeg_ops.probe(head)
+    finally:
+        _cleanup(work)
+
+
+def _header_states_duration(info: dict) -> bool:
+    container = (info.get("container") or "").lower()
+    return any(name in container for name in _HEADER_DURATION_CONTAINERS)
+
+
 @mcp.tool
 def probe_media(gcs_uri: str) -> dict:
     """Read a video's duration, resolution, frame rate and codecs.
 
     Tries the file header alone first, which avoids pulling gigabytes across the
-    wire for a faststart MP4, and falls back to the whole file if that is not
-    enough to determine duration.
+    wire for a faststart MP4 — the moov atom states the duration, so a prefix
+    is the whole answer. **A prefix of an MPEG-TS is not.** A transport stream
+    has no header to state its length, ffprobe reports the duration of what it
+    was given, and the first 32 MiB of a 6.9 GB recording probed as a
+    149-second video: the analysis then ran on one window and found nothing.
+    Anything that is not an MP4 family container is probed in place over
+    HTTPS, where ffprobe range-reads the tail for the last timestamp, and the
+    size always comes from the object rather than from what was read.
 
     Args:
         gcs_uri: gs:// URI of the video.
     """
-    work = _scratch()
     try:
-        head = work / "head.mp4"
+        info: dict | None = None
         try:
-            gcs.download_range(gcs_uri, head, _HEADER_BYTES)
-            info = ffmpeg_ops.probe(head)
-            if info["duration_sec"] > 0:
-                return {"status": "success", "gcs_uri": gcs_uri, "partial_read": True, **info}
+            head = _head_probe(gcs_uri)
+            if head["duration_sec"] > 0 and _header_states_duration(head):
+                info = head
         except Exception as exc:  # noqa: BLE001
             logger.info("header probe failed (%s); probing over HTTPS", exc)
 
-        # Non-faststart file: probe it in place over HTTPS. ffprobe range-reads
-        # the moov atom from the tail; the object never lands on local disk.
-        info = ffmpeg_ops.probe(gcs.https_url(gcs_uri), bearer_token=gcs.bearer_token())
+        if info is None:
+            # Non-faststart MP4, or a container with no header to read: probe
+            # it in place over HTTPS. The object never lands on local disk.
+            info = ffmpeg_ops.probe(gcs.https_url(gcs_uri), bearer_token=gcs.bearer_token())
+
+        try:
+            size = gcs.object_size(gcs_uri)
+        except Exception:  # noqa: BLE001
+            size = 0
+        if size:
+            info["bytes"] = size
         return {"status": "success", "gcs_uri": gcs_uri, "partial_read": True, **info}
     except Exception as exc:  # noqa: BLE001
         logger.exception("probe_media failed for %s", gcs_uri)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "gcs_uri": gcs_uri}
-    finally:
-        _cleanup(work)
+
+
+def _source_has_audio(gcs_uri: str) -> bool:
+    """Whether the source carries an audio track, from its first bytes.
+
+    Transcoder is told which elementary streams to make, and asked for an AAC
+    track from a file that has none it fails minutes in with "does not have
+    any inputs with an audio track" — which is what an HLS recording whose
+    audio was a separate rendition looks like. Stream presence is in the
+    first packets, so the head is enough. Unreadable means "assume audio":
+    that is the encode failing as it did, rather than a silent proxy made of
+    a source that had sound.
+    """
+    try:
+        return bool(_head_probe(gcs_uri).get("has_audio"))
+    except Exception:  # noqa: BLE001
+        logger.warning("could not tell whether %s has audio; assuming it does", gcs_uri,
+                       exc_info=True)
+        return True
 
 
 @mcp.tool
@@ -195,7 +245,8 @@ def transcode_hls(gcs_uri: str, job_id: str) -> dict:
         # overwritten — and a stale playlist would be served as if it were this
         # encode's.
         gcs.delete_prefix(HLS_BUCKET, f"jobs/{job_id}/hls/")
-        started = transcoder.create_preview_job(gcs_uri, HLS_BUCKET, job_id)
+        started = transcoder.create_preview_job(gcs_uri, HLS_BUCKET, job_id,
+                                                audio=_source_has_audio(gcs_uri))
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not start a transcoder job for %s", gcs_uri)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
@@ -777,7 +828,8 @@ def make_analysis_proxy(gcs_uri: str, job_id: str) -> dict:
         # A proxy left by an attempt that did not finish, or by the download
         # job's own encoder in an earlier release.
         gcs.delete_prefix(MEDIA_BUCKET, _proxy_prefix(job_id))
-        started = transcoder.create_proxy_job(gcs_uri, MEDIA_BUCKET, job_id)
+        started = transcoder.create_proxy_job(gcs_uri, MEDIA_BUCKET, job_id,
+                                              audio=_source_has_audio(gcs_uri))
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not start a proxy encode for %s", gcs_uri)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}

@@ -153,6 +153,29 @@ class TestAnalysisProxy:
         assert transcoder.proxy_output_uri("media", "j1") == "gs://media/jobs/j1/proxy/"
 
 
+class TestASilentSource:
+    """Transcoder asked for an AAC track from a file with none fails minutes in.
+
+    An HLS recording whose audio was a separate rendition arrives as a
+    video-only transport stream, and both the proxy and the preview died
+    with "does not have any inputs with an audio track".
+    """
+
+    def test_the_proxy_can_be_video_only(self):
+        cfg = transcoder.build_proxy_config("gs://media/jobs/j1/proxy/", audio=False)
+        assert [s.key for s in cfg.elementary_streams] == ["video-1fps"]
+        assert cfg.mux_streams[0].elementary_streams == ["video-1fps"]
+
+    def test_the_preview_can_be_video_only(self):
+        cfg = transcoder.build_preview_config("gs://hls/jobs/j1/hls/", audio=False)
+        assert [s.key for s in cfg.elementary_streams] == ["video-480p"]
+        assert cfg.mux_streams[0].elementary_streams == ["video-480p"]
+
+    def test_audio_is_the_default(self):
+        cfg = transcoder.build_preview_config("gs://hls/jobs/j1/hls/")
+        assert "audio-aac" in cfg.mux_streams[0].elementary_streams
+
+
 class TestJobLifecycle:
     def _client(self, state_name: str, message: str = ""):
         job = MagicMock()
