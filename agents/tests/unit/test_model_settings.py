@@ -72,11 +72,24 @@ class TestDeploymentCarriesThePair:
         assert 'output "analysis_model"' in OUTPUTS and 'output "analysis_location"' in OUTPUTS
 
     def test_terraform_defaults(self):
-        assert _default("analysis_model") == "gemini-3.6-flash"
-        assert _default("analysis_location") == "global"
+        # The analysis went back to 2.5 Flash after a day on 3.6: fewer
+        # moments judged right on the equestrian footage, and four windows of
+        # sixteen unanswerable even on the retry pass. 2.5 is regional, so
+        # the pair moves to us-central1 together. The reranker stays on 3.6.
+        assert _default("analysis_model") == "gemini-2.5-flash"
+        assert _default("analysis_location") == "us-central1"
         assert _default("rerank_model") == "gemini-3.6-flash"
         assert _default("rerank_location") == "global"
         assert _default("gemini_model") == "gemini-2.5-flash", "the engine's own model is unchanged"
+
+    def test_a_global_only_model_is_never_paired_with_a_region(self):
+        # Every regional endpoint 404s for the post-2.5 Flash models here;
+        # the pair is the guard, and this is the shape it must keep.
+        for model_var, location_var in (("analysis_model", "analysis_location"),
+                                        ("rerank_model", "rerank_location")):
+            model, location = _default(model_var), _default(location_var)
+            if not model.startswith("gemini-2.5"):
+                assert location == "global", f"{model} is only served globally"
 
     def test_the_catalog_receives_the_rerank_pair(self):
         assert 'value = var.rerank_model' in CLOUD_RUN
