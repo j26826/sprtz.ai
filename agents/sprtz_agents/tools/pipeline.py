@@ -236,7 +236,11 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
 
 # The download's share of the ingest band, as fractions of the stage: it
 # starts here and ends here, and the proxy encode and the probe take the rest.
-_DOWNLOAD_BAND = (0.05, 0.5)
+# The opening fraction is a tenth rather than a twentieth so the bar shows a
+# point at once: 0.05 of a ten-point band rounds to zero, and a bar at zero
+# for the three minutes the download job takes to start reads as nothing
+# running.
+_DOWNLOAD_BAND = (0.1, 0.5)
 
 
 async def _download_hls_source(job_id: str, hls_url: str) -> dict:
@@ -267,6 +271,9 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
             f"The HLS download could not be started: {started.get('error', 'unknown error')}")
 
     execution = started.get("execution", "")
+    await _emit(job_id, "ingest",
+                "The download job is starting; the first segments arrive once its container "
+                "is up, about three minutes.")
     deadline = time.monotonic() + settings.hls_download_timeout_seconds
     last_note = time.monotonic()
     interval = 15.0
@@ -292,8 +299,11 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
             # of the ingest band; the proxy takes most of the rest.
             await _progress(job_id, "ingest", _DOWNLOAD_BAND[0]
                             + (_DOWNLOAD_BAND[1] - _DOWNLOAD_BAND[0]) * fraction)
-            while quarters_noted < 3 and fraction >= (quarters_noted + 1) / 4:
-                quarters_noted += 1
+            crossed = min(3, int(fraction * 4))
+            if crossed > quarters_noted:
+                # One note per poll, however many quarter marks it crossed —
+                # a poll at 53% wrote the same count twice.
+                quarters_noted = crossed
                 await _emit(job_id, "ingest",
                             f"Downloaded {probe.get('segments_done')} of "
                             f"{probe.get('segments_total')} segments.")

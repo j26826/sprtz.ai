@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -38,6 +40,13 @@ logger = logging.getLogger("remux")
 
 FETCH_TIMEOUT = 60
 PARALLEL_FETCHES = 8
+# A CDN drops a connection now and then on three thousand fetches — the first
+# real run lost its whole mux to one "Remote end closed connection". Retried
+# from two seconds, doubling, with jitter so eight workers do not retry in step.
+FETCH_ATTEMPTS = 5
+FETCH_BACKOFF = 2.0
+
+_session = threading.local()
 UPLOAD_CHUNK = 32 * 1024 * 1024
 READ_CHUNK = 8 * 1024 * 1024
 
@@ -70,9 +79,28 @@ def fetch_playlist(url: str) -> hls.MediaPlaylist:
 
 
 def _fetch(url: str) -> bytes:
-    response = requests.get(url, timeout=FETCH_TIMEOUT)
-    response.raise_for_status()
-    return response.content
+    """One segment, on a per-thread keep-alive session, retried on the way."""
+    session = getattr(_session, "s", None)
+    if session is None:
+        session = _session.s = requests.Session()
+    last: Exception | None = None
+    for attempt in range(FETCH_ATTEMPTS):
+        try:
+            response = session.get(url, timeout=FETCH_TIMEOUT)
+            if response.status_code >= 500:
+                raise requests.HTTPError(f"HTTP {response.status_code}", response=response)
+            response.raise_for_status()
+            return response.content
+        except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as exc:
+            last = exc
+            if isinstance(exc, requests.HTTPError) and exc.response is not None \
+                    and exc.response.status_code < 500:
+                raise
+            delay = FETCH_BACKOFF * (2 ** attempt) * (0.5 + random.random())
+            logger.warning("fetch %s failed (%s); retry %d/%d in %.1fs",
+                           url.rsplit("/", 1)[-1][:60], exc, attempt + 1, FETCH_ATTEMPTS, delay)
+            time.sleep(delay)
+    raise RuntimeError(f"gave up fetching {url} after {FETCH_ATTEMPTS} attempts: {last}")
 
 
 def download_audio(playlist: hls.MediaPlaylist, dest: Path) -> int:
@@ -112,6 +140,13 @@ def remux_to_gcs(video_uri: str, audio_path: Path, output_uri: str) -> int:
     code = proc.wait()
     drain.join(timeout=30)
     if code != 0:
+        # The upload was opened before ffmpeg produced anything, so a failed
+        # run leaves an empty object under the muxed name. Remove it: an
+        # object that exists and is zero bytes reads as a finished mux.
+        try:
+            blob.delete()
+        except Exception:  # noqa: BLE001
+            logger.warning("could not remove the partial output %s", output_uri, exc_info=True)
         tail = b"".join(stderr).decode("utf-8", "replace").strip().splitlines()[-12:]
         raise RuntimeError("ffmpeg exited %d: %s" % (code, "\n".join(tail) or "no output"))
     return written

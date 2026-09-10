@@ -904,6 +904,9 @@ def mux_status(execution: str, output_uri: str, original_uri: str = "") -> dict:
         state = runjobs.execution_state(execution)
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
+    if state["state"] == "failed":
+        return {"status": "failed", **state,
+                "error": "the remux execution failed; its log names the segment or the ffmpeg error"}
     if state["state"] != "succeeded":
         return {"status": state["state"], **state}
     size = gcs.object_size(output_uri)
