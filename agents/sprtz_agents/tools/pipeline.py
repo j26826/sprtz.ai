@@ -1351,6 +1351,19 @@ async def delete_job(job_id: str) -> dict:
     job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     gcs_uri = (job.get("source") or {}).get("gcsUri", "")
 
+    # A live event's recorder is a Cloud Run Job execution with the job's id
+    # in its environment and nothing else. Deleting the job under it leaves
+    # it recording chunks for a document that is gone, until the event's end
+    # — hours of objects nothing refers to. Stop it first; a recorder that
+    # has already finished is not an error.
+    capture = (job.get("live") or {}).get("capture") or {}
+    if job.get("kind") == "live" and capture.get("execution") \
+            and capture.get("state") not in ("finished", "failed", "cancelled"):
+        stopped = await mcp_client.call_tool(
+            "media", "cancel_live_capture", {"execution": capture["execution"]})
+        if stopped.get("status") == "error":
+            logger.warning("could not stop the recorder for %s: %s", job_id, stopped.get("error"))
+
     # Media first: a failure here leaves a job pointing at its video, which is
     # recoverable. The other order leaves orphaned gigabytes nothing refers to.
     media = await mcp_client.call_tool(
