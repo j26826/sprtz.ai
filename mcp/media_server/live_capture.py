@@ -633,7 +633,14 @@ def main() -> int:
         logger.error("EVENT_END %r is not an ISO 8601 time", end_raw)
         return 2
     chunk_sec = float(os.environ.get("CHUNK_SEC") or os.environ.get("LIVE_CHUNK_SECONDS") or 300)
+    # The full resource name, not the bare id the platform hands the
+    # container: the tick polls and cancels this execution by name, and the
+    # API reads a bare id as a project. LIVE_CAPTURE_JOB is the job's own
+    # resource name, set on its template.
     execution = os.environ.get("CLOUD_RUN_EXECUTION", "")
+    job_resource = os.environ.get("LIVE_CAPTURE_JOB", "")
+    if execution and "/" not in execution and job_resource:
+        execution = f"{job_resource.rstrip('/')}/executions/{execution}"
     store = Store(job_id, MEDIA_BUCKET)
     recorder = Recorder(job_id, hls_url, event_end, chunk_sec, store, execution)
     try:

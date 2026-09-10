@@ -1059,7 +1059,7 @@ def live_capture_status(execution: str) -> dict:
         execution: The execution name `start_live_capture` returned.
     """
     try:
-        state = runjobs.execution_state(execution)
+        state = runjobs.execution_state(runjobs.qualify(execution, LIVE_CAPTURE_JOB))
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
     return {"status": state["state"], **state}
@@ -1073,7 +1073,7 @@ def cancel_live_capture(execution: str) -> dict:
         execution: The execution name `start_live_capture` returned.
     """
     try:
-        runjobs.cancel(execution)
+        runjobs.cancel(runjobs.qualify(execution, LIVE_CAPTURE_JOB))
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
     return {"status": "cancelled", "execution": execution}

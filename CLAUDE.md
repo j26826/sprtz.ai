@@ -518,6 +518,16 @@ with no handle to interrupt, so stages check `cancel_requested` between steps an
 stop at the next boundary. Moments already found are saved rather than discarded
 — cancelling should not also destroy the hour that was already paid for.
 
+**An execution is addressed by its full resource name.** A Cloud Run Job
+sees itself as `CLOUD_RUN_EXECUTION`, the bare id, and the recorder reported
+that over the full name the tick had stored; the API reads a bare id as a
+project ("Permission denied on resource project sprtz-dev-live-capture-…"),
+so the cancel on delete was refused and the status probe with it — and a
+recorder whose state cannot be read is one the event can never see finish.
+The recorder now qualifies its id against `LIVE_CAPTURE_JOB`, set on the job's
+template, and the media tools qualify any bare id they are handed
+(`runjobs.qualify`).
+
 **Deleting a live event stops its recorder first.** The recorder is a Cloud
 Run Job execution that knows the job only by id; with the document gone it
 would record chunks for nothing until the event's end. `delete_job` cancels
@@ -1393,6 +1403,15 @@ for a whole analysis.
   runs while the images build, so it normally costs no wall-clock, and it fails
   open: a gate that cannot read the API lets the build through rather than
   blocking the pipeline on a question it cannot answer.
+
+  **Cancelling a build during its `terraform-apply` step leaves the state
+  lock behind.** The GCS backend's `default.tflock` belongs to a build that no
+  longer exists, and every later apply fails with "Error acquiring the state
+  lock" naming it. Nothing in the pipeline clears it: with no apply running,
+  delete `gs://<state bucket>/terraform/<env>/default.tflock` (or
+  `terraform force-unlock <id>` from a directory initialised with the build's
+  `-backend-config`), then re-run the trigger. Cancel a build before its apply
+  or let it finish.
 
   `gcloud builds list` writes "filter keys were not present in any resource" to
   **stderr** when nothing matches. Merged into stdout that reads as a build id
