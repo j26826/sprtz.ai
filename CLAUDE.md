@@ -497,6 +497,12 @@ with no handle to interrupt, so stages check `cancel_requested` between steps an
 stop at the next boundary. Moments already found are saved rather than discarded
 — cancelling should not also destroy the hour that was already paid for.
 
+**Deleting a live event stops its recorder first.** The recorder is a Cloud
+Run Job execution that knows the job only by id; with the document gone it
+would record chunks for nothing until the event's end. `delete_job` cancels
+the execution named in `live.capture` unless it is already finished, failed
+or cancelled.
+
 **Delete removes media first, then Firestore.** A failure after the media is gone
 leaves a job pointing at a missing video, which is recoverable; the other order
 leaves orphaned gigabytes nothing refers to. Firestore does not cascade, so
