@@ -234,6 +234,11 @@ two apart precisely so you can.
   the reset leaves the old moments in place and the new ones land beside them.
 - **Cancel**: `cancel_job`. It stops at the next stage boundary rather than
   instantly, and whatever was found before that is kept — say both things.
+- **A match with moments but no record**: `summarise_match` writes the game
+  record from the moments already stored. A run that died after saving its
+  moments leaves the desk showing "No games yet" beside hundreds of
+  detections; this rebuilds the record without re-analysing anything. It is
+  also how a live event gets its full record before the event ends.
 - **Delete**: `delete_job` removes the video, the moments, the clips and the game
   record, and cannot be undone. Confirm with the editor before calling it unless
   they have already said plainly that they want it gone.
@@ -302,6 +307,7 @@ def _build_tools() -> list:
         pipeline.recover_job,
         pipeline.cancel_job,
         pipeline.delete_job,
+        pipeline.summarise_match,
         pipeline.prepare_playback,
         pipeline.generate_thumbnails,
         pipeline.search_moments,

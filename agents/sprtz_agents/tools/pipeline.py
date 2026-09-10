@@ -969,6 +969,43 @@ async def _patch_moment_identities(job_id: str, moments: list[Moment], rides: li
         return 0
 
 
+async def record_game_facts(
+    *, job_id: str, sport: str, moments: list[Moment],
+    segment_summaries: list[dict], competitions: list[str], venues: list[str],
+    fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
+    rides: list[dict] | None = None,
+    teams_are_constant: bool = True,
+) -> None:
+    """The match-level record from observed facts alone — no model, no search.
+
+    A live event's record cannot wait for the event to end: that is twelve
+    hours in which the desk lists nothing for a match with hundreds of
+    moments already found, and "No games yet" reads as an analysis that has
+    produced nothing. Assembling the facts is pure; the judgement and the
+    grounding are the expensive half and stay at the finish, which overwrites
+    this with the complete record.
+    """
+    try:
+        game = game_summary.assemble(
+            job_id=job_id, sport=sport, moments=moments,
+            segment_summaries=segment_summaries,
+            competitions=competitions, venues=venues,
+            fallback_title=fallback_title,
+            discipline=discipline, discipline_confidence=discipline_confidence,
+            not_confirmed=[], rides=rides or [],
+            teams_are_constant=teams_are_constant,
+        )
+        await mcp_client.call_tool("catalog", "upsert_game", {
+            "job_id": job_id,
+            "game": game.model_dump(),
+            "embed_text": game_summary.embed_text(game),
+        })
+    except Exception:
+        # A record that could not be written is a match missing from the desk
+        # for a while, not a failed analysis.
+        logger.warning("could not write the interim game record for %s", job_id, exc_info=True)
+
+
 async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
@@ -1084,6 +1121,76 @@ async def _record_game_details(
         logger.exception("could not build the game summary for %s", job_id)
         await _emit(job_id, "analysis", "Could not build the game summary.", level="warning")
         return None
+
+
+async def summarise_match(job_id: str) -> dict:
+    """Write a match's game record from the moments already stored.
+
+    The record is normally written at the end of a run, so a run that died
+    after its moments were saved leaves the match with hundreds of detections
+    and nothing on the desk — "No games yet", which reads as an analysis that
+    found nothing. This rebuilds it without re-analysing anything: the
+    moments are read back, the facts are assembled from them, and only the
+    judgement and the grounding are asked for again.
+
+    Args:
+        job_id: Identifier of the job to summarise.
+
+    Returns:
+        dict with the title that was recorded, or the reason there is none.
+    """
+    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+    if job.get("status") == "error":
+        return {"status": "error", "job_id": job_id, "error": job.get("error", "no such job")}
+    sport = (job.get("sport") or "").strip()
+    try:
+        profile = get_profile(sport)
+    except KeyError:
+        return {"status": "error", "job_id": job_id, "error": f"No profile for sport {sport!r}."}
+
+    listing = await mcp_client.call_tool(
+        "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
+    moments: list[Moment] = []
+    for raw in listing.get("moments") or []:
+        try:
+            moments.append(Moment.model_validate({**raw, "job_id": job_id}))
+        except Exception:  # noqa: BLE001
+            continue
+    if not moments:
+        return {"status": "error", "job_id": job_id,
+                "error": "This match has no moments, so there is nothing to summarise."}
+
+    # A live event keeps a summary per chunk; an upload keeps none, and the
+    # judgement works from the moments themselves.
+    summaries: list[dict] = []
+    competitions: list[str] = []
+    venues: list[str] = []
+    discipline, confidence = "", 0.0
+    if job.get("kind") == "live":
+        chunks = (await mcp_client.call_tool(
+            "catalog", "list_live_chunks", {"job_id": job_id})).get("chunks") or []
+        analysed = [c for c in chunks if c.get("status") == "analysed"]
+        summaries = [{"index": int(c.get("index", 0)), "summary": c.get("summary", "")}
+                     for c in analysed if c.get("summary")]
+        competitions = [c["competition"] for c in analysed if c.get("competition")]
+        venues = [c["venue"] for c in analysed if c.get("venue")]
+        best = max(analysed, key=lambda c: float(c.get("disciplineConfidence") or 0.0), default=None)
+        discipline = (best or {}).get("discipline", "") or ""
+        confidence = float((best or {}).get("disciplineConfidence") or 0.0)
+
+    game = await _record_game_details(
+        job_id=job_id, sport=sport, moments=moments,
+        segment_summaries=summaries, competitions=competitions, venues=venues,
+        fallback_title=job.get("title", ""),
+        discipline=discipline, discipline_confidence=confidence,
+        context_urls=list(job.get("contextUrls") or []),
+        teams_are_constant=getattr(profile, "teams_are_constant", True),
+    )
+    if game is None:
+        return {"status": "error", "job_id": job_id,
+                "error": "The game summary could not be built; the moments are unchanged."}
+    return {"status": "success", "job_id": job_id, "title": game.title,
+            "moments": len(moments), "grounded": game.grounded}
 
 
 async def _judge_game(sport: str, moments: list[Moment], segment_summaries: list[dict]) -> dict:

@@ -51,6 +51,7 @@ from sprtz_agents.tools.pipeline import (
     _emit,
     _persist_moments,
     _record_game_details,
+    record_game_facts,
 )
 
 logger = logging.getLogger(__name__)
@@ -348,6 +349,14 @@ async def _advance(job_id: str, job: dict, live: dict, at: datetime, settings) -
     done = sum(1 for c in by_index.values() if c.get("status") in ("analysed", "failed"))
     await _status(job_id, "", progress=live_progress(done, expected))
 
+    if results:
+        # The desk should list the match while it is happening, not twelve
+        # hours later: "No games yet" beside four hundred moments reads as an
+        # analysis that found nothing. Facts only — the judgement and the
+        # grounding are the expensive half and stay at the finish, which
+        # overwrites this with the complete record.
+        await _record_facts_so_far(job_id, job, sport, profile, by_index.values())
+
     if await _cancelled(job_id):
         if execution:
             await mcp_client.call_tool("media", "cancel_live_capture", {"execution": execution})
@@ -541,6 +550,35 @@ async def _thumbnails_for_chunk(job_id: str, uri: str, start_sec: float,
                 "catalog", "record_moment_thumbnails", {"job_id": job_id, "thumbnails": written})
     except Exception:
         logger.warning("thumbnails for a live chunk of %s failed", job_id, exc_info=True)
+
+
+async def _record_facts_so_far(job_id: str, job: dict, sport: str, profile, chunks) -> None:
+    """Refresh the match's record from the chunks analysed so far."""
+    analysed = [c for c in chunks if c.get("status") == "analysed"]
+    if not analysed:
+        return
+    listing = await mcp_client.call_tool(
+        "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
+    moments: list[Moment] = []
+    for raw in listing.get("moments") or []:
+        try:
+            moments.append(Moment.model_validate({**raw, "job_id": job_id}))
+        except Exception:  # noqa: BLE001
+            continue
+    if not moments:
+        return
+    best = max(analysed, key=lambda c: float(c.get("disciplineConfidence") or 0.0), default=None)
+    await record_game_facts(
+        job_id=job_id, sport=sport, moments=moments,
+        segment_summaries=[{"index": int(c.get("index", 0)), "summary": c.get("summary", "")}
+                           for c in analysed if c.get("summary")],
+        competitions=[c["competition"] for c in analysed if c.get("competition")],
+        venues=[c["venue"] for c in analysed if c.get("venue")],
+        fallback_title=job.get("title", ""),
+        discipline=(best or {}).get("discipline", "") or "",
+        discipline_confidence=float((best or {}).get("disciplineConfidence") or 0.0),
+        teams_are_constant=getattr(profile, "teams_are_constant", True),
+    )
 
 
 async def _finish(job_id: str, job: dict, sport: str, profile, chunks: list[dict],

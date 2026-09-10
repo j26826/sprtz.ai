@@ -475,6 +475,17 @@ legible score means no `final_score` and no `event_outcome` — the winner is
 genuinely unknown, and `0-0` is a real result rather than a way of saying
 "unreadable".
 
+**The record is written while the match is still being analysed.** It used
+to be written once, at the end of a run: a live event that runs for twelve
+hours therefore showed "No games yet" on the desk beside four hundred
+moments already found, and a run that died after saving its moments left the
+match invisible for good. `record_game_facts` writes what
+`game_summary.assemble` can settle from the observations alone — no model,
+no search — and the live tick refreshes it after every tick that analysed a
+chunk; the finish overwrites it with the complete record. `summarise_match`
+is the root-agent tool for the other case: it rebuilds a record from the
+moments already stored, without re-analysing anything.
+
 **Google Search grounding runs once per match, not once per moment.** It takes
 what was read off the screen and resolves the fixture: full team names, the
 competition, the venue, the date, with sources. Grounded values are stored in
