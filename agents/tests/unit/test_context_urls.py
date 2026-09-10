@@ -87,14 +87,14 @@ class TestTheApiAcceptsThem:
             assert body and "context_urls" in body.group(0), f"{cls} has no context_urls"
 
     def test_every_door_passes_them_to_the_catalog(self):
-        """Three doors, not two: the upload, the gs:// registration, and the
-        edit. Counted by site rather than in total, so a fourth call that forgot
-        them could not hide behind one that did not."""
+        """Five doors: the upload, the gs:// registration, the HLS download,
+        the live event, and the edit. Counted by site rather than in total, so
+        a sixth call that forgot them could not hide behind one that did not."""
         # To the call's closing brace, not the first one: the from-source dict
         # holds an f-string with braces of its own, which cut the earlier match
         # short of the field it was looking for.
         create_dicts = re.findall(r'"create_job",\s*\{(.*?)\n\s*\},\s*\)', API, re.S)
-        assert len(create_dicts) == 2, "expected the upload and from-source calls"
+        assert len(create_dicts) == 4, "expected the upload, from-source, from-hls and live calls"
         for body in create_dicts:
             assert '"context_urls": body.context_urls' in body
         patch = re.search(r'"update_job_context",\s*\{(.*?)\}', API, re.S)

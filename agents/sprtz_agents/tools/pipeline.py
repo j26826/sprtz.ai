@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import time
 from typing import Any
 
 from google.adk.tools import ToolContext
@@ -141,6 +142,15 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
     """
     job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     gcs_uri = (job.get("source") or {}).get("gcsUri")
+    if not gcs_uri and job.get("kind") == "hls" and job.get("hlsUrl"):
+        # An HLS job is registered with a URL and no object. The download is
+        # the first thing ingest does, and once it has an object the job is
+        # an upload like any other.
+        fetched = await _download_hls_source(job_id, job["hlsUrl"])
+        if fetched.get("status") != "success":
+            return fetched
+        gcs_uri = fetched["gcs_uri"]
+        job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     if not gcs_uri:
         return {"status": "error", "error": f"Job {job_id} has no source video."}
 
@@ -204,6 +214,74 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
         "segment_count": len(segments),
         "segments": [s.model_dump() for s in segments],
     }
+
+
+async def _download_hls_source(job_id: str, hls_url: str) -> dict:
+    """Fetch an HLS playlist into the uploads bucket and put it on the job.
+
+    Runs `jobs/hls2mp4` as a Cloud Run Job through the media server and waits
+    on it here, widening the poll as it goes — the same shape as waiting on a
+    Transcoder encode. Alongside the source it produces the constant-1 fps
+    480p proxy, which is what the analysis reads: the same picture Gemini
+    samples anyway, at a fraction of the bytes, so a long recording no longer
+    needs to be cut to fit under the fetch limit.
+    """
+    settings = get_settings()
+    await _progress(job_id, "ingest", 0.05, status="analyzing")
+    await _emit(job_id, "ingest",
+                "Downloading the HLS stream into storage, with a 1 fps copy for the analysis.",
+                hls_url=hls_url)
+
+    async def fail(reason: str) -> dict:
+        await mcp_client.call_tool("catalog", "update_job_status", {
+            "job_id": job_id, "status": "failed", "stage": "ingest", "error": reason})
+        await _emit(job_id, "ingest", reason, level="error")
+        return {"status": "error", "job_id": job_id, "error": reason}
+
+    started = await mcp_client.call_tool(
+        "media", "download_hls", {"job_id": job_id, "hls_url": hls_url, "proxy": True})
+    if started.get("status") != "started":
+        return await fail(
+            f"The HLS download could not be started: {started.get('error', 'unknown error')}")
+
+    execution = started.get("execution", "")
+    deadline = time.monotonic() + settings.hls_download_timeout_seconds
+    last_note = time.monotonic()
+    interval = 15.0
+    while True:
+        await asyncio.sleep(interval)
+        interval = min(interval * 1.5, 60.0)
+        probe = await mcp_client.call_tool(
+            "media", "hls_download_status", {"execution": execution, "job_id": job_id})
+        state = probe.get("status")
+        if state == "succeeded":
+            break
+        if state in ("failed", "error"):
+            return await fail(
+                f"The HLS download failed: {probe.get('error') or 'the job did not succeed'}")
+        if time.monotonic() > deadline:
+            return await fail("The HLS download did not finish in time.")
+        if time.monotonic() - last_note > 300:
+            await _emit(job_id, "ingest", "Still downloading the stream.")
+            last_note = time.monotonic()
+
+    await mcp_client.call_tool("catalog", "set_source", {
+        "job_id": job_id,
+        "gcs_uri": probe.get("gcs_uri", ""),
+        "analysis_uri": probe.get("analysis_uri", ""),
+        "original_name": probe.get("original_name", ""),
+        "size_bytes": int(probe.get("bytes") or 0),
+        "content_type": probe.get("content_type", ""),
+    })
+    size_gb = int(probe.get("bytes") or 0) / 1e9
+    await _emit(
+        job_id, "ingest",
+        f"Downloaded {size_gb:.2f} GB as {probe.get('original_name') or 'the source'}"
+        + (" and made the 1 fps analysis proxy." if probe.get("analysis_uri") else "."),
+        bytes=int(probe.get("bytes") or 0), analysis_uri=probe.get("analysis_uri", ""),
+    )
+    return {"status": "success", "job_id": job_id, "gcs_uri": probe.get("gcs_uri", ""),
+            "analysis_uri": probe.get("analysis_uri", "")}
 
 
 @stage("playback")
@@ -396,6 +474,11 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         }
 
     gcs_uri = (job.get("source") or {}).get("gcsUri")
+    # What the model reads. For an HLS source that is the 1 fps proxy the
+    # download produced — the picture it samples anyway at a fraction of the
+    # bytes. Thumbnails and clips still come from the source, which is why
+    # this is a second variable rather than a replacement.
+    analysis_uri = (job.get("source") or {}).get("analysisUri") or gcs_uri
     duration = float((job.get("media") or {}).get("durationSec") or 0.0)
 
     if not gcs_uri:
@@ -441,10 +524,10 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
     # fails every window — slicing by time alone does not make the bytes
     # smaller. An empty result falls back to offsets, which is right for a
     # source small enough not to need this.
-    segment_uris = await _cut_segments(job_id, gcs_uri, duration)
+    segment_uris = await _cut_segments(job_id, analysis_uri, duration)
 
     result = await analyse_segments(
-        gcs_uri, duration, sport=sport,
+        analysis_uri, duration, sport=sport,
         metadata_language=metadata_language,
         on_segment_done=segment_done,
         segment_uris=segment_uris,
@@ -968,6 +1051,74 @@ async def reanalyse_job(job_id: str) -> dict:
     return {"status": "success", "job_id": job_id, "cleared": True,
             "moments_removed": result.get("moments", 0),
             "clips_removed": result.get("clips", 0)}
+
+
+# A run whose last write is older than this is dead, and how many times the
+# watchdog restarts one before it gives up. Both mirror the catalog's figures.
+STALL_MINUTES = 15
+MAX_RECOVERIES = 2
+
+
+async def recover_job(job_id: str) -> dict:
+    """Prepare a run that died with its process to be started again.
+
+    Nothing on the engine survives a deploy or a killed container, and the
+    job then keeps the status it had — "analysing", for ever. The watchdog
+    tick finds such jobs by their silence and calls this. It checks the run
+    really is dead rather than slow, counts the restart on the job so a job
+    that dies every time is not restarted every time, clears the previous
+    run's findings, and says whether to start `analysis_pipeline` again.
+
+    Args:
+        job_id: The job whose run has gone quiet.
+
+    Returns:
+        dict with ``restart`` — true means call `analysis_pipeline` with this
+        job_id now; false means leave it, and ``message`` says why.
+    """
+    from sprtz_agents.tools.live import now as _now
+    from sprtz_agents.tools.live import parse_time
+
+    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+    if job.get("status") == "error":
+        return job
+    if job.get("kind") == "live":
+        return {"status": "idle", "restart": False, "job_id": job_id,
+                "message": "A live event is looked after by its own tick, not by this."}
+    status = job.get("status")
+    if status not in ("uploaded", "transcoding", "analyzing"):
+        return {"status": "idle", "restart": False, "job_id": job_id,
+                "message": f"The job is {status}, not running; nothing to recover."}
+
+    updated = parse_time(job.get("updatedAt") or job.get("updated_at"))
+    quiet_min = int((_now() - updated).total_seconds() // 60) if updated else None
+    if quiet_min is not None and quiet_min < STALL_MINUTES:
+        return {"status": "running", "restart": False, "job_id": job_id,
+                "message": f"The run wrote {quiet_min} minutes ago; it is slow, not dead."}
+
+    attempts = int((job.get("recovery") or {}).get("attempts") or 0)
+    if attempts >= MAX_RECOVERIES:
+        reason = (f"The run died {attempts} times and was restarted each time; not "
+                  f"restarting again. Retry by hand once the cause is known.")
+        await mcp_client.call_tool("catalog", "update_job_status", {
+            "job_id": job_id, "status": "failed", "stage": job.get("stage") or "analysis",
+            "error": reason})
+        await _emit(job_id, "recovery", reason, level="error")
+        return {"status": "failed", "restart": False, "job_id": job_id, "message": reason}
+
+    reason = (f"No progress for {quiet_min if quiet_min is not None else '?'} minutes: the run "
+              f"died with its process.")
+    noted = await mcp_client.call_tool(
+        "catalog", "note_recovery", {"job_id": job_id, "reason": reason})
+    await _emit(
+        job_id, "recovery",
+        f"{reason} Restarting the analysis (attempt {noted.get('attempts', attempts + 1)} "
+        f"of {MAX_RECOVERIES}).",
+        level="warning", attempt=noted.get("attempts", attempts + 1),
+    )
+    await mcp_client.call_tool("catalog", "clear_analysis", {"job_id": job_id})
+    return {"status": "restart", "restart": True, "job_id": job_id,
+            "attempt": noted.get("attempts", attempts + 1)}
 
 
 async def cancel_job(job_id: str) -> dict:

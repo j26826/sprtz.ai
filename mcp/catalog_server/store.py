@@ -203,8 +203,8 @@ def delete_job(job_id: str) -> dict[str, Any]:
     The source video is not deleted here — that is the media server's bucket and
     its job, and doing it from two places is how you end up doing it neither.
     """
-    removed = {"moments": 0, "clips": 0, "events": 0, "game": 0}
-    for name in ("moments", "clips", "events"):
+    removed = {"moments": 0, "clips": 0, "events": 0, "chunks": 0, "game": 0}
+    for name in ("moments", "clips", "events", "chunks"):
         removed[name] = _delete_collection(job_ref(job_id).collection(name))
 
     game = game_ref(job_id).get()
@@ -605,17 +605,35 @@ def _job_summary(job_id: str, doc: dict[str, Any]) -> dict[str, Any]:
         "counts": doc.get("counts", {}),
         "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
         "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else updated,
+        # Where the video comes from. A live event has a window rather than a
+        # file, and the agent answers "what is running" differently for it.
+        "kind": doc.get("kind", "upload"),
+        **({"live": doc.get("live")} if doc.get("kind") == "live" else {}),
     }
 
 
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
                original_name: str, size_bytes: int, content_type: str = "",
                metadata_language: str = "en",
-               context_urls: list[str] | None = None) -> dict[str, Any]:
+               context_urls: list[str] | None = None,
+               kind: str = "upload", hls_url: str = "",
+               event_start: str = "", event_end: str = "",
+               chunk_sec: int = 0) -> dict[str, Any]:
+    """Open a job. Three kinds, told apart by where the video comes from.
+
+    ``upload`` has its source in the bucket already. ``hls`` has only a URL and
+    gets its source when the ingest stage has downloaded it. ``live`` has a URL
+    and a time window, no source at all, and is driven by the live tick rather
+    than by the analysis pipeline — it starts as ``scheduled``, not
+    ``uploaded``, because there is nothing to analyse until the event starts.
+    """
+    kind = kind if kind in ("upload", "hls", "live") else "upload"
     payload = {
         "ownerUid": owner_uid,
         "title": title,
         "sport": sport,
+        "kind": kind,
+        "hlsUrl": hls_url,
         # What the analysis writes its prose in. Stored on the job so re-reading
         # it years later still says which language its descriptions are in.
         "metadataLanguage": metadata_language or "en",
@@ -623,8 +641,8 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         # grounding, not a fetch target: the Equipe pages it will usually name
         # are JavaScript shells, and what they steer is the search.
         "contextUrls": list(context_urls or []),
-        "status": "uploaded",
-        "stage": "ingest",
+        "status": "scheduled" if kind == "live" else "uploaded",
+        "stage": "live" if kind == "live" else "ingest",
         "progress": 0,
         "source": {
             "gcsUri": gcs_uri,
@@ -633,6 +651,9 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
             # What the client claimed. Kept so ingest can compare it against
             # what the file actually decodes as; never trusted on its own.
             "contentType": content_type,
+            # Where the analysis reads from when that is not the source: the
+            # 1 fps proxy an HLS download produces. Empty means the source.
+            "analysisUri": "",
         },
         "media": {},
         "playback": {},
@@ -641,8 +662,137 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         "createdAt": now(),
         "updatedAt": now(),
     }
+    if kind == "live":
+        payload["live"] = {
+            "eventStart": event_start,
+            "eventEnd": event_end,
+            "chunkSec": int(chunk_sec or 0),
+            "state": "scheduled",
+            "chunksCaptured": 0,
+            "chunksAnalysed": 0,
+            "capture": {},
+            "tickLockUntil": None,
+        }
     job_ref(job_id).set(payload)
     return {"job_id": job_id, **payload}
+
+
+def set_source(job_id: str, gcs_uri: str, analysis_uri: str = "", original_name: str = "",
+               size_bytes: int = 0, content_type: str = "") -> dict[str, Any]:
+    """Record where a job's video ended up, for a source that arrived later.
+
+    An HLS job is created with a URL and no object; this is how the ingest
+    stage hands it the object once the download has finished. Fields are
+    written one by one so a value that is not known is left as it was.
+    """
+    patch: dict[str, Any] = {"source.gcsUri": gcs_uri, "updatedAt": now()}
+    if analysis_uri:
+        patch["source.analysisUri"] = analysis_uri
+    if original_name:
+        patch["source.originalName"] = original_name
+    if size_bytes:
+        patch["source.bytes"] = int(size_bytes)
+    if content_type:
+        patch["source.contentType"] = content_type
+    job_ref(job_id).update(patch)
+    return {"job_id": job_id, **patch}
+
+
+# --- Live events ----------------------------------------------------------------
+
+LIVE_ACTIVE_STATES = ("scheduled", "live")
+
+
+def list_live_jobs() -> list[dict[str, Any]]:
+    """Every live event that is not over, for the tick to decide about.
+
+    An equality filter alone, which the automatic single-field index serves;
+    the state filter is applied here because it is an ``in`` over a handful of
+    documents, not a page of them.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    query = db().collection("jobs").where(filter=FieldFilter("kind", "==", "live"))
+    jobs: list[dict[str, Any]] = []
+    for snapshot in query.stream():
+        doc = snapshot.to_dict() or {}
+        live = doc.get("live") or {}
+        if live.get("state") not in LIVE_ACTIVE_STATES:
+            continue
+        jobs.append({**_job_summary(snapshot.id, doc), "hls_url": doc.get("hlsUrl", ""),
+                     "live": live})
+    return jobs
+
+
+def update_live(job_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Patch fields under a job's ``live`` map, leaving the rest alone."""
+    update: dict[str, Any] = {f"live.{key}": value for key, value in patch.items()}
+    update["updatedAt"] = now()
+    job_ref(job_id).update(update)
+    return {"job_id": job_id, **update}
+
+
+def _chunk_ref(job_id: str, index: int):
+    return job_ref(job_id).collection("chunks").document(f"{int(index):04d}")
+
+
+def list_live_chunks(job_id: str) -> list[dict[str, Any]]:
+    """Every chunk the recorder has closed, in order."""
+    query = job_ref(job_id).collection("chunks").order_by("index")
+    return [snapshot.to_dict() or {} for snapshot in query.stream()]
+
+
+def claim_live_chunk(job_id: str, index: int) -> dict[str, Any]:
+    """Move one chunk from ``captured`` to ``analyzing``, exactly once.
+
+    A transaction, because two ticks can overlap — the scheduler fires on the
+    minute whatever the last tick is still doing — and the same five minutes
+    analysed twice lands every moment in it twice.
+    """
+    from google.cloud import firestore
+
+    ref = _chunk_ref(job_id, index)
+
+    @firestore.transactional
+    def claim(transaction) -> bool:
+        snapshot = ref.get(transaction=transaction)
+        if not snapshot.exists:
+            return False
+        if (snapshot.to_dict() or {}).get("status") != "captured":
+            return False
+        transaction.update(ref, {"status": "analyzing", "claimedAt": now()})
+        return True
+
+    claimed = claim(db().transaction())
+    return {"job_id": job_id, "index": int(index), "claimed": bool(claimed)}
+
+
+def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = "",
+                      continuity: dict[str, Any] | None = None,
+                      summary: str = "", competition: str = "", venue: str = "",
+                      discipline: str = "", discipline_confidence: float = 0.0) -> dict[str, Any]:
+    """Record the analysis of one chunk, and count it on the job."""
+    patch: dict[str, Any] = {
+        "status": "failed" if error else "analysed",
+        "moments": int(moments),
+        "error": error or None,
+        "continuity": continuity or {},
+        "summary": summary,
+        "competition": competition,
+        "venue": venue,
+        "discipline": discipline,
+        "disciplineConfidence": float(discipline_confidence or 0.0),
+        "analysedAt": now(),
+    }
+    _chunk_ref(job_id, index).update(patch)
+    from google.cloud import firestore
+
+    job_ref(job_id).update({
+        "live.chunksAnalysed": firestore.Increment(1),
+        "counts.moments": firestore.Increment(int(moments)),
+        "updatedAt": now(),
+    })
+    return {"job_id": job_id, "index": int(index), **patch}
 
 
 def record_teams(job_id: str, home: str, away: str) -> dict[str, Any]:
@@ -1393,3 +1543,86 @@ def update_clip(job_id: str, clip_id: str, patch: dict[str, Any]) -> dict[str, A
 
     job_ref(job_id).collection("clips").document(clip_id).update(clean)
     return {"status": "success", "clip_id": clip_id, "updated": sorted(clean), "rejected": rejected}
+
+
+# --- Recovery ---------------------------------------------------------------------
+
+# A run whose last write is older than this is dead: progress is written at
+# least once per analysed segment, and nothing takes this long between them.
+STALL_MINUTES = 15
+# How many times the watchdog restarts one job before it gives up and says so.
+MAX_RECOVERIES = 2
+# How many times a failed live chunk is analysed again before it stays failed.
+MAX_CHUNK_ATTEMPTS = 3
+
+
+def list_stalled_jobs(minutes: int = STALL_MINUTES, limit: int = 50) -> list[dict[str, Any]]:
+    """Uploaded, transcoding or analysing jobs nothing has written to lately.
+
+    Ordered by creation and filtered here rather than by an inequality on
+    ``updatedAt``: a running status plus a range on another field is a
+    composite index, and this reads a page of recent jobs once a minute.
+    Live events are driven by their own tick and left out.
+    """
+    from datetime import timedelta
+
+    cutoff = now() - timedelta(minutes=minutes)
+    query = (
+        db().collection("jobs")
+        .order_by("createdAt", direction="DESCENDING")
+        .limit(200)
+    )
+    stalled: list[dict[str, Any]] = []
+    for snapshot in query.stream():
+        doc = snapshot.to_dict() or {}
+        if doc.get("kind") == "live" or doc.get("status") not in RUNNING_STATUSES:
+            continue
+        updated = doc.get("updatedAt")
+        if updated is None or not hasattr(updated, "tzinfo"):
+            continue
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=UTC)
+        if updated > cutoff:
+            continue
+        stalled.append({**_job_summary(snapshot.id, doc), "recovery": doc.get("recovery") or {}})
+        if len(stalled) >= limit:
+            break
+    return stalled
+
+
+def note_recovery(job_id: str, reason: str) -> dict[str, Any]:
+    """Count one automatic restart on the job, and say why."""
+    snapshot = job_ref(job_id).get()
+    current = ((snapshot.to_dict() or {}).get("recovery") or {}) if snapshot.exists else {}
+    attempts = int(current.get("attempts") or 0) + 1
+    recovery = {"attempts": attempts, "lastAttemptAt": now(), "lastReason": reason}
+    job_ref(job_id).update({"recovery": recovery, "updatedAt": now()})
+    return {"job_id": job_id, "attempts": attempts, "max_attempts": MAX_RECOVERIES}
+
+
+def reset_live_chunk(job_id: str, index: int) -> dict[str, Any]:
+    """Put a failed chunk back to ``captured`` so the tick analyses it again.
+
+    A transaction for the same reason the claim is one, and bounded: a chunk
+    that has failed ``MAX_CHUNK_ATTEMPTS`` times stays failed and is reported
+    as missing rather than retried for the rest of the event.
+    """
+    from google.cloud import firestore
+
+    ref = _chunk_ref(job_id, index)
+
+    @firestore.transactional
+    def reset(transaction) -> tuple[bool, int]:
+        snapshot = ref.get(transaction=transaction)
+        if not snapshot.exists:
+            return False, 0
+        doc = snapshot.to_dict() or {}
+        attempts = int(doc.get("attempts") or 1)
+        if doc.get("status") != "failed" or attempts >= MAX_CHUNK_ATTEMPTS:
+            return False, attempts
+        transaction.update(ref, {"status": "captured", "attempts": attempts + 1,
+                                 "error": None, "resetAt": now()})
+        return True, attempts + 1
+
+    done, attempts = reset(db().transaction())
+    return {"job_id": job_id, "index": int(index), "reset": bool(done), "attempts": attempts}

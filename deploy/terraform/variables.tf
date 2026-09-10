@@ -286,3 +286,27 @@ variable "app_domain" {
   EOT
   default     = ""
 }
+
+variable "scheduler_region" {
+  description = "Where the Cloud Scheduler job lives. Scheduler serves fewer regions than Cloud Run; the job targets the app URL wherever it runs."
+  type        = string
+  default     = "us-central1"
+}
+
+variable "hls_download_timeout_seconds" {
+  description = "Deadline for one hls2mp4 execution. The download is minutes; the 1 fps proxy decodes the whole recording and is what takes the time."
+  type        = number
+  default     = 14400
+}
+
+variable "live_capture_timeout_seconds" {
+  description = "Deadline for one live capture execution — the longest event plus its lead-in. Cloud Run Jobs allow up to 24 hours."
+  type        = number
+  default     = 43200
+}
+
+variable "live_chunk_seconds" {
+  description = "How much of a live event each captured chunk holds. Each chunk is analysed as one segment, so this is also the analysis window for live."
+  type        = number
+  default     = 300
+}

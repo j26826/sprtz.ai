@@ -27,6 +27,11 @@ locals {
       # Packaging for playback is a Transcoder job now, so this service creates
       # them and polls them. It never touches the video itself.
       "roles/transcoder.admin",
+      # The live capture job runs as this account and records each chunk it
+      # closes straight into Firestore — the catalog server is a request path
+      # and a recorder that has to wait on one is a recorder that drops
+      # segments while it waits.
+      "roles/datastore.user",
       ] : "mcp_media:${r}" => { role = r, member = "serviceAccount:${google_service_account.mcp_media.email}" }
     },
     { for r in [
@@ -48,6 +53,8 @@ locals {
       "roles/serviceusage.serviceUsageAdmin",
       "roles/iap.admin",
       "roles/firebaserules.admin",
+      # The live tick's clock is a Cloud Scheduler job Terraform creates.
+      "roles/cloudscheduler.admin",
       ] : "cloudbuild:${r}" => { role = r, member = "serviceAccount:${google_service_account.cloudbuild.email}" }
     },
   )

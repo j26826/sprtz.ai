@@ -30,25 +30,34 @@ def _fail(exc: Exception, **context: Any) -> dict:
 @mcp.tool
 def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str,
                original_name: str, size_bytes: int, content_type: str = "",
-               metadata_language: str = "en", context_urls: list[str] | None = None) -> dict:
-    """Open a new analysis job for an uploaded video.
+               metadata_language: str = "en", context_urls: list[str] | None = None,
+               kind: str = "upload", hls_url: str = "", event_start: str = "",
+               event_end: str = "", chunk_sec: int = 0) -> dict:
+    """Open a new analysis job for an uploaded video, an HLS URL, or a live event.
 
     Args:
         job_id: Identifier to create the job under.
         owner_uid: Identity Platform uid of the owner.
         title: Human-readable title.
         sport: Sport in the video, for example "handball".
-        gcs_uri: gs:// URI of the uploaded source.
+        gcs_uri: gs:// URI of the uploaded source. Empty for hls and live.
         original_name: The file name the user uploaded.
         size_bytes: Size of the upload.
         content_type: Content type the client declared, checked at ingest.
         metadata_language: ISO 639-1 code the analysis should write in.
         context_urls: Pages the editor says are about this recording, for grounding.
+        kind: "upload", "hls" (a playlist to download first) or "live" (a
+            playlist to record between two times).
+        hls_url: The playlist URL, for hls and live.
+        event_start: ISO 8601 start of a live event.
+        event_end: ISO 8601 end of a live event.
+        chunk_sec: Live chunk length; the deployment default when 0.
     """
     try:
         return {"status": "success", **store.create_job(
             job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
-            content_type, metadata_language, context_urls or [])}
+            content_type, metadata_language, context_urls or [],
+            kind, hls_url, event_start, event_end, chunk_sec)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 
@@ -509,6 +518,144 @@ def update_clip(job_id: str, clip_id: str, patch: dict) -> dict:
 @mcp.custom_route("/healthz", methods=["GET"])
 async def healthz(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "service": "mcp-catalog"})
+
+
+@mcp.tool
+def set_source(job_id: str, gcs_uri: str, analysis_uri: str = "", original_name: str = "",
+               size_bytes: int = 0, content_type: str = "") -> dict:
+    """Record where a job's video ended up, once a download has produced it.
+
+    Args:
+        job_id: The job.
+        gcs_uri: gs:// URI of the source object.
+        analysis_uri: gs:// URI the analysis should read instead (the 1 fps proxy).
+        original_name: File name of the source.
+        size_bytes: Size of the source.
+        content_type: Content type of the source.
+    """
+    try:
+        return {"status": "success", **store.set_source(
+            job_id, gcs_uri, analysis_uri, original_name, size_bytes, content_type)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def list_live_jobs() -> dict:
+    """Every live event that is scheduled or running, with its live state."""
+    try:
+        return {"status": "success", "jobs": store.list_live_jobs()}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
+@mcp.tool
+def update_live(job_id: str, patch: dict) -> dict:
+    """Patch fields under a live job's `live` map.
+
+    Args:
+        job_id: The live event's job.
+        patch: Field -> value, applied under `live.`.
+    """
+    try:
+        return {"status": "success", **store.update_live(job_id, patch or {})}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def list_live_chunks(job_id: str) -> dict:
+    """The chunks the live recorder has closed for a job, in order.
+
+    Args:
+        job_id: The live event's job.
+    """
+    try:
+        return {"status": "success", "chunks": store.list_live_chunks(job_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def claim_live_chunk(job_id: str, index: int) -> dict:
+    """Take one captured chunk for analysis; `claimed` is false if someone already has.
+
+    Args:
+        job_id: The live event's job.
+        index: The chunk's index.
+    """
+    try:
+        return {"status": "success", **store.claim_live_chunk(job_id, index)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id, index=index)
+
+
+@mcp.tool
+def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = "",
+                      continuity: dict | None = None, summary: str = "",
+                      competition: str = "", venue: str = "", discipline: str = "",
+                      discipline_confidence: float = 0.0) -> dict:
+    """Record the outcome of analysing one live chunk.
+
+    Args:
+        job_id: The live event's job.
+        index: The chunk's index.
+        moments: How many moments were saved from it.
+        error: Why it failed, if it did.
+        continuity: What the check against the previous chunk found.
+        summary: The segment summary the analysis wrote.
+        competition: Competition read off the picture, if any.
+        venue: Venue read off the picture, if any.
+        discipline: Discipline code the chunk reported, if any.
+        discipline_confidence: Its confidence.
+    """
+    try:
+        return {"status": "success", **store.finish_live_chunk(
+            job_id, index, moments, error, continuity, summary, competition, venue,
+            discipline, discipline_confidence)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id, index=index)
+
+
+@mcp.tool
+def list_stalled_jobs(minutes: int = 15) -> dict:
+    """Running jobs nothing has written to for `minutes` — runs that died with their process.
+
+    Args:
+        minutes: How long without a write counts as dead.
+    """
+    try:
+        return {"status": "success", "jobs": store.list_stalled_jobs(minutes)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
+@mcp.tool
+def note_recovery(job_id: str, reason: str = "") -> dict:
+    """Count an automatic restart on a job.
+
+    Args:
+        job_id: The job being restarted.
+        reason: Why.
+    """
+    try:
+        return {"status": "success", **store.note_recovery(job_id, reason)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def reset_live_chunk(job_id: str, index: int) -> dict:
+    """Return a failed live chunk to `captured` for another attempt, up to a limit.
+
+    Args:
+        job_id: The live event's job.
+        index: The chunk's index.
+    """
+    try:
+        return {"status": "success", **store.reset_live_chunk(job_id, index)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id, index=index)
 
 
 def main() -> None:

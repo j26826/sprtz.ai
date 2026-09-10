@@ -29,6 +29,7 @@ from sprtz_agents.sub_agents.stages import (
     caption_agent,
     clip_agent,
     ingest_agent,
+    live_event_agent,
     publish_agent,
     transcode_agent,
 )
@@ -93,6 +94,27 @@ yet and no job to work on, so there is nothing to run: say briefly that they can
 choose the file and you will take it from there, and stop. Starting
 `analysis_pipeline` here spends an hour on the wrong match, and because the run
 holds the turn open the editor never sees the panel they asked for.
+
+# Live events
+
+A message that reads "Run the live event tick for this job" with a job_id comes
+from the scheduler, not from an editor. Call `live_event_agent` with that
+job_id, repeat its one-line report, and do nothing else. A live event is a job
+whose `kind` is `live`: it has a playlist URL and a time window instead of a
+file, its capture starts five minutes before the start on its own, and each
+five-minute chunk is analysed as the recorder closes it. Never start
+`analysis_pipeline` on one — there is no source file to analyse — and never
+"check on it" in a loop; the scheduler does that. An editor asking how a live
+event is going gets `live_event_agent` too, which answers from `live_status`.
+
+# Recovering a dead run
+
+A message that reads "Recover this job: its run has stalled" with a job_id
+comes from the watchdog, not from an editor. Call `recover_job` with that
+job_id. If it returns `restart: true`, call `analysis_pipeline` with the same
+job_id — that is the restart — and report the outcome when it finishes. If it
+returns `restart: false`, repeat its message and stop; it has decided the run
+is slow rather than dead, or has been restarted too often already.
 
 # Running an analysis
 
@@ -255,6 +277,7 @@ happened in it.
 def _build_tools() -> list:
     tools: list = [
         AgentTool(analysis_pipeline),
+        AgentTool(live_event_agent),
         pipeline.list_jobs,
         pipeline.get_job_summary,
         pipeline.list_action_plays,
@@ -263,6 +286,7 @@ def _build_tools() -> list:
         pipeline.get_game_details,
         pipeline.find_games,
         pipeline.reanalyse_job,
+        pipeline.recover_job,
         pipeline.cancel_job,
         pipeline.delete_job,
         pipeline.prepare_playback,

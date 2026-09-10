@@ -28,6 +28,7 @@ import {
 
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
 import { chooseCard, wantsDetail } from './cards.js';
+import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
   filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
 } from './search.js';
@@ -66,7 +67,12 @@ const state = {
   sports: ['handball'],
   platforms: { tiktok: true, instagram: true, youtube: false },
   playing: null,          // { momentId, start, end }
-  upload: { file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '', gcsUri: '' },
+  upload: {
+    file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '', gcsUri: '',
+    tab: 'upload',            // 'upload' | 'live'
+    hlsUrl: '',               // a VOD playlist to download
+    live: { title: '', hlsUrl: '', start: '', end: '' },
+  },
   pendingUploads: [],     // uploaded to GCS but never registered as a job
   thumbs: { urls: {}, asked: new Set() },  // momentId -> signed URL for its still
   details: null,          // the moment whose popup is open, and playing inside it
@@ -940,17 +946,39 @@ function closeDetails() {
 
 function ingestCard() {
   const u = state.upload;
-  // Offer the most recent one only. A list of near-identical filenames is a
-  // worse prompt than "the one you left behind", and the rest stay reachable.
-  const pending = state.pendingUploads[0];
-  const sources = ['Upload', 'Dropbox', 'Drive', 'Camera roll'];
+  const busy = u.status !== 'idle';
+  const tabs = [['upload', t('ingest.tabUpload')], ['live', t('ingest.tabLive')]];
+  // Sport and context links are the same two questions for a file, a stream
+  // and a live event, so they are one block rendered under whichever tab.
+  const sportRow = `
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center">
+          <div class="field-label" style="margin-right:4px">${esc(t('ingest.sport'))}</div>
+          ${state.sports.map((s) => `
+            <button class="chip" data-sport="${esc(s)}" aria-pressed="${u.sport === s}"
+                    style="text-transform:capitalize">${esc(s)}</button>`).join('')}
+        </div>`;
+  const contextBlock = `
+        <div class="ingest-context">
+          <label class="field-label" for="context-urls">${esc(t('ingest.contextUrls'))}</label>
+          <div class="setting-hint">${esc(t('ingest.contextUrlsHint'))}</div>
+          <textarea class="input ctx-textarea" id="context-urls" rows="3"
+                    data-context-urls placeholder="${esc(t('reanalyse.placeholder'))}">${esc(u.contextUrls || '')}</textarea>
+        </div>`;
   return `
     <div class="panel">
       <div class="source-tabs">
-        ${sources.map((s, i) => `
-          <button class="source-tab" aria-selected="${i === 0}" ${i === 0 ? '' : 'disabled'}
-                  title="${i === 0 ? '' : 'Not connected yet'}">${s}</button>`).join('')}
+        ${tabs.map(([key, label]) => `
+          <button class="source-tab" data-ingest-tab="${key}" aria-selected="${u.tab === key}">${esc(label)}</button>`).join('')}
       </div>
+      ${u.tab === 'live' ? liveForm(u, busy, sportRow, contextBlock) : uploadForm(u, busy, sportRow, contextBlock)}
+    </div>`;
+}
+
+function uploadForm(u, busy, sportRow, contextBlock) {
+  // Offer the most recent one only. A list of near-identical filenames is a
+  // worse prompt than "the one you left behind", and the rest stay reachable.
+  const pending = state.pendingUploads[0];
+  return `
       <div style="padding:16px;border-bottom:1px solid var(--color-neutral-300)">
         <div class="dropzone" id="dropzone">
           <div class="dz-thumb"><span class="thumb-stripes"></span></div>
@@ -971,22 +999,23 @@ function ingestCard() {
                    placeholder="gs://bucket/path/to/video.mp4"
                    value="${esc(u.gcsUri || '')}" />
             <button class="btn-outline" data-register-gcs="1"
-                    ${u.gcsUri ? '' : 'disabled'}>${esc(t('ingest.useLocation'))}</button>
+                    ${u.gcsUri && !busy ? '' : 'disabled'}>${esc(t('ingest.useLocation'))}</button>
           </div>
           <div class="setting-hint">${esc(t('ingest.fromStorageHint'))}</div>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center">
-          <div class="field-label" style="margin-right:4px">${esc(t('ingest.sport'))}</div>
-          ${state.sports.map((s) => `
-            <button class="chip" data-sport="${esc(s)}" aria-pressed="${u.sport === s}"
-                    style="text-transform:capitalize">${esc(s)}</button>`).join('')}
+        <div class="gcs-row">
+          <div class="field-label">${esc(t('ingest.fromHls'))}</div>
+          <div class="gcs-input-row">
+            <input class="composer-input" data-hls-input
+                   placeholder="https://…/master.m3u8"
+                   value="${esc(u.hlsUrl || '')}" />
+            <button class="btn-outline" data-register-hls="1"
+                    ${(u.hlsUrl || '').trim() && !busy ? '' : 'disabled'}>${esc(t('ingest.useStream'))}</button>
+          </div>
+          <div class="setting-hint">${esc(t('ingest.hlsHint'))}</div>
         </div>
-        <div class="ingest-context">
-          <label class="field-label" for="context-urls">${esc(t('ingest.contextUrls'))}</label>
-          <div class="setting-hint">${esc(t('ingest.contextUrlsHint'))}</div>
-          <textarea class="input ctx-textarea" id="context-urls" rows="3"
-                    data-context-urls placeholder="${esc(t('reanalyse.placeholder'))}">${esc(u.contextUrls || '')}</textarea>
-        </div>
+        ${sportRow}
+        ${contextBlock}
       </div>
       <div style="padding:14px 16px">
         ${u.status === 'uploading' || u.status === 'analyzing' ? `
@@ -1016,8 +1045,47 @@ function ingestCard() {
             ${esc(pending.filename)} · ${bytes(pending.size_bytes)}
             ${esc(t('ingest.strandedNote'))}
           </div>` : ''}
+      </div>`;
+}
+
+function liveForm(u, busy, sportRow, contextBlock) {
+  const l = u.live;
+  // Only judge what has been typed: an empty form is not a wrong one.
+  const err = (l.hlsUrl || l.start || l.end)
+    ? validateLiveEvent({ hlsUrl: l.hlsUrl, start: l.start, end: l.end }) : null;
+  const ready = !err && l.hlsUrl && l.start && l.end;
+  return `
+      <div style="padding:16px;border-bottom:1px solid var(--color-neutral-300)">
+        <div class="field-label">${esc(t('ingest.liveTitle'))}</div>
+        <input class="composer-input" data-live-title style="margin-top:6px"
+               placeholder="${esc(t('ingest.liveTitlePlaceholder'))}" value="${esc(l.title || '')}" />
+        <div class="gcs-row">
+          <div class="field-label">${esc(t('ingest.liveHls'))}</div>
+          <input class="composer-input" data-live-hls style="margin-top:6px"
+                 placeholder="https://…/live.m3u8" value="${esc(l.hlsUrl || '')}" />
+        </div>
+        <div class="live-times">
+          <label>
+            <span class="field-label">${esc(t('ingest.liveStart'))}</span>
+            <input class="composer-input" type="datetime-local" data-live-start value="${esc(l.start || '')}" />
+          </label>
+          <label>
+            <span class="field-label">${esc(t('ingest.liveEnd'))}</span>
+            <input class="composer-input" type="datetime-local" data-live-end value="${esc(l.end || '')}" />
+          </label>
+        </div>
+        <div class="setting-hint">${esc(t('ingest.liveHint'))}</div>
+        ${sportRow}
+        ${contextBlock}
       </div>
-    </div>`;
+      <div style="padding:14px 16px">
+        ${err ? `<div class="job-status live-error" data-tone="failed">${esc(t(err))}</div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn-solid" data-schedule-live="1" ${ready && !busy ? '' : 'disabled'}>
+            ${u.status === 'scheduling' ? esc(t('ingest.scheduling')) : esc(t('ingest.schedule'))}
+          </button>
+        </div>
+      </div>`;
 }
 
 function reelCard(msg, index) {
@@ -1789,6 +1857,7 @@ function jobsCard(msg, index) {
   if (!state.jobs.length) return emptyCard(t('jobs.none'));
   const view = pageOf(state.jobs, msg.page);
   return `<div class="panel-light">${view.slice.map((j) => {
+    if (j.kind === 'live') return liveJobRow(j);
     const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
     const failed = j.status === 'failed';
     const stalled = running && isStalled(j);
@@ -1802,7 +1871,8 @@ function jobsCard(msg, index) {
             stalled ? esc(t('jobs.stalled')) : esc(j.status || 'unknown')}</div>
         </div>
         <div class="job-stage">${esc(j.stage || '')}${
-          j.media?.segmentCount ? ` · ${j.media.segmentCount} segments` : ''}</div>
+          j.media?.segmentCount ? ` · ${j.media.segmentCount} segments` : ''}${
+          j.recovery?.attempts ? ` · ${esc(t('jobs.recovered'))} ×${j.recovery.attempts}` : ''}</div>
         ${running && !stalled ? `
           ${stageStrip(j)}
           <div class="meter-row">
@@ -1829,6 +1899,87 @@ function jobsCard(msg, index) {
         </div>
       </div>`;
   }).join('')}${pagerRow(view, index)}</div>`;
+}
+
+/**
+ * A live event's row: its own state rather than the job status, a strip of
+ * the three things that happen to it, and — once it is over — the game
+ * record where the moments list would otherwise sit.
+ *
+ * Progress is counted in chunks against how many the window will produce,
+ * because that is the only unit a live event has: there is no duration to
+ * be a fraction of until the event has ended.
+ */
+function liveJobRow(j) {
+  const live = liveSummary(j);
+  const active = live.state === 'scheduled' || live.state === 'live';
+  const tone = live.state === 'failed' ? 'failed' : live.state === 'live' ? 'running' : 'idle';
+  const game = state.games.find((g) => (g.jobId || g.id) === j.id);
+  const when = (v) => (v ? new Date(v).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
+  let line = '';
+  if (live.state === 'scheduled') {
+    line = `${t('live.startsAt')} ${when(live.start)} · ${t('live.captureLead')}`;
+  } else if (live.state === 'live') {
+    line = `${live.analysed} ${t('live.of')} ${live.expected} ${t('live.chunks')}`
+      + (live.waiting ? ` · ${live.waiting} ${t('live.captured')}` : ` · ${t('live.waiting')}`)
+      + (live.moments ? ` · ${live.moments} ${t('live.moments')}` : '');
+  } else {
+    line = `${live.captured} ${t('live.chunksDone')} · ${live.moments} ${t('live.moments')}`;
+  }
+  if (live.restarts) line += ` · ${t('live.restarted')} ×${live.restarts}`;
+  return `
+      <div class="job">
+        <div class="job-top">
+          <div class="job-name">${esc(j.title || j.id)}</div>
+          <div class="job-status" data-tone="${tone}">${esc(t(`live.${live.state}`) || live.state)}</div>
+        </div>
+        <div class="job-stage">${esc(line)}</div>
+        ${liveStrip(live)}
+        ${j.status === 'failed' && j.error ? `
+          <div class="job-error"><p>${esc(j.error)}</p></div>` : ''}
+        ${live.state === 'complete' ? (game ? `
+          <div class="live-game">
+            <div class="moment-label">${esc(gameHeadline(game))}</div>
+            <div class="moment-meta">${esc([
+              game.competition || game.groundedCompetition,
+              game.venue || game.groundedVenue, game.mood,
+            ].filter(Boolean).join(' · ') || t('game.notIdentified'))}</div>
+            ${game.summary ? `<div class="game-summary">${esc(game.summary)}</div>` : ''}
+            <div class="moment-actions">
+              <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
+            </div>
+          </div>` : `
+          <div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
+        <div class="job-actions">
+          ${active
+            ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
+            : ''}
+          <button class="link-btn" data-delete-job="${esc(j.id)}"
+                  data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
+        </div>
+      </div>`;
+}
+
+function liveStrip(live) {
+  const fills = liveStageFills(live);
+  const stages = [
+    ['scheduled', fills.scheduled, live.state === 'scheduled'],
+    ['capture', fills.capture, live.state === 'live' && fills.capture < 100],
+    ['analysis', fills.analysis, live.state === 'live' && fills.analysis < 100],
+  ];
+  return `
+    <div class="stage-strip">
+      ${stages.map(([key, fill, active]) => `
+        <div class="stage" style="flex-grow:${key === 'scheduled' ? 1 : 3}"
+             data-state="${fill >= 100 ? 'done' : active ? 'active' : 'todo'}">
+          <div class="stage-meter"><i style="width:${fill}%"></i></div>
+          <div class="stage-label">${esc(t(`live.stage.${key}`))}</div>
+        </div>`).join('')}
+    </div>
+    <div class="meter-row">
+      <div class="meter meter-neutral"><i style="width:${fills.analysis}%"></i></div>
+      <div class="meter-pct">${Math.round(fills.analysis)}%</div>
+    </div>`;
 }
 
 function publishCard() {
@@ -2480,6 +2631,94 @@ async function registerFromStorage() {
   render();
 }
 
+async function registerFromHls() {
+  const u = state.upload;
+  const url = (u.hlsUrl || '').trim();
+  if (!url) return;
+
+  u.status = 'uploading';
+  u.stage = 'Registering the stream';
+  render();
+
+  try {
+    const job = await api('/api/jobs/from-hls', {
+      method: 'POST',
+      body: JSON.stringify({
+        hls_url: url,
+        title: url.split('/').pop().split('?')[0].replace(/\.[^.]+$/, '') || url,
+        sport: u.sport,
+        metadata_language: getSettings().metadataLanguage,
+        context_urls: contextUrlList(),
+      }),
+    });
+
+    u.hlsUrl = '';
+    u.status = 'analyzing';
+    u.stage = 'Handed to the agent';
+    selectJob(job.job_id);
+    playbackUrl = null;
+    if (state.sessionKey) {
+      updateSession(state.sessionKey, { jobId: job.job_id, title: job.title || url });
+      state.sessions = listSessions();
+    }
+    render();
+
+    await ask('Analyse this match and suggest clips.', {
+      showJobs: true,
+      showActions: true,
+      actions: [t('action.processing'), t('action.bestMoments')],
+    });
+  } catch (err) {
+    say(`That stream could not be used: ${err.message}`);
+  }
+  u.status = 'idle';
+  render();
+}
+
+/**
+ * Schedule a live event. Nothing is asked of the agent here: the job is a
+ * document with a window, and the scheduler's tick finds it when its start is
+ * five minutes away. The jobs card is attached so the "scheduled" row is on
+ * screen from the moment it exists.
+ */
+async function scheduleLiveEvent() {
+  const u = state.upload;
+  const l = u.live;
+  const err = validateLiveEvent({ hlsUrl: l.hlsUrl, start: l.start, end: l.end });
+  if (err) { say(t(err)); return; }
+
+  u.status = 'scheduling';
+  render();
+  try {
+    const startIso = new Date(l.start).toISOString();
+    const job = await api('/api/jobs/live', {
+      method: 'POST',
+      body: JSON.stringify({
+        hls_url: l.hlsUrl.trim(),
+        title: l.title.trim() || l.hlsUrl.trim().split('/').pop().split('?')[0] || 'Live event',
+        sport: u.sport,
+        event_start: startIso,
+        event_end: new Date(l.end).toISOString(),
+        metadata_language: getSettings().metadataLanguage,
+        context_urls: contextUrlList(),
+      }),
+    });
+    u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.status = 'idle';
+    selectJob(job.job_id);
+    if (state.sessionKey) {
+      updateSession(state.sessionKey, { jobId: job.job_id, title: job.title || 'Live event' });
+      state.sessions = listSessions();
+    }
+    const when = new Date(startIso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    say(t('live.scheduledMsg').replace('{start}', when), { showJobs: true });
+  } catch (err) {
+    u.status = 'idle';
+    say(`The live event could not be scheduled: ${err.message}`);
+  }
+  render();
+}
+
 
 async function resumeUpload(jobId) {
   const pending = state.pendingUploads.find((p) => p.job_id === jobId);
@@ -2561,7 +2800,7 @@ document.addEventListener('click', (event) => {
     + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs],'
     + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel],'
     + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
-    + '[data-desk-add]');
+    + '[data-desk-add],[data-ingest-tab],[data-register-hls],[data-schedule-live]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -2587,6 +2826,9 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (hit.dataset.registerGcs) { registerFromStorage(); return; }
+  if (hit.dataset.registerHls) { registerFromHls(); return; }
+  if (hit.dataset.scheduleLive) { scheduleLiveEvent(); return; }
+  if (hit.dataset.ingestTab) { state.upload.tab = hit.dataset.ingestTab; render(); return; }
   if (hit.dataset.showAll) {
     const msg = state.msgs[Number(hit.dataset.showAll)];
     if (msg) { msg.showAll = true; msg.page = 0; }
@@ -2742,12 +2984,29 @@ document.addEventListener('click', (event) => {
 // underneath whoever is typing in it. Holding the value in state and writing it
 // back is what keeps a pasted path from vanishing mid-analysis.
 document.addEventListener('input', (event) => {
-  if (!event.target.matches?.('[data-gcs-input]')) return;
-  const wasEmpty = !state.upload.gcsUri;
-  state.upload.gcsUri = event.target.value;
-  // Only re-render when the button's enabled state actually changes; doing it
-  // on every keystroke would move the caret to the end of the field.
-  if (wasEmpty !== !state.upload.gcsUri) render();
+  const el = event.target;
+  if (!el.matches) return;
+  const u = state.upload;
+  // Only re-render when a button's enabled state or a validation message
+  // actually changes; doing it on every keystroke would move the caret to
+  // the end of the field.
+  if (el.matches('[data-gcs-input]')) {
+    const wasEmpty = !u.gcsUri;
+    u.gcsUri = el.value;
+    if (wasEmpty !== !u.gcsUri) render();
+  } else if (el.matches('[data-hls-input]')) {
+    const wasEmpty = !u.hlsUrl.trim();
+    u.hlsUrl = el.value;
+    if (wasEmpty !== !u.hlsUrl.trim()) render();
+  } else if (el.matches('[data-live-title]')) {
+    u.live.title = el.value;
+  } else if (el.matches('[data-live-hls],[data-live-start],[data-live-end]')) {
+    const before = validateLiveEvent(u.live);
+    if (el.matches('[data-live-hls]')) u.live.hlsUrl = el.value;
+    if (el.matches('[data-live-start]')) u.live.start = el.value;
+    if (el.matches('[data-live-end]')) u.live.end = el.value;
+    if (validateLiveEvent(u.live) !== before) render();
+  }
 });
 
 

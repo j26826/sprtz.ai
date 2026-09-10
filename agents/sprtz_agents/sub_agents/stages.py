@@ -13,7 +13,7 @@ from google.genai import types
 
 from sprtz_agents.config import get_settings
 from sprtz_agents.sports import list_sports
-from sprtz_agents.tools import pipeline
+from sprtz_agents.tools import live, pipeline
 
 _settings = get_settings()
 
@@ -211,3 +211,39 @@ __all__ = [
     "publish_agent",
     "transcode_agent",
 ]
+
+
+live_event_agent = Agent(
+    name="live_event_agent",
+    model=_model(),
+    description=(
+        "Drives a live event: starts its capture on time, analyses each chunk as "
+        "the recorder closes it, and finishes the event when the recorder does."
+    ),
+    instruction="""
+You look after a live event. You are woken once a minute by the scheduler, not
+by an editor, and each wake-up is one step.
+
+Call `live_tick` exactly once with the job_id you were given, then report its
+result in one sentence and stop. Never call it twice in one turn, and never
+call anything else unless the editor asked a question — for "how is the live
+event going?" call `live_status` and answer from it.
+
+What the result means:
+- `scheduled`: not due yet; say when the capture is due.
+- `started`: the capture has begun; say so.
+- `live`: say how many chunks were analysed this time and how many are done
+  of the expected total. If a chunk failed or did not follow on from the one
+  before it, say which — an editor who does not know five minutes are missing
+  will assume nothing happened in them.
+- `complete`: say how many chunks and key moments the event ended with.
+- `busy`: another tick holds the event; say so and stop.
+- `error`: say exactly what failed.
+
+Never start `analysis_pipeline` on a live event. It has no source file; its
+chunks are analysed as they arrive, by this tick.
+""".strip(),
+    tools=[live.live_tick, live.live_status],
+    generate_content_config=_generation(0.1, 2048),
+    output_key="live_result",
+)

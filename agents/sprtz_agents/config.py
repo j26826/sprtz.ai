@@ -75,6 +75,17 @@ class Settings:
         default_factory=lambda: float(os.environ.get("SPRTZ_ANALYSIS_FPS", "1.0"))
     )
 
+    # Live events. The capture starts this long before the scheduled start and
+    # closes a chunk every this many seconds; each chunk is analysed as one
+    # segment, so the chunk length is also the live analysis window.
+    live_lead_seconds: int = field(default_factory=lambda: _int_env("SPRTZ_LIVE_LEAD_SECONDS", 300))
+    live_chunk_seconds: int = field(default_factory=lambda: _int_env("SPRTZ_LIVE_CHUNK_SECONDS", 300))
+    # How long the ingest stage waits for an HLS download before giving up on
+    # it. The download is minutes; the 1 fps proxy decodes the whole recording.
+    hls_download_timeout_seconds: int = field(
+        default_factory=lambda: _int_env("SPRTZ_HLS_DOWNLOAD_TIMEOUT_SECONDS", 4 * 3600)
+    )
+
     uploads_bucket: str = field(default_factory=lambda: os.environ.get("UPLOADS_BUCKET", ""))
     media_bucket: str = field(default_factory=lambda: os.environ.get("MEDIA_BUCKET", ""))
 

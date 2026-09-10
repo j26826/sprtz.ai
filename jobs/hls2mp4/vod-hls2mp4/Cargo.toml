@@ -1,0 +1,13 @@
+[package]
+name = "vod-hls2mp4"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ais-media-core = { path = "../ais-media-core" }
+tokio = { version = "1.37", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+m3u8-rs = "6.0"
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive", "env"] }
+chrono = "0.4"

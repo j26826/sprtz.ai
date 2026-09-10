@@ -110,3 +110,15 @@ output "hls_bucket" {
   description = "Bucket holding the HLS packages."
   value       = google_storage_bucket.hls.name
 }
+
+output "live_chunk_seconds" {
+  value = var.live_chunk_seconds
+}
+
+output "hls2mp4_job" {
+  value = google_cloud_run_v2_job.hls2mp4.id
+}
+
+output "live_capture_job" {
+  value = google_cloud_run_v2_job.live_capture.id
+}

@@ -84,6 +84,19 @@ three-hour recording the HLS package takes longer than the analysis, so running
 them in a `ParallelAgent` takes it off the critical path — the editor gets
 moments to look at while the stream is still being built.
 
+### The live event agent and the watchdog tick
+
+`live_event_agent` is not a stage of `analysis_pipeline`. It is woken once a
+minute by Cloud Scheduler through `POST /api/live/tick` — a route that admits
+only the scheduler's own service account — and does one idempotent step per
+wake-up through `live_tick`: start the capture five minutes before the event,
+analyse whatever chunks the recorder has closed (each as one segment through
+the same call the pipeline uses, offset to its place in the recording), check
+each chunk follows on from the previous one as stored, and finish the event
+with a game record when the recorder is done. The same tick lists uploaded
+jobs that have gone quiet and has `recover_job` restart them, so a run killed
+by a deploy is minutes lost rather than a job left "analysing" for ever.
+
 ### Why there is no separate audio agent
 
 Gemini 3.6 Flash consumes the video's audio track in the same pass as the
@@ -196,6 +209,21 @@ package — bigger than any sensible instance. So:
   starts a job, `transcode_status` polls, and `prepare_playback` widens its
   interval while reporting each state change into the job's feed.
 
+### Cloud Run Jobs beside the service
+
+Two pieces of media work are the wrong shape for a request: downloading a
+whole HLS playlist (and transcoding its 1 fps proxy), and following a live
+playlist for the length of an event. Both run as Cloud Run *Jobs* — the
+`jobs/hls2mp4` Rust downloader, and `media_server.live_capture` on the same
+image as the service with a `command` override. The service starts executions
+with per-run environment overrides and polls them, exactly as it does with
+Transcoder; the agent never sees a job, only the tools that front them.
+
+The live recorder joins segments into five-minute chunks with GCS compose and
+writes one Firestore record per chunk. It is the one process in the system
+that must not pause, so it is the one that runs to completion; everything
+that can happen later happens on the once-a-minute tick.
+
 ### Cold start, and why the probe budget is large
 
 Python is slow to start here. Measured on a live Cloud Run revision with
@@ -262,7 +290,11 @@ users/{uid}
 
 jobs/{jobId}
   ownerUid, title, sport, status, stage, progress,
-  source:   { gcsUri, bytes, originalName },
+  kind: upload | hls | live, hlsUrl,
+  source:   { gcsUri, bytes, originalName, analysisUri },   # analysisUri: the 1 fps proxy
+  live:     { eventStart, eventEnd, chunkSec, state, chunksCaptured, chunksAnalysed,
+              capture: { execution, state, lastPollAt, captureStart }, captureRestarts, tickLockUntil },
+  recovery: { attempts, lastAttemptAt, lastReason },        # the watchdog's restarts
   media:    { durationSec, fps, width, height, videoCodec, audioCodec,
               bitrate, segmentCount },
   playback: { hlsUrl, posterUrl, renditions[], segmentSeconds, readyAt },
@@ -271,6 +303,12 @@ jobs/{jobId}
 
 jobs/{jobId}/events/{eventId}          # realtime agent activity feed
   ts, agent, level, stage, message, data
+
+jobs/{jobId}/chunks/{index}            # live events only; written by the recorder
+  index, status: captured | analyzing | analysed | failed, gcsUri, container,
+  startSec, durationSec, segments, firstSeq, lastSeq, firstPdt, lastPdtEnd,
+  discontinuities, gapBefore, gapsInside, attempts,
+  continuity, moments, summary, competition, venue, discipline   # filled by the tick
 
 jobs/{jobId}/moments/{momentId}
   startSec, endSec, type, label, description,

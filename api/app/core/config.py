@@ -78,6 +78,23 @@ class Settings:
 
     iap_audience: str = field(default_factory=lambda: os.environ.get("IAP_AUDIENCE", ""))
 
+    # The live tick's only legitimate caller: Cloud Scheduler, minting an ID
+    # token as this service account for this audience. Both empty means the
+    # route is closed — a tick with nobody allowed to call it is refused, not
+    # open.
+    scheduler_service_account: str = field(
+        default_factory=lambda: os.environ.get("SCHEDULER_SERVICE_ACCOUNT", "")
+    )
+    live_tick_audience: str = field(
+        default_factory=lambda: os.environ.get("LIVE_TICK_AUDIENCE", "")
+    )
+    # How long before a live event's start its capture begins. The agent
+    # enforces the same figure; this one only decides which jobs a tick is
+    # worth waking the agent for.
+    live_lead_seconds: int = field(
+        default_factory=lambda: int(os.environ.get("LIVE_LEAD_SECONDS", "300"))
+    )
+
     cdn_base_url: str = field(default_factory=lambda: os.environ.get("CDN_BASE_URL", "").rstrip("/"))
     cdn_signing_key: str = field(default_factory=lambda: os.environ.get("CDN_SIGNING_KEY", ""))
     cdn_signing_key_name: str = field(
