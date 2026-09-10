@@ -90,14 +90,6 @@ const PLATFORM_SPEC = {
   youtube: { name: 'YouTube Shorts', spec: '9:16 · title from caption' },
 };
 
-// Built per render rather than once, so switching language re-reads it.
-const greeting = () => ({
-  who: 'agent',
-  text: t('greeting'),
-  showActions: true,
-  actions: [t('action.ingest'), t('action.processing'), t('action.bestMoments')],
-});
-
 /* ─────────────────────────────────────────────────────────── utils ── */
 
 function esc(v) {
@@ -169,17 +161,14 @@ let refreshTimer = null;
  * Apply the current locale to everything on the page.
  *
  * Static chrome carries `data-i18n`; the chat and its cards are re-rendered,
- * because they are built from templates that call t() as they run. The greeting
- * is rebuilt only when it is the only thing on screen — replacing it mid-
- * conversation would rewrite something the editor has already read.
+ * because they are built from templates that call t() as they run. Messages
+ * already on screen keep their text — rewriting something the editor has
+ * read would be worse than leaving it in the previous language.
  */
 function applyLocale() {
   document.querySelectorAll('[data-i18n]').forEach((el) => {
     el.textContent = t(el.dataset.i18n);
   });
-  if (state.msgs.length === 1 && state.msgs[0].who === 'agent') {
-    state.msgs = [greeting()];
-  }
   if (!$('settings')?.classList.contains('hidden')) renderSettings();
   render();
 }
@@ -375,7 +364,7 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
-  state.msgs = [greeting()];
+  state.msgs = [];
   render();
   watchJobs();
   watchGames();
@@ -1572,7 +1561,7 @@ function openSession(sessionId) {
   state.scope = session.scope || null;
   state.msgs = Array.isArray(session.msgs) && session.msgs.length
     ? session.msgs.map((m) => ({ ...m, searching: false, deskLoading: false }))
-    : [greeting()];
+    : [];
   state.msgs.forEach((m) => animatedMsgs.add(m));
   if (!state.scope && !state.msgs.some((m) => m.showScope)) {
     state.msgs.push({ who: 'agent', text: t('scope.prompt'), showScope: true, scopeStep: 'choose' });
@@ -3320,5 +3309,5 @@ $('account-menu').addEventListener('click', () => toggleAccountMenu(false));
 
 $('new-session').addEventListener('click', startSession);
 
-state.msgs = [greeting()];
+state.msgs = [];
 render();
