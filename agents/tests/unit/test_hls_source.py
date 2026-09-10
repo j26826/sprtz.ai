@@ -131,6 +131,48 @@ class TestTheProxy:
         assert state["proxy_polls"] == 0
 
 
+class TestTheClockMoves:
+    """The watchdog reads the job's `updatedAt`, and an event is not a write to it.
+
+    The first HLS job on the desk was restarted fifteen minutes into its
+    download by a tick that could not tell a long download from a dead run:
+    the stage said "Still downloading" every five minutes, into the feed,
+    and touched the job never.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_long_download_touches_the_job_every_few_minutes(self, media):
+        clock = iter(range(0, 100_000, 120))  # two minutes pass per look
+        with patch.object(pipeline.time, "monotonic", side_effect=lambda: next(clock)):
+            await pipeline._download_hls_source("j1", "https://x.test/vod.m3u8")
+        notes = [a for t, a in media["calls"] if t == "emit_event" and "Still downloading" in a["message"]]
+        beats = [a for t, a in media["calls"] if t == "update_job_status" and a.get("stage") == "ingest"
+                 and not a.get("status")]
+        assert notes, "the note is what this test drives"
+        assert len(beats) >= len(notes)
+
+    @pytest.mark.asyncio
+    async def test_a_long_encode_touches_the_job_too(self):
+        state = {"calls": [], "polls": 0}
+
+        async def call(server, tool, args=None):
+            state["calls"].append((tool, args or {}))
+            if tool == "transcode_status":
+                state["polls"] += 1
+                done = state["polls"] >= 12
+                return {"status": "success", "state": "SUCCEEDED" if done else "RUNNING",
+                        "done": done, "succeeded": done}
+            return {"status": "success"}
+
+        with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)), \
+             patch.object(pipeline.asyncio, "sleep", AsyncMock()):
+            out = await pipeline._await_transcode("j1", "projects/p/locations/l/jobs/x",
+                                                  heartbeat=("ingest", 0.1))
+        assert out["succeeded"]
+        beats = [a for t, a in state["calls"] if t == "update_job_status" and a.get("stage") == "ingest"]
+        assert beats, "eleven polls is over nine minutes of waiting with nothing written"
+
+
 class TestWhatReadsWhat:
     def test_the_analysis_reads_the_proxy_when_there_is_one(self):
         assert 'analysis_uri = (job.get("source") or {}).get("analysisUri") or gcs_uri' in PIPELINE

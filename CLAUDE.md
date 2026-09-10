@@ -206,7 +206,13 @@ back to `captured` up to three times, and a recorder execution that has died
 or stopped reporting for five minutes while the event is still on is
 restarted, up to three times; a restarted recorder **resumes its chunk
 numbering** from what is on record, or the second execution's chunk 0 would
-sit on top of the first's. Inside a VOD analysis, segments that failed get a
+sit on top of the first's. **A stage that waits on something else has to
+keep the clock moving**: the watchdog reads the job's `updatedAt`, and an event
+in the feed does not touch it. The first HLS download on the desk was restarted
+fifteen minutes in by a tick that could not tell "Still downloading" from a
+dead run, so the download poll and every wait on Transcoder re-report their
+last progress fraction every five minutes — the bar does not move, the clock
+does. Inside a VOD analysis, segments that failed get a
 second pass on their own once the burst is over — what the HTTP retry cannot
 cover is a response that came back unparseable, and a window asked again with
 the quota free usually answers.

@@ -262,6 +262,12 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
             return await fail("The HLS download did not finish in time.")
         if time.monotonic() - last_note > 300:
             await _emit(job_id, "ingest", "Still downloading the stream.")
+            # An event is not a heartbeat: the watchdog reads the job's own
+            # `updatedAt`, and a download that wrote nothing there for fifteen
+            # minutes was restarted mid-download, by a tick that could not
+            # tell it from a dead run. Same fraction again — progress only
+            # goes forward, so this moves the clock and not the bar.
+            await _progress(job_id, "ingest", 0.05)
             last_note = time.monotonic()
 
     gcs_uri = probe.get("gcs_uri", "")
@@ -305,7 +311,8 @@ async def _make_analysis_proxy(job_id: str, gcs_uri: str) -> str:
         return ""
 
     outcome = await _await_transcode(job_id, started["transcoder_job"],
-                                     stage="ingest", what="1 fps copy")
+                                     stage="ingest", what="1 fps copy",
+                                     heartbeat=("ingest", 0.1))
     if not outcome.get("succeeded"):
         await _emit(job_id, "ingest",
                     "The 1 fps copy failed; the analysis will cut the source into "
@@ -431,17 +438,34 @@ _POLL_MAX_SECONDS = 60
 _POLL_CEILING_SECONDS = 4 * 60 * 60
 
 
+# How often a wait on Transcoder touches the job while nothing changes. The
+# watchdog restarts a running job whose `updatedAt` is fifteen minutes old,
+# and an encode reports nothing between "running" and "succeeded".
+_HEARTBEAT_SECONDS = 300
+
+
 async def _await_transcode(job_id: str, transcoder_job: str, stage: str = "transcode",
-                           what: str = "Preview encode") -> dict:
-    """Wait for a Transcoder job, reporting each state change into the job's feed."""
+                           what: str = "Preview encode",
+                           heartbeat: tuple[str, float] = ("transcode", 0.1)) -> dict:
+    """Wait for a Transcoder job, reporting each state change into the job's feed.
+
+    ``heartbeat`` is the (stage, fraction) re-reported every few minutes so
+    the job's clock moves while the encode runs — the same fraction the
+    caller last reported, since progress only goes forward.
+    """
     waited = 0.0
+    since_heartbeat = 0.0
     interval = float(_POLL_FIRST_SECONDS)
     last_state = ""
 
     while waited < _POLL_CEILING_SECONDS:
         await asyncio.sleep(interval)
         waited += interval
+        since_heartbeat += interval
         interval = min(interval * 1.5, _POLL_MAX_SECONDS)
+        if since_heartbeat >= _HEARTBEAT_SECONDS:
+            await _progress(job_id, *heartbeat)
+            since_heartbeat = 0.0
 
         status = await mcp_client.call_tool(
             "media", "transcode_status", {"transcoder_job": transcoder_job}
