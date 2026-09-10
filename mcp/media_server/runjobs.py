@@ -16,6 +16,7 @@ to import on Cloud Run and the server must answer its health check first.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -80,3 +81,45 @@ def cancel(execution_name: str) -> None:
     from google.cloud import run_v2
 
     run_v2.ExecutionsClient().cancel_execution(name=execution_name)
+
+
+_SEGMENT_LINE = re.compile(r"^\[(\d+)/(\d+)\] Streaming segment")
+
+
+def parse_segment_progress(text: str) -> tuple[int, int] | None:
+    """``(done, total)`` from a download job's ``[n/N] Streaming segment`` line."""
+    match = _SEGMENT_LINE.match(text or "")
+    if not match:
+        return None
+    done, total = int(match.group(1)), int(match.group(2))
+    return (done, total) if total > 0 else None
+
+
+def execution_progress(execution_name: str) -> dict[str, Any] | None:
+    """How far a download execution has got, read from its own log.
+
+    The download streams the whole playlist into one object through a single
+    resumable upload, so nothing is visible in the bucket until it finishes.
+    What is visible is the job's log: one ``[n/N] Streaming segment`` line per
+    segment. The newest one is the progress. Best effort — a log that has not
+    caught up yet, or a query that fails, is ``None`` rather than an error,
+    because the poll that asks is deciding whether to keep waiting, not
+    whether the download is working.
+    """
+    from google.cloud import logging as cloud_logging
+
+    short = execution_name.rsplit("/", 1)[-1]
+    filter_ = (
+        'resource.type="cloud_run_job" '
+        f'AND labels."run.googleapis.com/execution_name"="{short}" '
+        'AND textPayload:"Streaming segment"'
+    )
+    entries = cloud_logging.Client().list_entries(
+        filter_=filter_, order_by=cloud_logging.DESCENDING, max_results=1)
+    for entry in entries:
+        parsed = parse_segment_progress(str(entry.payload or ""))
+        if parsed:
+            done, total = parsed
+            return {"segments_done": done, "segments_total": total,
+                    "fraction": min(1.0, done / total)}
+    return None

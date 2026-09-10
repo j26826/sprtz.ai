@@ -715,6 +715,9 @@ def download_hls(job_id: str, hls_url: str) -> dict:
 def hls_download_status(execution: str, job_id: str) -> dict:
     """Where an HLS download is, and the object it produced once it is done.
 
+    While it runs, carries ``segments_done``/``segments_total``/``fraction``
+    read from the execution's own log when that has caught up.
+
     Args:
         execution: The execution name `download_hls` returned.
         job_id: Job the download belongs to.
@@ -724,7 +727,15 @@ def hls_download_status(execution: str, job_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
     if state["state"] != "succeeded":
-        return {"status": state["state"], **state}
+        result = {"status": state["state"], **state}
+        if state["state"] == "running":
+            try:
+                result.update(runjobs.execution_progress(execution) or {})
+            except Exception:  # noqa: BLE001
+                # The poll is asking whether to keep waiting; a progress
+                # figure it could not read is not a reason to stop.
+                logger.warning("could not read progress for %s", execution, exc_info=True)
+        return result
 
     source = None
     for blob in gcs.client().list_blobs(UPLOADS_BUCKET, prefix=f"{_hls_source_prefix(job_id)}source/"):

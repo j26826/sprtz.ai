@@ -59,8 +59,12 @@ async def _emit(job_id: str, stage: str, message: str, level: str = "info", **da
 # everything else is minutes, so a bar that gave each stage a fifth would sit at
 # 40% for an hour and then jump.
 STAGE_SPANS: dict[str, tuple[int, int]] = {
-    "ingest": (0, 5),
-    "transcode": (5, 20),
+    # Ingest is a probe for an upload, and a download plus a proxy encode for
+    # an HLS source — a quarter of an hour that the bar has to be seen moving
+    # through, or it reads as a dead run. Transcode's band is mostly notional:
+    # it runs beside the analysis and finishes inside its own slice.
+    "ingest": (0, 10),
+    "transcode": (10, 20),
     "analysis": (20, 80),
     "clips": (80, 95),
     "captions": (95, 100),
@@ -230,6 +234,11 @@ async def inspect_source(job_id: str, tool_context: ToolContext) -> dict:
     }
 
 
+# The download's share of the ingest band, as fractions of the stage: it
+# starts here and ends here, and the proxy encode and the probe take the rest.
+_DOWNLOAD_BAND = (0.05, 0.5)
+
+
 async def _download_hls_source(job_id: str, hls_url: str) -> dict:
     """Fetch an HLS playlist into the uploads bucket and put it on the job.
 
@@ -242,7 +251,7 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
     fit under the fetch limit.
     """
     settings = get_settings()
-    await _progress(job_id, "ingest", 0.05, status="analyzing")
+    await _progress(job_id, "ingest", _DOWNLOAD_BAND[0], status="analyzing")
     await _emit(job_id, "ingest", "Downloading the HLS stream into storage.", hls_url=hls_url)
 
     async def fail(reason: str) -> dict:
@@ -261,6 +270,7 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
     deadline = time.monotonic() + settings.hls_download_timeout_seconds
     last_note = time.monotonic()
     interval = 15.0
+    quarters_noted = 0
     while True:
         await asyncio.sleep(interval)
         interval = min(interval * 1.5, 60.0)
@@ -274,6 +284,19 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
                 f"The HLS download failed: {probe.get('error') or 'the job did not succeed'}")
         if time.monotonic() > deadline:
             return await fail("The HLS download did not finish in time.")
+        fraction = float(probe.get("fraction") or 0.0)
+        if fraction:
+            # The download's own count, from the job's log: it streams into
+            # one object that appears only when it is done, so this is the
+            # only thing there is to show. The download owns the first half
+            # of the ingest band; the proxy takes most of the rest.
+            await _progress(job_id, "ingest", _DOWNLOAD_BAND[0]
+                            + (_DOWNLOAD_BAND[1] - _DOWNLOAD_BAND[0]) * fraction)
+            while quarters_noted < 3 and fraction >= (quarters_noted + 1) / 4:
+                quarters_noted += 1
+                await _emit(job_id, "ingest",
+                            f"Downloaded {probe.get('segments_done')} of "
+                            f"{probe.get('segments_total')} segments.")
         if time.monotonic() - last_note > 300:
             await _emit(job_id, "ingest", "Still downloading the stream.")
             # An event is not a heartbeat: the watchdog reads the job's own
@@ -281,7 +304,7 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
             # minutes was restarted mid-download, by a tick that could not
             # tell it from a dead run. Same fraction again — progress only
             # goes forward, so this moves the clock and not the bar.
-            await _progress(job_id, "ingest", 0.05)
+            await _progress(job_id, "ingest", _DOWNLOAD_BAND[0])
             last_note = time.monotonic()
 
     gcs_uri = probe.get("gcs_uri", "")
@@ -299,7 +322,7 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
     await _emit(job_id, "ingest",
                 f"Downloaded {size_gb:.2f} GB as {probe.get('original_name') or 'the source'}.",
                 bytes=int(probe.get("bytes") or 0))
-    await _progress(job_id, "ingest", 0.1)
+    await _progress(job_id, "ingest", _DOWNLOAD_BAND[1])
 
     analysis_uri = await _make_analysis_proxy(job_id, gcs_uri)
     return {"status": "success", "job_id": job_id, "gcs_uri": gcs_uri,
@@ -326,7 +349,7 @@ async def _make_analysis_proxy(job_id: str, gcs_uri: str) -> str:
 
     outcome = await _await_transcode(job_id, started["transcoder_job"],
                                      stage="ingest", what="1 fps copy",
-                                     heartbeat=("ingest", 0.1))
+                                     heartbeat=("ingest", _DOWNLOAD_BAND[1]))
     if not outcome.get("succeeded"):
         await _emit(job_id, "ingest",
                     "The 1 fps copy failed; the analysis will cut the source into "
@@ -339,6 +362,7 @@ async def _make_analysis_proxy(job_id: str, gcs_uri: str) -> str:
         "job_id": job_id, "gcs_uri": gcs_uri, "analysis_uri": analysis_uri})
     await _emit(job_id, "ingest", "Made the 1 fps copy the analysis reads.",
                 analysis_uri=analysis_uri)
+    await _progress(job_id, "ingest", 0.9)
     return analysis_uri
 
 

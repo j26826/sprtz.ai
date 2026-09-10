@@ -415,6 +415,16 @@ jobs card so the stage strip is on screen from the moment the run starts. The
 Firestore listener re-renders on every job write, so it follows by itself
 afterwards.
 
+**An HLS download reports its own count.** It streams the whole playlist into
+one object through one resumable upload, so the bucket shows nothing until it
+is done and the bar sat at the start of ingest for minutes — which was
+reported as "not progressing". The job logs one `[n/N] Streaming segment` line
+per segment; `hls_download_status` reads the newest through Cloud Logging
+(`execution_progress`, best effort, `roles/logging.viewer` on the media
+service) and the ingest stage reports it across the download's half of the
+band, with a note at each quarter. Ingest is 0-10 rather than 0-5 for the
+same reason: a download plus a proxy encode is a quarter of an hour.
+
 Cutting gets the first quarter of the analysis band. Thirteen windows take a
 minute or two and the first Gemini call several more, so with the whole band
 given to segment completions the bar sat at the stage's start for five minutes

@@ -1182,8 +1182,8 @@ function sinceLabel(value) {
 // an hour of Gemini calls and everything else is minutes, so equal thirds would
 // leave the bar parked mid-way for most of a run.
 const STAGES = [
-  { key: 'ingest', start: 0, end: 5 },
-  { key: 'transcode', start: 5, end: 20 },
+  { key: 'ingest', start: 0, end: 10 },
+  { key: 'transcode', start: 10, end: 20 },
   { key: 'analysis', start: 20, end: 80 },
   { key: 'clips', start: 80, end: 95 },
   { key: 'captions', start: 95, end: 100 },
