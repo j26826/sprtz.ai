@@ -15,11 +15,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core import auth  # noqa: E402
-from app.routers import live  # noqa: E402
-from app.routers.jobs import LiveEventRequest, _clean_hls_url  # noqa: E402
+from app.core import auth
+from app.routers import live
+from app.routers.jobs import LiveEventRequest, _clean_hls_url
 
-NOW = datetime.datetime(2026, 9, 10, 12, 0, tzinfo=datetime.timezone.utc)
+NOW = datetime.datetime(2026, 9, 10, 12, 0, tzinfo=datetime.UTC)
 
 
 def _at(minutes: float) -> str:
@@ -51,7 +51,7 @@ class TestTheWindow:
 
     def test_a_future_window_passes_and_is_normalised_to_utc(self):
         req = self._req(event_start="2026-09-10T15:00:00+02:00", event_end="2026-09-10T16:00:00+02:00")
-        assert req.event_start.tzinfo == datetime.timezone.utc
+        assert req.event_start.tzinfo == datetime.UTC
         assert req.event_start.hour == 13
 
     def test_a_naive_time_is_refused_rather_than_guessed(self):

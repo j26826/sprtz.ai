@@ -44,7 +44,7 @@ def _parse(value: str | None) -> datetime.datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+        parsed = parsed.replace(tzinfo=datetime.UTC)
     return parsed
 
 
@@ -109,7 +109,7 @@ async def tick(
     _caller: str = Depends(scheduler_caller),
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     listed = await clients.call_mcp("catalog", "list_live_jobs", {})
     jobs = listed.get("jobs") or []
     work = [(job, "Run the live event tick for this job.")
@@ -131,7 +131,7 @@ async def tick(
         try:
             reply = await asyncio.to_thread(_wake, engine, job_id, message)
             return {"job_id": job_id, "reply": reply}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("tick failed for %s", job_id)
             return {"job_id": job_id, "error": f"{type(exc).__name__}: {exc}"}
 
