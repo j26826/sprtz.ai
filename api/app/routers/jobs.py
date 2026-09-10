@@ -426,16 +426,16 @@ class LiveEventRequest(BaseModel):
         # UTC; anything else is refused rather than guessed at.
         if v.tzinfo is None:
             raise ValueError("Event times must carry a timezone (send UTC with a Z).")
-        return v.astimezone(datetime.timezone.utc)
+        return v.astimezone(datetime.UTC)
 
     @model_validator(mode="after")
-    def _window(self) -> "LiveEventRequest":
+    def _window(self) -> LiveEventRequest:
         if self.event_end <= self.event_start:
             raise ValueError("The event must end after it starts.")
         hours = (self.event_end - self.event_start).total_seconds() / 3600
         if hours > MAX_LIVE_EVENT_HOURS:
             raise ValueError(f"A live event is at most {MAX_LIVE_EVENT_HOURS} hours.")
-        if self.event_end <= datetime.datetime.now(datetime.timezone.utc):
+        if self.event_end <= datetime.datetime.now(datetime.UTC):
             raise ValueError("The event has already ended.")
         return self
 
