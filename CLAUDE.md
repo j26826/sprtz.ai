@@ -185,7 +185,12 @@ disk and has one ffmpeg stream-copy video from the bucket and audio from
 disk into a new transport stream, piped straight back to the bucket — and
 polls `mux_status`, which hands over the muxed object and deletes the silent
 one. A mux that fails is a warning and the recording stays silent; the
-analysis, the preview and the clips all still run.
+analysis, the preview and the clips all still run. The segment fetches retry
+from two seconds doubling with jitter, on a keep-alive session per worker:
+the first real mux lost all of a three-thousand-segment fetch to one dropped
+CDN connection. A failed ffmpeg removes the empty object its upload had
+already created, because a zero-byte object under the muxed name reads as a
+finished mux.
 
 **A live event is a recorder plus a tick, never one long process.** A live
 playlist is a sliding window of a few segments — 20 to 30 seconds — so the

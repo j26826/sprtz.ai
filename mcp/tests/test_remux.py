@@ -133,3 +133,61 @@ class TestTheMuxTools:
     def test_a_running_mux_is_still_running(self):
         with patch.object(server.runjobs, "execution_state", return_value={"state": "running"}):
             assert server.mux_status("e1", "gs://u/o.ts")["status"] == "running"
+
+
+class TestFetchesRetry:
+    """Three thousand fetches from a CDN drop a connection now and then.
+
+    The first real mux lost everything to one "Remote end closed connection
+    without response" on an audio segment.
+    """
+
+    def _session(self, answers):
+        sess = MagicMock()
+        sess.get.side_effect = answers
+        return sess
+
+    def _ok(self, body=b"SEG"):
+        r = MagicMock(); r.status_code = 200; r.content = body; r.raise_for_status = MagicMock()
+        return r
+
+    def test_a_dropped_connection_is_retried(self):
+        import requests
+
+        sess = self._session([requests.ConnectionError("Remote end closed connection"), self._ok()])
+        with patch.object(remux, "_session", MagicMock(s=sess)), patch.object(remux.time, "sleep"):
+            assert remux._fetch("https://x/a1.ts") == b"SEG"
+        assert sess.get.call_count == 2
+
+    def test_a_server_error_is_retried_but_a_client_error_is_not(self):
+        import requests
+
+        bad = MagicMock(); bad.status_code = 503
+        sess = self._session([bad, self._ok()])
+        with patch.object(remux, "_session", MagicMock(s=sess)), patch.object(remux.time, "sleep"):
+            assert remux._fetch("https://x/a1.ts") == b"SEG"
+
+        gone = MagicMock(); gone.status_code = 404
+        gone.raise_for_status.side_effect = requests.HTTPError("404", response=gone)
+        sess = self._session([gone, self._ok()])
+        with patch.object(remux, "_session", MagicMock(s=sess)), patch.object(remux.time, "sleep"):
+            with pytest.raises(requests.HTTPError):
+                remux._fetch("https://x/a1.ts")
+        assert sess.get.call_count == 1
+
+    def test_it_gives_up_with_the_last_reason(self):
+        import requests
+
+        sess = self._session([requests.ConnectionError("down")] * remux.FETCH_ATTEMPTS)
+        with patch.object(remux, "_session", MagicMock(s=sess)), patch.object(remux.time, "sleep"):
+            with pytest.raises(RuntimeError, match="gave up"):
+                remux._fetch("https://x/a1.ts")
+
+
+class TestAFailedMuxSaysSo:
+    def test_mux_status_names_the_failure(self):
+        with patch.object(server.runjobs, "execution_state",
+                          return_value={"state": "failed", "failed_count": 1}):
+            out = server.mux_status("e1", "gs://u/o.ts", "gs://u/s.ts")
+        assert out["status"] == "failed"
+        assert "remux execution failed" in out["error"]

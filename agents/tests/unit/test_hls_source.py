@@ -229,6 +229,36 @@ class TestTheBarMovesThroughTheDownload:
         assert notes == ["Downloaded 900 of 3375 segments.", "Downloaded 1800 of 3375 segments.",
                          "Downloaded 3000 of 3375 segments."]
 
+    @pytest.mark.asyncio
+    async def test_a_poll_that_crosses_two_quarters_notes_once(self):
+        state = {"calls": [], "polls": 0}
+
+        async def call(server, tool, args=None):
+            state["calls"].append((tool, args or {}))
+            if tool == "download_hls":
+                return {"status": "started", "execution": "exec-9"}
+            if tool == "hls_download_status":
+                state["polls"] += 1
+                if state["polls"] == 1:
+                    return {"status": "running", "segments_done": 1778, "segments_total": 3375,
+                            "fraction": 1778 / 3375}
+                return DOWNLOADED
+            if tool == "make_analysis_proxy":
+                return {"status": "error", "error": "off"}
+            return {"status": "success"}
+
+        with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)), \
+             patch.object(pipeline.asyncio, "sleep", AsyncMock()):
+            await pipeline._download_hls_source("j1", "https://x.test/vod.m3u8")
+        notes = [a["message"] for t, a in state["calls"]
+                 if t == "emit_event" and "of 3375 segments" in a["message"]]
+        assert notes == ["Downloaded 1778 of 3375 segments."]
+
+    def test_the_bar_shows_a_point_from_the_start(self):
+        # 0.05 of a ten-point band rounds to zero, and a bar at zero for the
+        # three minutes the download job takes to start reads as nothing running.
+        assert pipeline.stage_progress("ingest", pipeline._DOWNLOAD_BAND[0]) >= 1
+
     def test_the_ingest_band_is_wide_enough_to_see(self):
         # A download and a proxy encode are a quarter of an hour; five points
         # of bar for that was reported as "not progressing".
