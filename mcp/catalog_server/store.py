@@ -624,7 +624,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "",
                event_start: str = "", event_end: str = "",
-               chunk_sec: int = 0) -> dict[str, Any]:
+               chunk_sec: int = 0, make_clips: bool = True) -> dict[str, Any]:
     """Open a job. Three kinds, told apart by where the video comes from.
 
     ``upload`` has its source in the bucket already. ``hls`` has only a URL and
@@ -664,6 +664,13 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         "media": {},
         "playback": {},
         "counts": {"moments": 0, "clips": 0},
+        # Whether this match is being cut, or only read. A competition day
+        # yields hundreds of moments and an editor who wants the log does not
+        # want twenty suggestions and their copy — that is a Gemini call per
+        # clip for something nobody asked for. Fixed on the job at
+        # registration, like the metadata language: what a match was analysed
+        # for does not change because the panel's checkbox did.
+        "makeClips": bool(make_clips),
         "error": None,
         "createdAt": now(),
         "updatedAt": now(),

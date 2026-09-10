@@ -77,6 +77,10 @@ class CreateJobRequest(BaseModel):
     # the job at creation so a match's prose does not claim to change language
     # when a later reader changes theirs.
     metadata_language: str = Field(default="en", max_length=8)
+    # Whether this match is cut as well as read. Fixed on the job, like
+    # the metadata language: an editor who asked only for the log does
+    # not get twenty clip suggestions and a Gemini call each for copy.
+    make_clips: bool = True
     # Whose upload prefix the object sits under. Defaults to the caller, and is
     # only ever different when picking up an orphan somebody else left: the
     # path was written with their uid and the bytes are still there under it.
@@ -206,6 +210,7 @@ async def create_job(
             "size_bytes": body.size_bytes,
             "content_type": body.content_type,
             "metadata_language": body.metadata_language,
+            "make_clips": body.make_clips,
             "context_urls": body.context_urls,
         },
     )
@@ -226,6 +231,10 @@ class RegisterSourceRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     sport: str = Field(default="handball")
     metadata_language: str = Field(default="en", max_length=8)
+    # Whether this match is cut as well as read. Fixed on the job, like
+    # the metadata language: an editor who asked only for the log does
+    # not get twenty clip suggestions and a Gemini call each for copy.
+    make_clips: bool = True
     context_urls: list[str] = Field(default_factory=list)
 
     @field_validator("context_urls")
@@ -315,6 +324,7 @@ async def create_job_from_source(
             "size_bytes": size_bytes,
             "content_type": blob.content_type or "",
             "metadata_language": body.metadata_language,
+            "make_clips": body.make_clips,
             "context_urls": body.context_urls,
         },
     )
@@ -343,6 +353,10 @@ class HlsSourceRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     sport: str = Field(default="handball")
     metadata_language: str = Field(default="en", max_length=8)
+    # Whether this match is cut as well as read. Fixed on the job, like
+    # the metadata language: an editor who asked only for the log does
+    # not get twenty clip suggestions and a Gemini call each for copy.
+    make_clips: bool = True
     context_urls: list[str] = Field(default_factory=list)
     # The 1 fps proxy the analysis reads instead of the source. Off only for
     # a source that is already small.
@@ -385,6 +399,7 @@ async def create_job_from_hls(
             "size_bytes": 0,
             "content_type": "application/vnd.apple.mpegurl",
             "metadata_language": body.metadata_language,
+            "make_clips": body.make_clips,
             "context_urls": body.context_urls,
             "kind": "hls",
             "hls_url": body.hls_url,
@@ -407,6 +422,10 @@ class LiveEventRequest(BaseModel):
     event_start: datetime.datetime
     event_end: datetime.datetime
     metadata_language: str = Field(default="en", max_length=8)
+    # Whether this match is cut as well as read. Fixed on the job, like
+    # the metadata language: an editor who asked only for the log does
+    # not get twenty clip suggestions and a Gemini call each for copy.
+    make_clips: bool = True
     context_urls: list[str] = Field(default_factory=list)
 
     @field_validator("hls_url")
@@ -466,6 +485,7 @@ async def create_live_event(
             "size_bytes": 0,
             "content_type": "application/vnd.apple.mpegurl",
             "metadata_language": body.metadata_language,
+            "make_clips": body.make_clips,
             "context_urls": body.context_urls,
             "kind": "live",
             "hls_url": body.hls_url,

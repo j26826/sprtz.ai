@@ -75,6 +75,9 @@ const state = {
   playing: null,          // { momentId, start, end }
   upload: {
     file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '', gcsUri: '',
+    // Whether this match is cut as well as read. Sent with the registration
+    // and fixed on the job there, like the metadata language.
+    makeClips: true,
     tab: 'upload',            // 'upload' | 'live'
     hlsUrl: '',               // a VOD playlist to download
     live: { title: '', hlsUrl: '', start: '', end: '' },
@@ -974,7 +977,14 @@ function ingestCard() {
           ${state.sports.map((s) => `
             <button class="chip" data-sport="${esc(s)}" aria-pressed="${u.sport === s}"
                     style="text-transform:capitalize">${esc(s)}</button>`).join('')}
-        </div>`;
+        </div>
+        <label class="ingest-clips">
+          <input type="checkbox" data-make-clips ${u.makeClips ? 'checked' : ''} />
+          <span>
+            <span class="field-label">${esc(t('ingest.makeClips'))}</span>
+            <span class="setting-hint">${esc(t('ingest.makeClipsHint'))}</span>
+          </span>
+        </label>`;
   const contextBlock = `
         <div class="ingest-context">
           <label class="field-label" for="context-urls">${esc(t('ingest.contextUrls'))}</label>
@@ -2736,6 +2746,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
       // descriptions are written in is a property of that match, not of
       // whoever opens it later.
       metadata_language: getSettings().metadataLanguage,
+      make_clips: state.upload.makeClips,
       context_urls: contextUrlList(),
       // Only set when picking up an orphan somebody else left: the bytes are
       // under their prefix, not this caller's.
@@ -2851,6 +2862,7 @@ async function registerFromStorage() {
         title: uri.split('/').pop().replace(/\.[^.]+$/, '') || uri,
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
+        make_clips: state.upload.makeClips,
       context_urls: contextUrlList(),
       }),
     });
@@ -2897,6 +2909,7 @@ async function registerFromHls() {
         title: url.split('/').pop().split('?')[0].replace(/\.[^.]+$/, '') || url,
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
+        make_clips: state.upload.makeClips,
         context_urls: contextUrlList(),
       }),
     });
@@ -2951,6 +2964,7 @@ async function scheduleLiveEvent() {
         event_start: startIso,
         event_end: new Date(l.end).toISOString(),
         metadata_language: getSettings().metadataLanguage,
+        make_clips: state.upload.makeClips,
         context_urls: contextUrlList(),
       }),
     });
@@ -3265,6 +3279,8 @@ document.addEventListener('input', (event) => {
     render();
     const again = document.querySelector('[data-scope-query]');
     if (again) { again.focus(); again.setSelectionRange(at, at); }
+  } else if (el.matches('[data-make-clips]')) {
+    u.makeClips = el.checked;
   } else if (el.matches('[data-live-title]')) {
     u.live.title = el.value;
   } else if (el.matches('[data-live-hls],[data-live-start],[data-live-end]')) {
