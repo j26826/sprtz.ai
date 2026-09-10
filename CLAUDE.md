@@ -653,7 +653,28 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
-### Something must be selected
+### A session has a scope
+
+Every new session starts with a card asking what it is about — all the games,
+one sport and any of its disciplines, or games picked by name through a
+search box — and the answer is the session's `scope` (`web/src/scope.js`,
+tested). It does four things: **names the session** in the sidebar
+(`All games`, `Equestrian · Dressage`, the game's headline, `3 games`);
+**narrows the cards** — the games list, the desk shortlist's `sport`/`job_ids`,
+and the search panel's presets; is **sent to the agent on every message** as a
+`[scope: …]` line (`context` on `POST /api/agent/messages`, composed by
+`build_prompt`), which the root instruction reads and passes on to
+`search_moments`/`list_top_moments`; and chooses which job is open. Job ids
+travel with the names because a name is what a vector search is worst at.
+
+Disciplines are whatever the desk has actually seen for that sport — a sport
+with none (handball) skips the question. Registering a match in a session
+scopes the session to that match. **Switching sessions restores the
+transcript and the agent's own session id** as well as the scope (`msgs`,
+`agentSessionId` on the session, last eighty turns, big search results
+dropped), so switching back is switching back rather than starting again; a
+session with no scope yet — one from before this existed — is asked on open.
+
 
 Moments, clips, events and the game record are all read through listeners
 `selectJob` opens, so with no job selected every one of those cards is empty

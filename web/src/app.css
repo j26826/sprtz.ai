@@ -1576,3 +1576,20 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .live-times .composer-input { margin-top: 6px; width: 100%; }
 .live-error { margin-bottom: 4px; }
 .live-game { margin-top: 10px; padding-top: 10px; border-top: var(--rule-hair) solid var(--color-rule); }
+
+
+/* The scope card: three doors at the start of a session, then a one-line
+   summary of what was chosen. */
+.scope-options { display: grid; gap: 8px; margin-top: 10px; }
+.scope-option {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  padding: 10px 12px; cursor: pointer; font: inherit; color: var(--color-text);
+  background: var(--color-bg); border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-input, 5px);
+}
+.scope-option:hover { border-color: var(--color-accent); background: var(--color-accent-100); }
+.scope-option-title { font-weight: 600; }
+.scope-option-desc { font-size: 11.5px; color: var(--color-neutral-800); line-height: 1.4; }
+.scope-panel { margin-top: 10px; }
+.scope-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.scope-name { font-weight: 600; }
