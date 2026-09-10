@@ -299,6 +299,13 @@ async def _advance(job_id: str, job: dict, live: dict, at: datetime, settings) -
         probe = await mcp_client.call_tool("media", "live_capture_status", {"execution": execution})
         if probe.get("status") in ("running", "succeeded", "failed"):
             exec_state = probe["status"]
+        else:
+            # Assumed running, which is the safe reading — but say so: a
+            # recorder whose state cannot be read is one the event can never
+            # see finish, and the first such was a bare execution id the API
+            # took for a project.
+            logger.warning("could not read the recorder's state for %s: %s",
+                           job_id, probe.get("error") or probe)
 
     # The recorder's health, before anything else: a dead recorder during the
     # event is minutes of broadcast lost for every minute it stays dead.

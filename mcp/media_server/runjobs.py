@@ -54,6 +54,23 @@ def run(job_name: str, env: dict[str, str]) -> str:
     return name
 
 
+def qualify(execution_name: str, job_name: str) -> str:
+    """The full resource name of an execution, given possibly only its id.
+
+    A Cloud Run Job sees itself as ``CLOUD_RUN_EXECUTION``, which is the bare
+    id; the API wants ``projects/…/jobs/…/executions/<id>`` and, handed the
+    bare id, reads it as a project — "Permission denied on resource project
+    sprtz-dev-live-capture-mp5hp". ``job_name`` is the job's full name, from
+    which the execution's is one segment further.
+    """
+    name = (execution_name or "").strip()
+    if not name or "/" in name:
+        return name
+    if not job_name:
+        return name
+    return f"{job_name.rstrip('/')}/executions/{name}"
+
+
 def execution_state(execution_name: str) -> dict[str, Any]:
     """Where an execution is: ``running``, ``succeeded`` or ``failed``.
 

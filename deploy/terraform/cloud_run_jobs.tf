@@ -92,6 +92,13 @@ resource "google_cloud_run_v2_job" "live_capture" {
           name  = "LIVE_CHUNK_SECONDS"
           value = tostring(var.live_chunk_seconds)
         }
+        # The job's own resource name, so the recorder can report its
+        # execution fully qualified. Spelled out rather than referenced: a
+        # resource cannot read its own id.
+        env {
+          name  = "LIVE_CAPTURE_JOB"
+          value = "projects/${var.project_id}/locations/${var.region}/jobs/${local.prefix}-live-capture"
+        }
       }
     }
   }
