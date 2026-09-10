@@ -550,7 +550,14 @@ without that they would blank the field the whole UI reads.
 
 **Cancel is a flag, not a kill.** The run is a sequence of calls on Agent Runtime
 with no handle to interrupt, so stages check `cancel_requested` between steps and
-stop at the next boundary. Moments already found are saved rather than discarded
+stop at the next boundary. **Inside the analysis that boundary is the window,
+not the whole recording**: the check used to sit only before and after
+`analyse_segments`, so a run cancelled one second in carried on through every
+window of a three-hour match — and because the editor had meanwhile pressed
+Analyse again, two full analyses ran in one engine worker. That worker was
+killed with no traceback, twice, the second time after it had already found
+117 moments. `analyse_segments` takes a `should_stop` and asks it before each
+window. Moments already found are saved rather than discarded
 — cancelling should not also destroy the hour that was already paid for.
 
 **An execution is addressed by its full resource name.** A Cloud Run Job

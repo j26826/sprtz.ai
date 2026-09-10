@@ -740,6 +740,9 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         analysis_uri, duration, sport=sport,
         metadata_language=metadata_language,
         on_segment_done=segment_done,
+        # Asked before every window, so a cancel stops the run within one
+        # window rather than at the end of the whole recording.
+        should_stop=lambda: _cancelled(job_id),
         segment_uris=segment_uris,
     )
     if result["status"] == "error":
