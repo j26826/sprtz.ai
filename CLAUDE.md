@@ -544,6 +544,13 @@ separate top-level document that an imagined cascade would miss entirely.
 moments stay put and the new ones land beside them: the same play twice, with a
 count that grows on every retry.
 
+**And it clears the cancel flag.** `cancelRequested` is read by the stages
+between steps, and it outlived the run it stopped: a job cancelled in the
+morning answered every re-run after it with "Cancelled before the analysis
+started" a second after the editor pressed Analyse again, and the row simply
+went back to `cancelled` with nothing to say why. Starting again is the one
+moment the flag certainly no longer applies.
+
 ### Search
 
 Retrieval and ranking answer different questions. `knn_search_moments`

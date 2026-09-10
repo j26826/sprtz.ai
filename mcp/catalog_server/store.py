@@ -255,6 +255,12 @@ def clear_analysis(job_id: str) -> dict[str, Any]:
         "progress": 0,
         "status": "uploaded",
         "stage": "ingest",
+        # A cancel is a flag the stages read, and it outlived the run it
+        # stopped: a job cancelled in the morning refused every re-run after
+        # it, reporting "Cancelled before the analysis started" a second
+        # after the editor asked for one. Starting again is the one moment
+        # the flag certainly no longer applies.
+        "cancelRequested": False,
         "updatedAt": now(),
     })
     return {"job_id": job_id, "cleared": True, **removed}
