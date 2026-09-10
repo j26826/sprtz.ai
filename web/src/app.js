@@ -1878,7 +1878,16 @@ function openSearchResult(index, k) {
     <div class="detail-value">${esc(String(value))}</div>`).join('');
   $('details-player').innerHTML = playerMarkup(m);
   state.details = m.momentId;
-  state.playing = m.momentId;
+  // The same shape openDetails builds — mountPlayer reads momentId, start
+  // and end off it. This used to be the bare id: the player then looked for
+  // a slot for a moment called undefined, found none, and never asked the
+  // API for the stream, so a moment opened from a search or desk result had
+  // no player while the same moment from its own card played.
+  const duration = Number(state.jobs.find((j) => j.id === (m.jobId || state.jobId))?.media?.durationSec || 0);
+  state.playing = {
+    momentId: m.momentId,
+    ...playRange(Number(m.startSec) || 0, Number(m.endSec) || 0, { duration }),
+  };
   showDetailsModal(true);
   mountPlayer();
 }
