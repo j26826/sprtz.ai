@@ -131,6 +131,47 @@ class TestTheProxy:
         assert state["proxy_polls"] == 0
 
 
+class TestTheBarMovesThroughTheDownload:
+    @pytest.mark.asyncio
+    async def test_each_poll_reports_the_downloads_own_count(self):
+        state = {"calls": [], "polls": 0}
+
+        async def call(server, tool, args=None):
+            state["calls"].append((tool, args or {}))
+            if tool == "download_hls":
+                return {"status": "started", "execution": "exec-9"}
+            if tool == "hls_download_status":
+                state["polls"] += 1
+                done = [900, 1800, 3000][min(state["polls"] - 1, 2)]
+                if state["polls"] < 4:
+                    return {"status": "running", "segments_done": done, "segments_total": 3375,
+                            "fraction": done / 3375}
+                return DOWNLOADED
+            if tool == "make_analysis_proxy":
+                return {"status": "error", "error": "off"}
+            return {"status": "success"}
+
+        with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)), \
+             patch.object(pipeline.asyncio, "sleep", AsyncMock()):
+            await pipeline._download_hls_source("j1", "https://x.test/vod.m3u8")
+
+        bar = [a["progress"] for t, a in state["calls"]
+               if t == "update_job_status" and a.get("stage") == "ingest"]
+        assert len(bar) >= 4, "one report per poll, not one at the start"
+        assert bar == sorted(bar), "only forward"
+        assert bar[-1] > bar[0]
+        notes = [a["message"] for t, a in state["calls"]
+                 if t == "emit_event" and "of 3375 segments" in a["message"]]
+        assert notes == ["Downloaded 900 of 3375 segments.", "Downloaded 1800 of 3375 segments.",
+                         "Downloaded 3000 of 3375 segments."]
+
+    def test_the_ingest_band_is_wide_enough_to_see(self):
+        # A download and a proxy encode are a quarter of an hour; five points
+        # of bar for that was reported as "not progressing".
+        start, end = pipeline.STAGE_SPANS["ingest"]
+        assert end - start >= 10
+
+
 class TestTheClockMoves:
     """The watchdog reads the job's `updatedAt`, and an event is not a write to it.
 

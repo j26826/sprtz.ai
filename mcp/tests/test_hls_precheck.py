@@ -68,3 +68,45 @@ class TestThePlaylistIsAskedFirst:
         assert out["status"] == "error"
         assert "HTTP 403" in out["error"]
         started.assert_not_called()
+
+
+class TestDownloadProgressIsReadFromTheLog:
+    """The download streams into one object that appears only when it is done.
+
+    The bucket shows nothing for the whole download, so the bar sat at the
+    start of ingest for minutes and was reported as not moving. The job's own
+    log has one line per segment, and that is what the poll reads.
+    """
+
+    def test_the_segment_line_parses(self):
+        from media_server import runjobs
+
+        assert runjobs.parse_segment_progress(
+            "[851/3375] Streaming segment to cloud: manifest-video_0-851.ts") == (851, 3375)
+
+    def test_other_lines_do_not(self):
+        from media_server import runjobs
+
+        assert runjobs.parse_segment_progress("-> Distributed download: 16 parallel") is None
+        assert runjobs.parse_segment_progress("[0/0] Streaming segment") is None
+        assert runjobs.parse_segment_progress("") is None
+
+    def test_a_running_download_carries_its_fraction(self):
+        with patch.object(server.runjobs, "execution_state",
+                          return_value={"state": "running", "execution": "e"}), \
+             patch.object(server.runjobs, "execution_progress",
+                          return_value={"segments_done": 851, "segments_total": 3375,
+                                        "fraction": 851 / 3375}):
+            out = server.hls_download_status("projects/p/locations/l/jobs/j/executions/e", "j1")
+        assert out["status"] == "running"
+        assert out["segments_done"] == 851
+        assert 0.25 < out["fraction"] < 0.26
+
+    def test_a_log_that_cannot_be_read_does_not_fail_the_poll(self):
+        with patch.object(server.runjobs, "execution_state",
+                          return_value={"state": "running", "execution": "e"}), \
+             patch.object(server.runjobs, "execution_progress",
+                          side_effect=RuntimeError("logging api down")):
+            out = server.hls_download_status("projects/p/locations/l/jobs/j/executions/e", "j1")
+        assert out["status"] == "running"
+        assert "fraction" not in out

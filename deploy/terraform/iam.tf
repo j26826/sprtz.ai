@@ -32,6 +32,10 @@ locals {
       # and a recorder that has to wait on one is a recorder that drops
       # segments while it waits.
       "roles/datastore.user",
+      # The HLS download streams into one object that appears only when it
+      # finishes; its progress is one log line per segment, and this is what
+      # lets `hls_download_status` read it.
+      "roles/logging.viewer",
       ] : "mcp_media:${r}" => { role = r, member = "serviceAccount:${google_service_account.mcp_media.email}" }
     },
     { for r in [
