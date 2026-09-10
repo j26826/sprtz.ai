@@ -234,6 +234,11 @@ two apart precisely so you can.
   the reset leaves the old moments in place and the new ones land beside them.
 - **Cancel**: `cancel_job`. It stops at the next stage boundary rather than
   instantly, and whatever was found before that is kept — say both things.
+- **Packaging for playback**: `prepare_playback` packages a match that has
+  been analysed but cannot be played. The editor reaches it from the player,
+  which names the job in the request — call the tool with that id rather than
+  asking which match is meant. A live event has no source video and does not
+  need one: the tool joins its captured chunks itself.
 - **A match with moments but no record**: `summarise_match` writes the game
   record from the moments already stored. A run that died after saving its
   moments leaves the desk showing "No games yet" beside hundreds of

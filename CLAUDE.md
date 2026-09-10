@@ -655,6 +655,14 @@ waits with a widening interval while reporting each state change. Blocking a
 request until a match-length encode finished would only move the one-hour
 ceiling onto an idle connection.
 
+**A button that asks the agent to act on a match names it.** The player's
+Prepare playback said "this match", leaving the agent to work out which one
+from the conversation — and when it could not, it answered without calling
+anything, so the player went on saying the match was not packaged and
+nothing had been asked to package it. The button carries the job id and the
+request quotes it; the root instruction says to use that id rather than ask
+which match is meant.
+
 Packaging is independent of the analysis, so a job can hold moments and have
 nothing to play. `prepare_playback` is a root-agent tool as well as a pipeline
 stage for that reason — re-running a whole analysis to fix playback would be an

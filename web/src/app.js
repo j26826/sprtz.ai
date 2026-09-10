@@ -2491,8 +2491,8 @@ async function mountPlayer() {
         <p>${notReady
           ? esc(t('player.notPackaged'))
           : `${esc(t('player.notReady'))}: ${esc(err.message)}`}</p>
-        ${notReady ? `
-          <button class="btn-outline" data-prepare-playback="1">
+        ${notReady && state.jobId ? `
+          <button class="btn-outline" data-prepare-playback="${esc(state.jobId)}">
             ${esc(t('player.preparePlayback'))}
           </button>` : ''}
       </div>`);
@@ -3239,7 +3239,14 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (hit.dataset.preparePlayback) {
-    ask('Prepare playback for this match. The analysis is done; it just needs packaging.');
+    // The button names the match. "This match" left the agent to work out
+    // which one from the conversation, and when it could not it answered
+    // without calling anything — the player kept saying the match was not
+    // packaged and nothing had been asked to package it.
+    const jobId = hit.dataset.preparePlayback;
+    selectJob(jobId);
+    ask(`Prepare playback for job ${jobId}. The analysis is done; it just needs packaging.`,
+      { showJobs: true });
     return;
   }
   if (hit.dataset.retry) {
