@@ -110,6 +110,11 @@ def catalog():
             return {"status": state["capture_status"]}
         if tool == "list_live_chunks":
             return {"status": "success", "chunks": [dict(c) for c in state["chunks"]]}
+        if tool == "mux_chunk":
+            if state.get("mux_fails"):
+                return {"status": "error", "error": "ffmpeg exited 1"}
+            return {"status": "success", "index": args["index"],
+                    "gcs_uri": f"gs://media/jobs/j1/live/chunks/chunk_{int(args['index']):04d}_muxed.ts"}
         if tool == "claim_live_chunk":
             for c in state["chunks"]:
                 if c["index"] == args["index"] and c["status"] == "captured":
@@ -229,6 +234,66 @@ class TestLive:
         thumbs = _calls(catalog, "generate_moment_thumbnails")[0]
         assert thumbs["gcs_uri"].endswith("chunk_0001.ts")
         assert thumbs["moments"][0]["at_sec"] == pytest.approx(13.0)
+
+    @pytest.mark.asyncio
+    async def test_a_chunk_with_separate_audio_is_muxed_before_it_is_analysed(self, catalog):
+        _live(catalog)
+        catalog["chunks"] = [_chunk(0, 1, 50, audioUri="gs://media/jobs/j1/live/chunks/chunk_0000_audio.ts")]
+        analysis = SimpleNamespace(segment_summary="", competition="", venue="", discipline="",
+                                   discipline_confidence=0.0)
+        seen = {}
+
+        async def fake_analyse(uri, plan, total, sport, sem, language, segment_uri=""):
+            seen.update(uri=uri, segment_uri=segment_uri)
+            return plan, analysis, None
+
+        with patch.object(live, "_analyse_one", fake_analyse), \
+             patch.object(live, "merge_segment_results", lambda a, sport, job_id: [_moment()]):
+            await live.live_tick("j1")
+
+        mux = _calls(catalog, "mux_chunk")[0]
+        assert mux["video_uri"].endswith("chunk_0000.ts")
+        assert mux["audio_uri"].endswith("chunk_0000_audio.ts")
+        assert seen["segment_uri"].endswith("chunk_0000_muxed.ts"), "the analysis reads the muxed file"
+        assert _calls(catalog, "generate_moment_thumbnails")[0]["gcs_uri"].endswith("chunk_0000_muxed.ts")
+        assert _calls(catalog, "finish_live_chunk")[0]["muxed_uri"].endswith("chunk_0000_muxed.ts")
+
+    @pytest.mark.asyncio
+    async def test_a_chunk_already_muxed_is_not_muxed_again(self, catalog):
+        _live(catalog)
+        catalog["chunks"] = [_chunk(0, 1, 50, audioUri="gs://media/a.ts",
+                                    muxedUri="gs://media/jobs/j1/live/chunks/chunk_0000_muxed.ts")]
+        analysis = SimpleNamespace(segment_summary="", competition="", venue="", discipline="",
+                                   discipline_confidence=0.0)
+
+        async def fake_analyse(uri, plan, total, sport, sem, language, segment_uri=""):
+            return plan, analysis, None
+
+        with patch.object(live, "_analyse_one", fake_analyse), \
+             patch.object(live, "merge_segment_results", lambda a, sport, job_id: []):
+            await live.live_tick("j1")
+        assert not _calls(catalog, "mux_chunk")
+
+    @pytest.mark.asyncio
+    async def test_a_mux_that_fails_analyses_the_chunk_silent_and_says_so(self, catalog):
+        _live(catalog)
+        catalog["chunks"] = [_chunk(0, 1, 50, audioUri="gs://media/a.ts")]
+        catalog["mux_fails"] = True
+        analysis = SimpleNamespace(segment_summary="", competition="", venue="", discipline="",
+                                   discipline_confidence=0.0)
+        seen = {}
+
+        async def fake_analyse(uri, plan, total, sport, sem, language, segment_uri=""):
+            seen.update(segment_uri=segment_uri)
+            return plan, analysis, None
+
+        with patch.object(live, "_analyse_one", fake_analyse), \
+             patch.object(live, "merge_segment_results", lambda a, sport, job_id: []):
+            out = await live.live_tick("j1")
+        assert out["analysed_now"] == 1
+        assert seen["segment_uri"].endswith("chunk_0000.ts")
+        warnings = [a for a in _calls(catalog, "emit_event") if a.get("level") == "warning"]
+        assert any("without its audio" in w["message"] for w in warnings)
 
     @pytest.mark.asyncio
     async def test_a_chunk_that_does_not_follow_on_is_said_so(self, catalog):

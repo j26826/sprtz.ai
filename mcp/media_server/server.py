@@ -961,6 +961,35 @@ def mux_status(execution: str, output_uri: str, original_uri: str = "") -> dict:
 
 
 @mcp.tool
+def mux_chunk(job_id: str, index: int, video_uri: str, audio_uri: str) -> dict:
+    """Mux a live chunk's separate audio into its video, in this request.
+
+    A chunk is five minutes — a hundred and fifty megabytes of video and a
+    few of audio — so unlike a whole recording this is seconds of ffmpeg,
+    reading both from the bucket and streaming the result back. The tick
+    calls it before analysing a chunk that has an `audioUri`.
+
+    Args:
+        job_id: The live event's job.
+        index: The chunk's index.
+        video_uri: gs:// URI of the video chunk.
+        audio_uri: gs:// URI of the audio chunk.
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+    from media_server import remux
+
+    output_uri = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/live/chunks/chunk_{int(index):04d}_muxed.ts"
+    try:
+        written = remux.remux_to_gcs(video_uri, audio_uri, output_uri)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not mux chunk %s of %s", index, job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+    return {"status": "success", "job_id": job_id, "index": int(index),
+            "gcs_uri": output_uri, "bytes": written}
+
+
+@mcp.tool
 def make_analysis_proxy(gcs_uri: str, job_id: str) -> dict:
     """Start the 1 fps 480p proxy the analysis reads, and return immediately.
 

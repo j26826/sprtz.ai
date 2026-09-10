@@ -770,8 +770,13 @@ def claim_live_chunk(job_id: str, index: int) -> dict[str, Any]:
 def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = "",
                       continuity: dict[str, Any] | None = None,
                       summary: str = "", competition: str = "", venue: str = "",
-                      discipline: str = "", discipline_confidence: float = 0.0) -> dict[str, Any]:
-    """Record the analysis of one chunk, and count it on the job."""
+                      discipline: str = "", discipline_confidence: float = 0.0,
+                      muxed_uri: str = "") -> dict[str, Any]:
+    """Record the analysis of one chunk, and count it on the job.
+
+    ``muxed_uri`` is the chunk with its audio muxed in, when the tick made
+    one; it is kept so a retried chunk is not muxed twice.
+    """
     patch: dict[str, Any] = {
         "status": "failed" if error else "analysed",
         "moments": int(moments),
@@ -784,6 +789,8 @@ def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = ""
         "disciplineConfidence": float(discipline_confidence or 0.0),
         "analysedAt": now(),
     }
+    if muxed_uri:
+        patch["muxedUri"] = muxed_uri
     _chunk_ref(job_id, index).update(patch)
     from google.cloud import firestore
 

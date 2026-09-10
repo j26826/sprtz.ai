@@ -109,3 +109,43 @@ class TestChunkRecord:
         record = live_capture.chunk_record(a.close(), "gs://m/c3.ts", "ts", None, 180.0)
         assert record["startSec"] == 180.0
         assert record["firstPdt"] is None
+
+
+class TestAudioParts:
+    """A separate audio rendition is paired with the video by segment number."""
+
+    def test_the_audio_for_a_chunk_is_the_parts_in_its_range(self):
+        a = live_capture.AudioParts()
+        for seq in range(1, 60):
+            a.add(seq, f"audio/{seq:09d}.ts")
+        names, missing, stale = a.take(1, 50)
+        assert len(names) == 50 and names[0].endswith("000000001.ts") and names[-1].endswith("000000050.ts")
+        assert missing == 0 and stale == []
+        assert sorted(a.parts) == list(range(51, 60)), "the rest wait for the next chunk"
+
+    def test_missing_audio_is_counted_not_invented(self):
+        a = live_capture.AudioParts()
+        for seq in [1, 2, 4, 5]:
+            a.add(seq, f"audio/{seq}.ts")
+        names, missing, _ = a.take(1, 5)
+        assert len(names) == 4 and missing == 1
+
+    def test_audio_older_than_the_chunk_is_stale(self):
+        a = live_capture.AudioParts()
+        for seq in [3, 4, 10, 11]:
+            a.add(seq, f"audio/{seq}.ts")
+        names, missing, stale = a.take(10, 11)
+        assert names == ["audio/10.ts", "audio/11.ts"]
+        assert sorted(stale) == ["audio/3.ts", "audio/4.ts"]
+        assert a.parts == {}
+
+    def test_the_chunk_record_carries_its_audio(self):
+        a = live_capture.ChunkAssembler(60)
+        closed = _feed(a, [_seg(i) for i in range(1, 12)])
+        rec = live_capture.chunk_record(closed[0], "gs://m/jobs/j/live/chunks/chunk_0000.ts", "ts", T0, 0.0,
+                                        audio={"uri": "gs://m/jobs/j/live/chunks/chunk_0000_audio.ts",
+                                               "container": "ts", "segments": 10, "missing": 0})
+        assert rec["audioUri"].endswith("chunk_0000_audio.ts")
+        assert rec["audioSegments"] == 10 and rec["audioMissing"] == 0
+        silent = live_capture.chunk_record(closed[0], "gs://m/v.ts", "ts", T0, 0.0)
+        assert silent["audioUri"] is None

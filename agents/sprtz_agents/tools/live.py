@@ -432,7 +432,21 @@ async def _analyse_chunk(job_id: str, sport: str, chunk: dict, previous: dict | 
     index = int(chunk.get("index", 0))
     start_sec = float(chunk.get("startSec") or 0.0)
     duration = float(chunk.get("durationSec") or 0.0)
-    uri = chunk.get("gcsUri") or ""
+    uri = chunk.get("muxedUri") or chunk.get("gcsUri") or ""
+    muxed_uri = chunk.get("muxedUri") or ""
+    if uri and chunk.get("audioUri") and not muxed_uri:
+        # The stream keeps its audio apart from the video; the recorder
+        # closed both, and the analysis wants one file with sound in it.
+        muxed = await mcp_client.call_tool("media", "mux_chunk", {
+            "job_id": job_id, "index": index,
+            "video_uri": chunk.get("gcsUri"), "audio_uri": chunk.get("audioUri")})
+        if muxed.get("status") == "success" and muxed.get("gcs_uri"):
+            uri = muxed_uri = muxed["gcs_uri"]
+        else:
+            await _emit(job_id, "live",
+                        f"Chunk {index} is analysed without its audio: "
+                        f"{muxed.get('error') or 'the mux did not succeed'}.",
+                        level="warning", chunk=index)
 
     continuity = check_continuity(chunk, previous)
     if continuity["status"] == "gap":
@@ -455,7 +469,8 @@ async def _analyse_chunk(job_id: str, sport: str, chunk: dict, previous: dict | 
     _, analysis, error = await _analyse_one(
         uri, plan, expected, sport, asyncio.Semaphore(1), language, segment_uri=uri)
     if analysis is None:
-        await _finish_chunk(job_id, index, error=error or "analysis failed", continuity=continuity)
+        await _finish_chunk(job_id, index, error=error or "analysis failed", continuity=continuity,
+                            muxed_uri=muxed_uri)
         await _emit(job_id, "live", f"Chunk {index} failed and was skipped: {error}",
                     level="warning", chunk=index)
         return {"index": index, "status": "failed", "error": error}
@@ -470,6 +485,7 @@ async def _analyse_chunk(job_id: str, sport: str, chunk: dict, previous: dict | 
         venue=getattr(analysis, "venue", "") or "",
         discipline=getattr(analysis, "discipline", "") or "",
         discipline_confidence=float(getattr(analysis, "discipline_confidence", 0.0) or 0.0),
+        muxed_uri=muxed_uri,
     )
     await _emit(
         job_id, "live",
