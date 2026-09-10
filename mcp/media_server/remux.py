@@ -51,16 +51,20 @@ UPLOAD_CHUNK = 32 * 1024 * 1024
 READ_CHUNK = 8 * 1024 * 1024
 
 
-def ffmpeg_command(video_url: str, audio_path: str, bearer_token: str | None) -> list[str]:
-    """One stream-copy remux to stdout: video from the URL, audio from disk.
+def ffmpeg_command(video_url: str, audio_src: str, bearer_token: str | None) -> list[str]:
+    """One stream-copy remux to stdout: video from the URL, audio from disk or a URL.
 
     The output is MPEG-TS because that is what the video is, and because a
-    transport stream needs no seeking to write — it can go up a pipe.
+    transport stream needs no seeking to write — it can go up a pipe. A
+    chunk's audio is small enough to read straight from the bucket, so the
+    audio input may be a URL too; the header applies per input.
     """
+    audio_args = ffmpeg_ops.http_input_args(audio_src, bearer_token) \
+        if audio_src.startswith("http") else []
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", *ffmpeg_ops._FFMPEG_HARDENING,
         *ffmpeg_ops.http_input_args(video_url, bearer_token), "-i", video_url,
-        "-i", audio_path,
+        *audio_args, "-i", audio_src,
         "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
         "-f", "mpegts", "pipe:1",
     ]
@@ -117,10 +121,14 @@ def download_audio(playlist: hls.MediaPlaylist, dest: Path) -> int:
     return total
 
 
-def remux_to_gcs(video_uri: str, audio_path: Path, output_uri: str) -> int:
-    """Run ffmpeg and stream its output into the bucket. Returns bytes written."""
-    cmd = ffmpeg_command(gcs.https_url(video_uri), str(audio_path), gcs.bearer_token())
-    logger.info("running: ffmpeg ... -i <video> -i %s -c copy -f mpegts pipe:1", audio_path.name)
+def remux_to_gcs(video_uri: str, audio_src: Path | str, output_uri: str) -> int:
+    """Run ffmpeg and stream its output into the bucket. Returns bytes written.
+
+    ``audio_src`` is a local file, or a gs:// URI read over HTTPS.
+    """
+    audio = gcs.https_url(str(audio_src)) if str(audio_src).startswith("gs://") else str(audio_src)
+    cmd = ffmpeg_command(gcs.https_url(video_uri), audio, gcs.bearer_token())
+    logger.info("running: ffmpeg ... -i <video> -i <audio> -c copy -f mpegts pipe:1")
     bucket, name = gcs.split_uri(output_uri)
     blob = gcs.client().bucket(bucket).blob(name)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

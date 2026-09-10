@@ -191,3 +191,28 @@ class TestAFailedMuxSaysSo:
             out = server.mux_status("e1", "gs://u/o.ts", "gs://u/s.ts")
         assert out["status"] == "failed"
         assert "remux execution failed" in out["error"]
+
+
+class TestAChunkIsMuxedInRequest:
+    def test_the_audio_input_may_be_a_url_with_its_own_header(self):
+        cmd = remux.ffmpeg_command("https://x/v.ts", "https://x/a.ts", "tok")
+        assert cmd.count("-headers") == 2
+        inputs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-i"]
+        assert inputs == ["https://x/v.ts", "https://x/a.ts"]
+
+    def test_mux_chunk_writes_beside_the_chunk_and_reports_it(self):
+        with patch.object(server, "MEDIA_BUCKET", "media"), \
+             patch("media_server.remux.remux_to_gcs", return_value=155_000_000) as run:
+            out = server.mux_chunk("j1", 3, "gs://media/jobs/j1/live/chunks/chunk_0003.ts",
+                                   "gs://media/jobs/j1/live/chunks/chunk_0003_audio.ts")
+        assert out["status"] == "success"
+        assert out["gcs_uri"] == "gs://media/jobs/j1/live/chunks/chunk_0003_muxed.ts"
+        assert out["bytes"] == 155_000_000
+        video, audio, output = run.call_args.args
+        assert audio.endswith("chunk_0003_audio.ts") and output == out["gcs_uri"]
+
+    def test_a_failed_mux_is_an_error_not_an_exception(self):
+        with patch.object(server, "MEDIA_BUCKET", "media"), \
+             patch("media_server.remux.remux_to_gcs", side_effect=RuntimeError("ffmpeg exited 1")):
+            out = server.mux_chunk("j1", 3, "gs://media/v.ts", "gs://media/a.ts")
+        assert out["status"] == "error" and "ffmpeg exited 1" in out["error"]

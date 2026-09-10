@@ -228,6 +228,20 @@ is a Firestore transaction and the tick holds a lock on the job, because the
 scheduler fires on the minute whatever the last tick is still doing and five
 minutes analysed twice is every moment in them saved twice.
 
+**A separate audio rendition is recorded beside the video and muxed per
+chunk.** JW Live and Unified Streaming keep the audio in an `EXT-X-MEDIA`
+group, so a recorder that follows the variant alone records a silent event.
+The recorder resolves the group's default rendition (`separate_audio_url`),
+polls its playlist after the video's on every loop, stores its segments as
+`audio_parts/` and, when a video chunk closes, composes the audio parts
+whose sequence numbers fall in the chunk's range into `chunk_NNNN_audio`
+(`AudioParts`, pure) — the origins that publish separate audio number both
+in step. The chunk record carries `audioUri`/`audioSegments`/`audioMissing`;
+the tick asks `mux_chunk` for one file (seconds of ffmpeg in-request — a
+chunk is small, unlike a whole recording) before `_analyse_one`, reads the
+thumbnails from it, and records `muxedUri` so a retried chunk is not muxed
+twice. A mux that fails is a warning and the chunk is analysed silent.
+
 **Continuity is checked two-sided.** The recorder notes what it saw; the tick
 checks each chunk against the previous one *as stored* — sequence numbers that
 do not follow on, wall clock that does not agree — because a gap between two

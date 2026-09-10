@@ -179,8 +179,41 @@ class ChunkAssembler:
         return (segment.pdt - self.last_pdt_end).total_seconds()
 
 
+class AudioParts:
+    """Audio segments fetched so far, by sequence number.
+
+    A separate audio rendition is its own playlist, but on the origins that
+    publish one (Unified Streaming, JW Live) it is cut on the same clock and
+    numbered in step with the video, so the audio for a video chunk is the
+    parts whose numbers fall inside the chunk's range. Pure: the recorder
+    stores the bytes and tells this what it has.
+    """
+
+    def __init__(self) -> None:
+        self.parts: dict[int, str] = {}
+        self.next_seq: int | None = None
+
+    def add(self, seq: int, name: str) -> None:
+        self.parts[seq] = name
+        self.next_seq = max(self.next_seq or 0, seq + 1)
+
+    def take(self, first_seq: int, last_seq: int) -> tuple[list[str], int, list[str]]:
+        """``(names in order, how many are missing, stale names to delete)``.
+
+        Stale parts are ones numbered before the range: audio the video chunk
+        that would have carried them never had, because it was missed.
+        """
+        names = [self.parts[seq] for seq in range(first_seq, last_seq + 1) if seq in self.parts]
+        missing = (last_seq - first_seq + 1) - len(names)
+        stale = [name for seq, name in self.parts.items() if seq < first_seq]
+        for seq in [q for q in self.parts if q <= last_seq]:
+            del self.parts[seq]
+        return names, missing, stale
+
+
 def chunk_record(chunk: Chunk, gcs_uri: str, container: str,
-                 capture_start: datetime | None, cumulative_sec: float) -> dict[str, Any]:
+                 capture_start: datetime | None, cumulative_sec: float,
+                 audio: dict[str, Any] | None = None) -> dict[str, Any]:
     """The Firestore document for a closed chunk.
 
     ``startSec`` is the chunk's offset into the recording — from wall-clock
@@ -209,6 +242,13 @@ def chunk_record(chunk: Chunk, gcs_uri: str, container: str,
         "gapBefore": chunk.gap_before,
         "gapsInside": chunk.gaps_inside,
         "capturedAt": now().isoformat(),
+        # The separate audio rendition's chunk, when the stream keeps its
+        # audio apart from the video. The tick muxes the two before the
+        # analysis; a chunk without one is analysed silent.
+        "audioUri": (audio or {}).get("uri") or None,
+        "audioContainer": (audio or {}).get("container") or None,
+        "audioSegments": int((audio or {}).get("segments") or 0),
+        "audioMissing": int((audio or {}).get("missing") or 0),
     }
 
 
@@ -329,6 +369,12 @@ class Recorder:
         self.next_seq: int | None = None
         self.init_name = ""
         self.container = "ts"
+        # The separate audio rendition, when the master names one for the
+        # chosen variant. Followed beside the video and paired by number.
+        self.audio_url = ""
+        self.audio_container = "ts"
+        self.audio_init_name = ""
+        self.audio = AudioParts()
         self.capture_start: datetime | None = None
         self.cumulative_sec = 0.0
         self.chunks_captured = 0
@@ -346,6 +392,7 @@ class Recorder:
             "captureStart": self.capture_start.isoformat() if self.capture_start else None,
             "variant": self.media_url,
             "container": self.container,
+            "audio": bool(self.audio_url),
             "lastSeq": self.assembler.last_seq,
             "lastPollAt": now().isoformat(),
             "error": self.error,
@@ -371,11 +418,14 @@ class Recorder:
                         raise ValueError("multivariant playlist lists no variants")
                     self.variant = chosen
                     self.media_url = chosen.url
+                    self.audio_url = hls.separate_audio_url(text, self.hls_url, chosen)
                     text = _fetch(self.media_url).decode("utf-8", "replace")
                 playlist = hls.parse_media(text, self.media_url)
                 self.container = hls.container_of(playlist)
                 logger.info("following %s (%s, target %.1fs)",
                             self.media_url, self.container, playlist.target_duration)
+                if self.audio_url:
+                    self._resolve_audio()
                 return playlist
             except Exception as exc:  # noqa: BLE001
                 if time.monotonic() > deadline or now() >= self.event_end:
@@ -387,6 +437,49 @@ class Recorder:
     def poll(self) -> hls.MediaPlaylist:
         text = _fetch(self.media_url).decode("utf-8", "replace")
         return hls.parse_media(text, self.media_url)
+
+    def _resolve_audio(self) -> None:
+        """Read the audio rendition's playlist once, to learn its container.
+
+        Not fatal: an audio playlist that does not answer leaves the event
+        video-only, which is what it was before audio was captured at all.
+        """
+        try:
+            text = _fetch(self.audio_url).decode("utf-8", "replace")
+            audio = hls.parse_media(text, self.audio_url)
+            self.audio_container = hls.container_of(audio)
+            logger.info("following audio %s (%s)", self.audio_url, self.audio_container)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("audio rendition %s not readable (%s); recording video only",
+                           self.audio_url, exc)
+            self.audio_url = ""
+
+    def poll_audio(self) -> hls.MediaPlaylist:
+        text = _fetch(self.audio_url).decode("utf-8", "replace")
+        return hls.parse_media(text, self.audio_url)
+
+    def take_audio(self, playlist: hls.MediaPlaylist) -> int:
+        """Fetch every audio segment not yet held, from where the video starts."""
+        floor = self.audio.next_seq
+        if floor is None:
+            floor = self.assembler.open.first_seq if self.assembler.open else self.next_seq
+        fresh = [s for s in playlist.segments if floor is None or s.seq >= floor]
+        if playlist.init_url and not self.audio_init_name:
+            self.audio_init_name = f"{self.store.prefix}/audio_init.mp4"
+            self.store.put(self.audio_init_name, _fetch(playlist.init_url), "audio/mp4")
+        ext = "m4s" if self.audio_container == "mp4" else "ts"
+        mime = "audio/mp4" if ext == "m4s" else "video/mp2t"
+        taken = 0
+        for segment in fresh:
+            data = self._download(segment)
+            if data is None:
+                self.audio.next_seq = segment.seq + 1
+                continue
+            name = f"{self.store.prefix}/audio_parts/{segment.seq:09d}.{ext}"
+            self.store.put(name, data, mime)
+            self.audio.add(segment.seq, name)
+            taken += 1
+        return taken
 
     # -- segments and chunks --
 
@@ -443,7 +536,9 @@ class Recorder:
         dest = f"{self.store.prefix}/chunks/chunk_{chunk.index:04d}.{self.container}"
         mime = "video/mp4" if self.container == "mp4" else "video/mp2t"
         uri = self.store.compose(names, dest, mime)
-        record = chunk_record(chunk, uri, self.container, self.capture_start, self.cumulative_sec)
+        audio = self._close_audio(chunk)
+        record = chunk_record(chunk, uri, self.container, self.capture_start,
+                              self.cumulative_sec, audio=audio)
         self.cumulative_sec += chunk.duration
         self.store.write_chunk(record)
         self.store.delete_all(chunk.parts)
@@ -453,6 +548,31 @@ class Recorder:
                     chunk.last_seq, " (gap before)" if chunk.gap_before else "")
         self.report()
         return record
+
+    def _close_audio(self, chunk: Chunk) -> dict[str, Any] | None:
+        """Compose the audio parts that pair with a closed video chunk."""
+        if not self.audio_url or chunk.first_seq is None or chunk.last_seq is None:
+            return None
+        names, missing, stale = self.audio.take(chunk.first_seq, chunk.last_seq)
+        self.store.delete_all(stale)
+        if not names:
+            return None
+        sources = list(names)
+        if self.audio_container == "mp4" and self.audio_init_name:
+            sources = [self.audio_init_name, *sources]
+        dest = f"{self.store.prefix}/chunks/chunk_{chunk.index:04d}_audio.{self.audio_container}"
+        mime = "audio/mp4" if self.audio_container == "mp4" else "video/mp2t"
+        try:
+            uri = self.store.compose(sources, dest, mime)
+        except Exception:  # noqa: BLE001
+            logger.warning("audio for chunk %d could not be composed", chunk.index, exc_info=True)
+            return None
+        finally:
+            self.store.delete_all(names)
+        if missing:
+            logger.warning("chunk %d audio is missing %d segment(s)", chunk.index, missing)
+        return {"uri": uri, "container": self.audio_container,
+                "segments": len(names), "missing": missing}
 
     # -- the loop --
 
@@ -488,6 +608,13 @@ class Recorder:
             except Exception:  # noqa: BLE001
                 logger.warning("playlist fetch failed; keeping the last one", exc_info=True)
                 playlist.segments = []
+            if self.audio_url:
+                # Audio after video, so the chunk a poll closes always has
+                # its video parts first and its audio parts by the next.
+                try:
+                    self.take_audio(self.poll_audio())
+                except Exception:  # noqa: BLE001
+                    logger.warning("audio poll failed; will retry", exc_info=True)
         self.close_chunk()
         self.state = "finished"
         self.report()

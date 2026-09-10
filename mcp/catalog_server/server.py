@@ -594,7 +594,7 @@ def claim_live_chunk(job_id: str, index: int) -> dict:
 def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = "",
                       continuity: dict | None = None, summary: str = "",
                       competition: str = "", venue: str = "", discipline: str = "",
-                      discipline_confidence: float = 0.0) -> dict:
+                      discipline_confidence: float = 0.0, muxed_uri: str = "") -> dict:
     """Record the outcome of analysing one live chunk.
 
     Args:
@@ -608,11 +608,12 @@ def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = ""
         venue: Venue read off the picture, if any.
         discipline: Discipline code the chunk reported, if any.
         discipline_confidence: Its confidence.
+        muxed_uri: The chunk with its audio muxed in, when the tick made one.
     """
     try:
         return {"status": "success", **store.finish_live_chunk(
             job_id, index, moments, error, continuity, summary, competition, venue,
-            discipline, discipline_confidence)}
+            discipline, discipline_confidence, muxed_uri=muxed_uri)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id, index=index)
 
