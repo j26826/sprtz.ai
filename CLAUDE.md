@@ -273,6 +273,18 @@ chunk is small, unlike a whole recording) before `_analyse_one`, reads the
 thumbnails from it, and records `muxedUri` so a retried chunk is not muxed
 twice. A mux that fails is a warning and the chunk is analysed silent.
 
+**A live event's chunks become one recording so it can be watched.** It has
+no source video — it has a row of five-minute chunks — so `prepare_playback`
+refused it with "has no source video" and every moment the analysis had
+found opened on "This match has not been packaged for playback yet".
+`_compose_live_source` joins the chunks with GCS compose in the bucket they
+are already in (`compose_live_source`, `gcs.compose`, the same rounds-of-32
+the recorder uses), so no bytes pass through the container and a twelve-hour
+event costs a few API calls. It runs on demand, which is what makes a long
+broadcast watchable before it ends, and again when the event finishes so
+clips and source-quality stills have a file to read. The muxed chunk wins
+over the silent one where there is both.
+
 **Continuity is checked two-sided.** The recorder notes what it saw; the tick
 checks each chunk against the previous one *as stored* — sequence numbers that
 do not follow on, wall clock that does not agree — because a gap between two
@@ -550,7 +562,14 @@ without that they would blank the field the whole UI reads.
 
 **Cancel is a flag, not a kill.** The run is a sequence of calls on Agent Runtime
 with no handle to interrupt, so stages check `cancel_requested` between steps and
-stop at the next boundary. Moments already found are saved rather than discarded
+stop at the next boundary. **Inside the analysis that boundary is the window,
+not the whole recording**: the check used to sit only before and after
+`analyse_segments`, so a run cancelled one second in carried on through every
+window of a three-hour match — and because the editor had meanwhile pressed
+Analyse again, two full analyses ran in one engine worker. That worker was
+killed with no traceback, twice, the second time after it had already found
+117 moments. `analyse_segments` takes a `should_stop` and asks it before each
+window. Moments already found are saved rather than discarded
 — cancelling should not also destroy the hour that was already paid for.
 
 **An execution is addressed by its full resource name.** A Cloud Run Job

@@ -476,6 +476,40 @@ async def _make_analysis_proxy(job_id: str, gcs_uri: str) -> str:
     return analysis_uri
 
 
+async def _compose_live_source(job_id: str) -> str:
+    """Join a live event's captured chunks into one object, and put it on the job.
+
+    Returns the composed object's URI, or "" when there is nothing to join
+    yet. Every chunk the recorder has closed goes in, in index order — a
+    chunk still being analysed is already a complete file.
+    """
+    listing = await mcp_client.call_tool("catalog", "list_live_chunks", {"job_id": job_id})
+    chunks = sorted((listing.get("chunks") or []), key=lambda c: int(c.get("index", 0)))
+    uris = [c.get("muxedUri") or c.get("gcsUri") for c in chunks
+            if c.get("muxedUri") or c.get("gcsUri")]
+    if not uris:
+        return ""
+
+    await _emit(job_id, "playback",
+                f"Joining {len(uris)} captured chunk(s) into one recording to package.")
+    composed = await mcp_client.call_tool(
+        "media", "compose_live_source", {"job_id": job_id, "chunk_uris": uris})
+    if composed.get("status") != "success":
+        await _emit(job_id, "playback",
+                    f"The chunks could not be joined: {composed.get('error', 'unknown error')}",
+                    level="error")
+        return ""
+
+    await mcp_client.call_tool("catalog", "set_source", {
+        "job_id": job_id,
+        "gcs_uri": composed["gcs_uri"],
+        "original_name": composed.get("original_name", ""),
+        "size_bytes": int(composed.get("bytes") or 0),
+        "content_type": composed.get("content_type", ""),
+    })
+    return composed["gcs_uri"]
+
+
 @stage("playback")
 async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     """Encode the uploaded video to a 480p HLS preview behind the CDN.
@@ -496,6 +530,13 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     """
     job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     gcs_uri = (job.get("source") or {}).get("gcsUri")
+    if not gcs_uri and job.get("kind") == "live":
+        # A live event has no source video, it has a row of chunks. Joining
+        # them is a server-side compose in the bucket they are already in, so
+        # it costs a few API calls whatever the event's length — and it can be
+        # asked for again as the event grows, which is how a twelve-hour
+        # broadcast is watchable before it ends.
+        gcs_uri = await _compose_live_source(job_id)
     if not gcs_uri:
         return {"status": "error", "error": f"Job {job_id} has no source video."}
 
@@ -740,6 +781,9 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         analysis_uri, duration, sport=sport,
         metadata_language=metadata_language,
         on_segment_done=segment_done,
+        # Asked before every window, so a cancel stops the run within one
+        # window rather than at the end of the whole recording.
+        should_stop=lambda: _cancelled(job_id),
         segment_uris=segment_uris,
     )
     if result["status"] == "error":

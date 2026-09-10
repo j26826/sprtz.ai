@@ -247,6 +247,7 @@ async def analyse_segments(
     on_segment_done: Callable[[int, int], Awaitable[None]] | None = None,
     segment_uris: dict[int, str] | None = None,
     retry_failed: bool = True,
+    should_stop: Callable[[], Awaitable[bool]] | None = None,
 ) -> dict:
     """Analyse every segment of a video concurrently and merge the results.
 
@@ -254,6 +255,13 @@ async def analyse_segments(
     finished and the total. Segments are the only part of the run long enough to
     need reporting — a full match is an hour here and minutes everywhere else —
     and they finish out of order, so the count is what moves, not the index.
+
+    ``should_stop`` is asked before each window starts, and a true answer
+    leaves the rest unanalysed. Without it a cancel only took effect at the
+    *edges* of this call: a run cancelled one second after it began carried on
+    through every window of a three-hour recording, and because the editor had
+    meanwhile started the job again, two full analyses ran inside one engine
+    worker — which is what killed it, twice, with no traceback.
 
     Returns a plain dict so this is directly usable as an ADK tool result.
     """
@@ -268,8 +276,23 @@ async def analyse_segments(
     semaphore = asyncio.Semaphore(settings.max_concurrent_segments)
     done = 0
 
+    stopped = False
+
+    async def stop_now() -> bool:
+        nonlocal stopped
+        if stopped or should_stop is None:
+            return stopped
+        try:
+            stopped = await should_stop()
+        except Exception:
+            # Not being able to ask is not an answer; keep going.
+            logger.warning("could not check for a cancel", exc_info=True)
+        return stopped
+
     async def run(plan: SegmentPlan):
         nonlocal done
+        if await stop_now():
+            return (plan, None, "cancelled before this window started")
         outcome = await _analyse_one(
             gcs_uri, plan, len(plans), sport, semaphore, metadata_language,
             (segment_uris or {}).get(plan.index, ""),
@@ -292,6 +315,10 @@ async def analyse_segments(
     # with the burst over, a window that failed usually answers — and the
     # alternative is reporting fifteen minutes of match as empty.
     failed_plans = [plan for plan, analysis, _ in results if analysis is None]
+    if stopped:
+        # Whatever answered before the cancel is kept — the caller decides what
+        # to do with it — but nothing more is asked for.
+        failed_plans = []
     if failed_plans and retry_failed:
         logger.warning("retrying %d segment(s) that failed", len(failed_plans))
         again = await asyncio.gather(*(
