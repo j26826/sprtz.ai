@@ -593,7 +593,13 @@ changes the scoping therefore leaves a copy that can keep answering for the
 correct one until it expires, so `/playback` expires the domain-scoped one.
 
 Reviewing a moment is a seek to its in point with a stop at its out point — that
-is what replaces a timeline.
+is what replaces a timeline. **The player shows three seconds either side**
+(`web/src/player.js`, `playRange`, tested): the in point is a second or two
+of run-up by design and the out point is the end of the play, and the editor
+is judging the play in its context. The record keeps the moment's own times;
+only the playback is wider, clamped at zero and at the match's length. Every
+way into the player — the row's thumbnail, Details, the reel's Play with a
+clip's own trim — goes through `openDetails`, so the pad lives in one place.
 
 ### Sessions
 

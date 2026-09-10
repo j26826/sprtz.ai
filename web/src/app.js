@@ -36,6 +36,7 @@ import {
 import {
   filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
 } from './search.js';
+import { playRange } from './player.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
 } from './settings.js';
@@ -921,10 +922,14 @@ function openDetails(momentId, range = null) {
   // watching the save are the same act here.
   $('details-player').innerHTML = playerMarkup(m);
   state.details = momentId;
+  // Three seconds either side of what was asked for — the moment's own
+  // times, or a clip's trim — so the play is seen in its context. Every way
+  // into the player comes through here: the row's thumbnail, the details
+  // button, and the reel's Play.
+  const duration = Number(state.jobs.find((j) => j.jobId === (m.jobId || state.jobId))?.media?.durationSec || 0);
   state.playing = {
     momentId,
-    start: range?.start ?? m.startSec,
-    end: range?.end ?? m.endSec,
+    ...playRange(range?.start ?? m.startSec, range?.end ?? m.endSec, { duration }),
   };
   showDetailsModal(true);
   mountPlayer();
