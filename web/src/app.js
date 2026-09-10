@@ -2759,8 +2759,16 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
     state.sessions = listSessions();
   }
 
-  u.status = 'analyzing';
+  // Idle the moment the job exists, not when the agent's turn ends. The
+  // panel's job is done once the match is registered — the run's progress is
+  // the stage strip's business — and the turn stays open for the whole
+  // analysis. Holding the form busy for that long disabled every ingest
+  // button, including Schedule Live on the other tab, and an engine that
+  // never answered left them disabled for good.
+  u.status = 'idle';
   u.stage = 'Handed to the agent';
+  u.file = null;
+  u.name = '';
   selectJob(job_id);
   playbackUrl = null;
   render();
@@ -2770,9 +2778,6 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
     showActions: true,
     actions: [t('action.processing'), t('action.bestMoments')],
   });
-  u.status = 'idle';
-  u.file = null;
-  u.name = '';
   render();
 }
 
@@ -2851,7 +2856,8 @@ async function registerFromStorage() {
     });
 
     u.gcsUri = '';
-    u.status = 'analyzing';
+    // Idle before the turn, for the same reason as the upload path.
+    u.status = 'idle';
     u.stage = 'Handed to the agent';
     selectJob(job.job_id);
     playbackUrl = null;
@@ -2896,7 +2902,8 @@ async function registerFromHls() {
     });
 
     u.hlsUrl = '';
-    u.status = 'analyzing';
+    // Idle before the turn, for the same reason as the upload path.
+    u.status = 'idle';
     u.stage = 'Handed to the agent';
     selectJob(job.job_id);
     playbackUrl = null;
@@ -2913,9 +2920,9 @@ async function registerFromHls() {
       actions: [t('action.processing'), t('action.bestMoments')],
     });
   } catch (err) {
+    u.status = 'idle';
     say(`That stream could not be used: ${err.message}`);
   }
-  u.status = 'idle';
   render();
 }
 
