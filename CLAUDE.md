@@ -643,7 +643,10 @@ starting at time 5520s and ending at time 5640s." Both jobs set
 worse answer to two silent minutes than a filled gap. It needs a second
 field with it or the API refuses the job at creation:
 "frameRateConversionStrategy is DOWNSAMPLE, must be set to DROP_DUPLICATE
-when fillContentGaps is enabled".
+when fillContentGaps is enabled" — and then a third, refused in turn:
+"frameRateConversionStrategy is DROP_DUPLICATE, optimization should be
+DISABLED". Three fields, each discovered only by being rejected at creation
+by the one before it.
 
 Two grants decide whether an encode works, and both fail *minutes in* rather
 than at job creation: the **Transcoder service agent** — not the media service
