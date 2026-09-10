@@ -605,7 +605,10 @@ frames in the middle — a LeMieux upload has two minutes with no audio at
 generate output for elementary stream audio-aac. Media frames are missing
 starting at time 5520s and ending at time 5640s." Both jobs set
 `fill_content_gaps`, because no preview and no analysis proxy at all is a
-worse answer to two silent minutes than a filled gap.
+worse answer to two silent minutes than a filled gap. It needs a second
+field with it or the API refuses the job at creation:
+"frameRateConversionStrategy is DOWNSAMPLE, must be set to DROP_DUPLICATE
+when fillContentGaps is enabled".
 
 Two grants decide whether an encode works, and both fail *minutes in* rather
 than at job creation: the **Transcoder service agent** — not the media service

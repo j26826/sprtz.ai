@@ -60,6 +60,12 @@ MASTER_PLAYLIST = "master.m3u8"
 # which is what a preview and an analysis proxy both want: the alternative
 # is no picture at all because of two silent minutes.
 FILL_CONTENT_GAPS = True
+# Required with it: "config.elementaryStreams[0].videoStream.h264
+# .frameRateConversionStrategy is DOWNSAMPLE, must be set to DROP_DUPLICATE
+# when fillContentGaps is enabled" — the API refuses the job at creation
+# otherwise. Dropping or duplicating whole frames is also the honest way to
+# hold a fixed rate across a gap that has no frames to blend.
+FRAME_RATE_CONVERSION = "DROP_DUPLICATE"
 
 # The analysis proxy: the same 480p picture at one frame a second, audio kept.
 # Gemini samples a video at 1 fps whatever it is given, so this is the picture
@@ -130,6 +136,7 @@ def build_preview_config(out_uri: str, audio: bool = True) -> Any:
                         # starts late — the feature failing quietly rather than
                         # loudly.
                         gop_duration=segment,
+                        frame_rate_conversion_strategy=FRAME_RATE_CONVERSION,
                     ),
                 ),
             ),
@@ -195,6 +202,7 @@ def build_proxy_config(out_uri: str, audio: bool = True) -> Any:
                     bitrate_bps=PROXY_BITRATE_BPS,
                     frame_rate=PROXY_FRAME_RATE,
                     gop_duration=duration_pb2.Duration(seconds=PROXY_GOP_SECONDS),
+                    frame_rate_conversion_strategy=FRAME_RATE_CONVERSION,
                 ),
             ),
         ),

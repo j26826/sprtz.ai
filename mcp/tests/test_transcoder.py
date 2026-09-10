@@ -184,6 +184,18 @@ class TestAGapInTheSource:
     analysis proxy because of two silent minutes.
     """
 
+    def test_filling_gaps_needs_the_drop_duplicate_strategy(self):
+        # The API refuses the job at creation without it: "…
+        # frameRateConversionStrategy is DOWNSAMPLE, must be set to
+        # DROP_DUPLICATE when fillContentGaps is enabled".
+        from google.cloud.video import transcoder_v1
+
+        want = transcoder_v1.types.VideoStream.FrameRateConversionStrategy.DROP_DUPLICATE
+        for config in (transcoder.build_preview_config("gs://hls/jobs/j1/hls/"),
+                       transcoder.build_proxy_config("gs://media/jobs/j1/proxy/")):
+            h264 = config.elementary_streams[0].video_stream.h264
+            assert h264.frame_rate_conversion_strategy == want
+
     def test_both_jobs_fill_content_gaps(self):
         for maker, args in ((transcoder.create_preview_job, ("gs://up/v.mp4", "hls", "j1")),
                             (transcoder.create_proxy_job, ("gs://up/v.mp4", "media", "j1"))):
