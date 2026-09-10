@@ -30,6 +30,10 @@ import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i1
 import { chooseCard, wantsDetail } from './cards.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
+  disciplinesFor, findGames, gamesInScope, scopeContextLine, scopeFilters, scopeTitle,
+  sportsAvailable,
+} from './scope.js';
+import {
   filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
 } from './search.js';
 import {
@@ -57,6 +61,7 @@ const state = {
   games: [],           // every match with a game record, for the games list
   sessions: [],
   sessionKey: null,    // the open session, which may not have a job yet
+  scope: null,         // what this session is about — see scope.js
   jobId: null,
   job: null,
   moments: [],
@@ -450,7 +455,8 @@ function ensureJobContext() {
     ? listSessions().find((s) => s.id === state.sessionKey)
     : null;
   if (session?.jobId) return;
-  selectJob(state.jobs[0].id);
+  const inScope = gamesInScope(state.scope, state.games);
+  selectJob(inScope[0] ? (inScope[0].jobId || inScope[0].id) : state.jobs[0].id);
 }
 
 
@@ -499,8 +505,26 @@ function selectJob(jobId) {
 
 function push(msg) {
   state.msgs.push(msg);
+  persistTranscript();
   render();
   scrollDown();
+}
+
+/**
+ * Keep the conversation on its session, so switching away and back finds it.
+ *
+ * The last eighty turns, with the agent's session id beside them so the
+ * agent's own memory of the conversation continues too. Big search results
+ * are dropped: they are re-run in a click and they are the bulk of the bytes.
+ */
+function persistTranscript() {
+  if (!state.sessionKey) return;
+  const msgs = state.msgs.slice(-80).map((m) => {
+    const copy = { ...m };
+    if (Array.isArray(copy.searchResults) && copy.searchResults.length > 20) copy.searchResults = null;
+    return copy;
+  });
+  updateSession(state.sessionKey, { msgs, agentSessionId: state.sessionId });
 }
 
 function say(text, extra = {}) { push({ who: 'agent', text, ...extra }); }
@@ -1341,7 +1365,8 @@ function gamesCard(msg, index) {
   // that ran and matched everything. The module was tested; the call site was
   // never made, which is exactly the failure a tested pure function cannot
   // catch on its own.
-  const found = selectGames(state.games, { terms: msg.showAll ? [] : (msg.terms || []) });
+  const found = selectGames(gamesInScope(state.scope, state.games),
+    { terms: msg.showAll ? [] : (msg.terms || []) });
 
   // Asking for the records opens them in place, and a two-column detail table
   // does not fit a 190px tile — so the expanded view keeps the row layout it
@@ -1540,8 +1565,18 @@ function openSession(sessionId) {
   if (!session) return;
 
   state.sessionKey = sessionId;
-  state.sessionId = null;          // a new agent session per conversation
-  state.msgs = [greeting()];
+  // The conversation continues where it left off: the transcript and the
+  // agent's own session are both held on the session, so switching back is
+  // switching back, not starting again.
+  state.sessionId = session.agentSessionId || null;
+  state.scope = session.scope || null;
+  state.msgs = Array.isArray(session.msgs) && session.msgs.length
+    ? session.msgs.map((m) => ({ ...m, searching: false, deskLoading: false }))
+    : [greeting()];
+  state.msgs.forEach((m) => animatedMsgs.add(m));
+  if (!state.scope && !state.msgs.some((m) => m.showScope)) {
+    state.msgs.push({ who: 'agent', text: t('scope.prompt'), showScope: true, scopeStep: 'choose' });
+  }
   state.playing = null;
   destroyPlayer();
 
@@ -1785,8 +1820,10 @@ async function loadDeskMoments(index) {
   const msg = state.msgs[index];
   if (!msg) return;
   try {
+    const filters = scopeFilters(state.scope, state.games);
     const res = await api('/api/jobs/top-moments', {
-      method: 'POST', body: JSON.stringify({ limit: 20 }),
+      method: 'POST',
+      body: JSON.stringify({ limit: 20, sport: filters.sport, job_ids: filters.jobIds }),
     });
     msg.searchResults = res.moments || [];
     msg.running = res.running || [];
@@ -1982,6 +2019,199 @@ function liveStrip(live) {
     </div>`;
 }
 
+/* ─────────────────────────────────────────────────────────── scope ── */
+
+/**
+ * What this conversation is about, asked at the start of every session.
+ *
+ * Three doors: everything, one sport and any of its disciplines, or games
+ * picked by name. The choice is held on the session (see scope.js), names it
+ * in the sidebar, narrows the games list, the desk shortlist and the search
+ * panel, and is sent to the agent with every message — so "the best moments"
+ * means the best moments *of these games* on both sides of the conversation.
+ *
+ * The steps live on the message rather than in global state, so the card
+ * re-renders from the transcript like every other card and survives a
+ * session switch.
+ */
+function scopeCard(m, i) {
+  const step = m.scopeStep || 'choose';
+  const chip = (attr, value, label, pressed) => `
+    <button class="chip" data-${attr}="${i}:${esc(value)}" aria-pressed="${pressed}">${esc(label)}</button>`;
+  const back = `<button class="link-btn" data-scope-back="${i}">${esc(t('scope.back'))}</button>`;
+
+  if (step === 'done' && m.scope) {
+    return `
+      <div class="scope-summary">
+        <span class="field-label">${esc(t('scope.current'))}</span>
+        <span class="scope-name">${esc(scopeTitle(m.scope, state.games, t, gameHeadline))}</span>
+        <button class="link-btn" data-scope-change="${i}">${esc(t('scope.change'))}</button>
+      </div>`;
+  }
+
+  if (step === 'category') {
+    const sports = sportsAvailable(state.games, state.sports);
+    return `
+      <div class="scope-panel">
+        <div class="field-label">${esc(t('scope.pickSport'))}</div>
+        <div class="search-opts">
+          ${sports.map((sp) => chip('scope-sport', sp, sp, false)).join('')}
+        </div>
+        <div class="ctx-actions">${back}</div>
+      </div>`;
+  }
+
+  if (step === 'discipline') {
+    const discs = disciplinesFor(state.games, m.scopeSport);
+    const chosen = m.scopeDisciplines || [];
+    return `
+      <div class="scope-panel">
+        <div class="field-label">${esc(t('scope.pickDisciplines'))} · ${esc(m.scopeSport)}</div>
+        <div class="search-opts">
+          ${chip('scope-disc', '*', t('scope.allDisciplines'), !chosen.length)}
+          ${discs.map((d) => chip('scope-disc', d, d, chosen.includes(d))).join('')}
+        </div>
+        <div class="ctx-actions">
+          <button class="btn-solid" data-scope-done="${i}">${esc(t('scope.done'))}</button>
+          ${back}
+        </div>
+      </div>`;
+  }
+
+  if (step === 'games') {
+    const found = findGames(state.games, m.scopeQuery || '', gameHeadline);
+    const chosen = m.scopeJobs || [];
+    return `
+      <div class="scope-panel">
+        <div class="field-label">${esc(t('scope.searchGames'))}</div>
+        <input class="composer-input" data-scope-query="${i}" style="margin-top:6px"
+               placeholder="${esc(t('scope.searchPlaceholder'))}" value="${esc(m.scopeQuery || '')}" />
+        <div class="search-opts">
+          ${found.length ? found.slice(0, 30).map((g) => chip('scope-game', g.jobId || g.id,
+              gameHeadline(g), chosen.includes(g.jobId || g.id))).join('')
+            : `<span class="setting-hint">${esc(t('scope.noMatches'))}</span>`}
+        </div>
+        <div class="ctx-actions">
+          <button class="btn-solid" data-scope-done="${i}" ${chosen.length ? '' : 'disabled'}>
+            ${esc(t('scope.done'))}${chosen.length ? ` (${chosen.length})` : ''}
+          </button>
+          ${back}
+        </div>
+      </div>`;
+  }
+
+  const option = (key, title, desc) => `
+    <button class="scope-option" data-scope-pick="${i}:${key}">
+      <span class="scope-option-title">${esc(title)}</span>
+      <span class="scope-option-desc">${esc(desc)}</span>
+    </button>`;
+  return `
+    <div class="scope-options">
+      ${option('all', t('scope.all'), t('scope.allDesc'))}
+      ${option('category', t('scope.category'), t('scope.categoryDesc'))}
+      ${option('games', t('scope.games'), t('scope.gamesDesc'))}
+    </div>`;
+}
+
+function applyScope(i, scope) {
+  const msg = state.msgs[i];
+  if (msg) {
+    msg.scope = scope;
+    msg.scopeStep = 'done';
+  }
+  state.scope = scope;
+  const inScope = gamesInScope(scope, state.games);
+  const first = inScope[0] ? (inScope[0].jobId || inScope[0].id) : null;
+  if (state.sessionKey) {
+    updateSession(state.sessionKey, {
+      scope,
+      title: scopeTitle(scope, state.games, t, gameHeadline),
+      ...(first ? { jobId: first } : {}),
+    });
+    state.sessions = listSessions();
+  }
+  if (first && first !== state.jobId) selectJob(first);
+  persistTranscript();
+  render();
+}
+
+function onScopeClick(hit) {
+  const parse = (v) => { const k = v.indexOf(':'); return [Number(v.slice(0, k)), v.slice(k + 1)]; };
+  if (hit.dataset.scopePick) {
+    const [i, key] = parse(hit.dataset.scopePick);
+    const msg = state.msgs[i];
+    if (!msg) return;
+    if (key === 'all') { applyScope(i, { kind: 'all' }); return; }
+    msg.scopeStep = key;                      // 'category' or 'games'
+    msg.scopeSport = '';
+    msg.scopeDisciplines = [];
+    msg.scopeJobs = [];
+    msg.scopeQuery = '';
+    render();
+    return;
+  }
+  if (hit.dataset.scopeSport) {
+    const [i, sport] = parse(hit.dataset.scopeSport);
+    const msg = state.msgs[i];
+    if (!msg) return;
+    msg.scopeSport = sport;
+    // A sport with no disciplines on the desk has nothing to ask.
+    if (!disciplinesFor(state.games, sport).length) {
+      applyScope(i, { kind: 'category', sport, disciplines: [] });
+      return;
+    }
+    msg.scopeStep = 'discipline';
+    msg.scopeDisciplines = [];
+    render();
+    return;
+  }
+  if (hit.dataset.scopeDisc) {
+    const [i, disc] = parse(hit.dataset.scopeDisc);
+    const msg = state.msgs[i];
+    if (!msg) return;
+    const set = new Set(msg.scopeDisciplines || []);
+    if (disc === '*') set.clear();
+    else if (set.has(disc)) set.delete(disc); else set.add(disc);
+    msg.scopeDisciplines = [...set];
+    render();
+    return;
+  }
+  if (hit.dataset.scopeGame) {
+    const [i, id] = parse(hit.dataset.scopeGame);
+    const msg = state.msgs[i];
+    if (!msg) return;
+    const set = new Set(msg.scopeJobs || []);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    msg.scopeJobs = [...set];
+    render();
+    return;
+  }
+  if (hit.dataset.scopeDone) {
+    const i = Number(hit.dataset.scopeDone);
+    const msg = state.msgs[i];
+    if (!msg) return;
+    if (msg.scopeStep === 'discipline') {
+      applyScope(i, { kind: 'category', sport: msg.scopeSport, disciplines: msg.scopeDisciplines || [] });
+    } else if (msg.scopeStep === 'games' && (msg.scopeJobs || []).length) {
+      applyScope(i, { kind: 'games', jobIds: msg.scopeJobs });
+    }
+    return;
+  }
+  if (hit.dataset.scopeBack) {
+    const msg = state.msgs[Number(hit.dataset.scopeBack)];
+    if (!msg) return;
+    msg.scopeStep = msg.scopeStep === 'discipline' ? 'category' : 'choose';
+    render();
+    return;
+  }
+  if (hit.dataset.scopeChange) {
+    const msg = state.msgs[Number(hit.dataset.scopeChange)];
+    if (!msg) return;
+    msg.scopeStep = 'choose';
+    render();
+  }
+}
+
 function publishCard() {
   const posted = state.job?.status === 'ready';
   return `
@@ -2081,6 +2311,7 @@ function render() {
     <div class="msg ${agent ? `msg-agent card${fresh ? ' fade-in' : ''}` : 'msg-user'}">
       <div class="msg-label">${agent ? 'Agent' : 'You'}</div>
       ${cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
+      ${m.showScope ? scopeCard(m, i) : ''}
       ${m.showSearch ? searchPanel(m, i) + searchCard(m, i) : ''}
       ${m.showDeskMoments ? deskMomentsCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
@@ -2332,7 +2563,10 @@ async function ask(text, cards = null) {
         'Content-Type': 'application/json',
         ...(state.user ? { Authorization: `Bearer ${await getIdToken(state.user)}` } : {}),
       },
-      body: JSON.stringify({ message: text, session_id: sessionId, job_id: state.jobId }),
+      body: JSON.stringify({
+        message: text, session_id: sessionId, job_id: state.jobId,
+        context: scopeContextLine(state.scope, state.games, gameHeadline) || null,
+      }),
     });
     if (!res.ok || !res.body) throw new Error(`Agent returned ${res.status}`);
 
@@ -2378,6 +2612,7 @@ async function ask(text, cards = null) {
     if (msgIndex >= 0) state.msgs[msgIndex].text = `Could not reach the agent: ${err.message}`;
     else say(`Could not reach the agent: ${err.message}`);
   }
+  persistTranscript();
   render();
   scrollDown();
 }
@@ -2414,8 +2649,10 @@ function attachCards(index, question) {
     msg.showSearch = true;
     msg.query = question;
     msg.searchMode = 'all';
-    msg.searchSport = '';
-    msg.searchJobs = [];
+    // Narrowed to the session's scope; the editor can widen it in the panel.
+    const filters = scopeFilters(state.scope, state.games);
+    msg.searchSport = filters.sport;
+    msg.searchJobs = filters.jobIds;
     msg.searchResults = null;
   } else if (card === 'activity') {
     msg.showActivity = true;
@@ -2511,9 +2748,11 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
   // it.
   if (state.sessionKey) {
     updateSession(state.sessionKey, {
+      scope: { kind: 'games', jobIds: [job_id] },
       jobId: job_id,
       title: filename.replace(/\.[^.]+$/, ''),
     });
+    state.scope = { kind: 'games', jobIds: [job_id] };
     state.sessions = listSessions();
   }
 
@@ -2614,8 +2853,9 @@ async function registerFromStorage() {
     selectJob(job.job_id);
     playbackUrl = null;
     if (state.sessionKey) {
-      updateSession(state.sessionKey, { jobId: job.job_id, title: job.title || uri });
+      updateSession(state.sessionKey, { scope: { kind: 'games', jobIds: [job.job_id] }, jobId: job.job_id, title: job.title || uri });
       state.sessions = listSessions();
+      state.scope = { kind: 'games', jobIds: [job.job_id] };
     }
     render();
 
@@ -2658,8 +2898,9 @@ async function registerFromHls() {
     selectJob(job.job_id);
     playbackUrl = null;
     if (state.sessionKey) {
-      updateSession(state.sessionKey, { jobId: job.job_id, title: job.title || url });
+      updateSession(state.sessionKey, { scope: { kind: 'games', jobIds: [job.job_id] }, jobId: job.job_id, title: job.title || url });
       state.sessions = listSessions();
+      state.scope = { kind: 'games', jobIds: [job.job_id] };
     }
     render();
 
@@ -2707,7 +2948,8 @@ async function scheduleLiveEvent() {
     u.status = 'idle';
     selectJob(job.job_id);
     if (state.sessionKey) {
-      updateSession(state.sessionKey, { jobId: job.job_id, title: job.title || 'Live event' });
+      updateSession(state.sessionKey, { scope: { kind: 'games', jobIds: [job.job_id] }, jobId: job.job_id, title: job.title || 'Live event' });
+      state.scope = { kind: 'games', jobIds: [job.job_id] };
       state.sessions = listSessions();
     }
     const when = new Date(startIso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -2800,7 +3042,9 @@ document.addEventListener('click', (event) => {
     + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs],'
     + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel],'
     + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
-    + '[data-desk-add],[data-ingest-tab],[data-register-hls],[data-schedule-live]');
+    + '[data-desk-add],[data-ingest-tab],[data-register-hls],[data-schedule-live],'
+    + '[data-scope-pick],[data-scope-sport],[data-scope-disc],[data-scope-game],'
+    + '[data-scope-done],[data-scope-back],[data-scope-change]');
   if (!hit) return;
 
   if (hit.dataset.ask) {
@@ -2826,6 +3070,9 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (hit.dataset.registerGcs) { registerFromStorage(); return; }
+  if ('scopePick' in hit.dataset || 'scopeSport' in hit.dataset || 'scopeDisc' in hit.dataset
+      || 'scopeGame' in hit.dataset || 'scopeDone' in hit.dataset || 'scopeBack' in hit.dataset
+      || 'scopeChange' in hit.dataset) { onScopeClick(hit); return; }
   if (hit.dataset.registerHls) { registerFromHls(); return; }
   if (hit.dataset.scheduleLive) { scheduleLiveEvent(); return; }
   if (hit.dataset.ingestTab) { state.upload.tab = hit.dataset.ingestTab; render(); return; }
@@ -2998,6 +3245,16 @@ document.addEventListener('input', (event) => {
     const wasEmpty = !u.hlsUrl.trim();
     u.hlsUrl = el.value;
     if (wasEmpty !== !u.hlsUrl.trim()) render();
+  } else if (el.matches('[data-scope-query]')) {
+    const msg = state.msgs[Number(el.dataset.scopeQuery)];
+    if (!msg) return;
+    msg.scopeQuery = el.value;
+    // The list under the box follows the typing, which means re-rendering;
+    // the caret is put back where it was so typing is not interrupted.
+    const at = el.selectionStart;
+    render();
+    const again = document.querySelector('[data-scope-query]');
+    if (again) { again.focus(); again.setSelectionRange(at, at); }
   } else if (el.matches('[data-live-title]')) {
     u.live.title = el.value;
   } else if (el.matches('[data-live-hls],[data-live-start],[data-live-end]')) {

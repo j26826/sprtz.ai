@@ -78,6 +78,24 @@ class MessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     session_id: str | None = None
     job_id: str | None = None
+    # The session's scope — all games, a sport and its disciplines, or named
+    # games — as one line the editor's screen composes. Sent with every
+    # message rather than once, because the agent's context is the
+    # conversation and a scope chosen ten turns ago has to still hold.
+    context: str | None = Field(default=None, max_length=2000)
+
+
+def build_prompt(message: str, job_id: str | None, context: str | None) -> str:
+    """The message as the agent sees it: scope first, then the open job, then
+    what was typed. Bracketed lines are what the root instruction reads."""
+    lines: list[str] = []
+    if context:
+        lines.append(f"[scope: {context.strip()}]")
+    if job_id:
+        # Give the agent the job in context without making the user restate it.
+        lines.append(f"[job_id: {job_id}]")
+    lines.append(message)
+    return "\n".join(lines)
 
 
 @router.post("/sessions")
@@ -119,10 +137,7 @@ async def send_message(
             status_code=status.HTTP_502_BAD_GATEWAY, detail="Agent is unavailable."
         ) from exc
 
-    prompt = body.message
-    if body.job_id:
-        # Give the agent the job in context without making the user restate it.
-        prompt = f"[job_id: {body.job_id}]\n{prompt}"
+    prompt = build_prompt(body.message, body.job_id, body.context)
 
     async def stream() -> AsyncIterator[str]:
         queue: asyncio.Queue = asyncio.Queue()
