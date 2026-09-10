@@ -196,6 +196,22 @@ class TestAGapInTheSource:
             h264 = config.elementary_streams[0].video_stream.h264
             assert h264.frame_rate_conversion_strategy == want
 
+    def test_both_jobs_disable_the_optimisation_strategy(self):
+        # Refused in turn without it: "frameRateConversionStrategy is
+        # DROP_DUPLICATE, optimization should be DISABLED".
+        from google.cloud.video import transcoder_v1
+
+        want = transcoder_v1.types.Job.OptimizationStrategy.DISABLED
+        for maker, args in ((transcoder.create_preview_job, ("gs://up/v.mp4", "hls", "j1")),
+                            (transcoder.create_proxy_job, ("gs://up/v.mp4", "media", "j1"))):
+            fake = MagicMock()
+            created = MagicMock()
+            created.name = "projects/p/locations/l/jobs/x"
+            fake.create_job.return_value = created
+            with patch.object(transcoder, "client", return_value=fake):
+                maker(*args)
+            assert fake.create_job.call_args.kwargs["job"].optimization == want, maker.__name__
+
     def test_both_jobs_fill_content_gaps(self):
         for maker, args in ((transcoder.create_preview_job, ("gs://up/v.mp4", "hls", "j1")),
                             (transcoder.create_proxy_job, ("gs://up/v.mp4", "media", "j1"))):

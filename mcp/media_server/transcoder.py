@@ -66,6 +66,11 @@ FILL_CONTENT_GAPS = True
 # otherwise. Dropping or duplicating whole frames is also the honest way to
 # hold a fixed rate across a gap that has no frames to blend.
 FRAME_RATE_CONVERSION = "DROP_DUPLICATE"
+# And a third field, refused in turn: "frameRateConversionStrategy is
+# DROP_DUPLICATE, optimization should be DISABLED". Transcoder's autodetect
+# optimisation reserves the right to skip work it thinks is redundant, which
+# it cannot do while it is being told to duplicate frames across a gap.
+OPTIMIZATION = "DISABLED"
 
 # The analysis proxy: the same 480p picture at one frame a second, audio kept.
 # Gemini samples a video at 1 fps whatever it is given, so this is the picture
@@ -233,6 +238,7 @@ def create_proxy_job(source_uri: str, media_bucket: str, job_id: str,
         output_uri=out_uri,
         config=build_proxy_config(out_uri, audio=audio),
         fill_content_gaps=FILL_CONTENT_GAPS,
+        optimization=OPTIMIZATION,
         ttl_after_completion_days=7,
         labels={"sprtz_job": job_id[:63], "sprtz_kind": "proxy"},
     )
@@ -256,6 +262,7 @@ def create_preview_job(source_uri: str, hls_bucket: str, job_id: str,
         output_uri=out_uri,
         config=build_preview_config(out_uri, audio=audio),
         fill_content_gaps=FILL_CONTENT_GAPS,
+        optimization=OPTIMIZATION,
         # Let finished jobs age out on their own. The package lives in GCS; the
         # job record is only interesting while it is running or has just failed.
         ttl_after_completion_days=7,
