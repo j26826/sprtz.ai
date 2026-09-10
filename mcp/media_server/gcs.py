@@ -199,6 +199,53 @@ def delete_object(gcs_uri: str) -> bool:
     return True
 
 
+# Compose takes at most 32 sources, so more than that is composed in rounds
+# into intermediates that are composed again. No bytes pass through here at
+# any size — the same reason the live recorder joins its segments this way.
+COMPOSE_LIMIT = 32
+
+
+def compose(sources: list[str], dest_uri: str, content_type: str) -> str:
+    """Join objects server-side, in order, however many there are.
+
+    Every source must be in the destination's bucket; GCS compose cannot
+    cross one. Returns ``dest_uri``.
+    """
+    bucket_name, dest_name = split_uri(dest_uri)
+    bucket = client().bucket(bucket_name)
+    names = []
+    for uri in sources:
+        source_bucket, name = split_uri(uri)
+        if source_bucket != bucket_name:
+            raise ValueError(f"compose cannot cross buckets: {uri} into {dest_uri}")
+        names.append(name)
+
+    level = list(names)
+    scratch: list[str] = []
+    round_no = 0
+    while len(level) > COMPOSE_LIMIT:
+        next_level: list[str] = []
+        for i in range(0, len(level), COMPOSE_LIMIT):
+            group = level[i:i + COMPOSE_LIMIT]
+            inter = f"{dest_name}.part{round_no}-{i // COMPOSE_LIMIT:03d}"
+            target = bucket.blob(inter)
+            target.content_type = content_type
+            target.compose([bucket.blob(n) for n in group])
+            next_level.append(inter)
+            scratch.append(inter)
+        level = next_level
+        round_no += 1
+    target = bucket.blob(dest_name)
+    target.content_type = content_type
+    target.compose([bucket.blob(n) for n in level])
+    for name in scratch:
+        try:
+            bucket.blob(name).delete()
+        except Exception:  # noqa: BLE001
+            logger.warning("could not remove the compose intermediate %s", name)
+    return dest_uri
+
+
 def object_size(gcs_uri: str) -> int:
     """The object's size in bytes, from its metadata — no bytes are read."""
     bucket, name = split_uri(gcs_uri)

@@ -47,6 +47,7 @@ from sprtz_agents.tools import mcp_client
 from sprtz_agents.tools.analysis import _analyse_one, merge_segment_results
 from sprtz_agents.tools.pipeline import (
     _cancelled,
+    _compose_live_source,
     _emit,
     _persist_moments,
     _record_game_details,
@@ -557,6 +558,17 @@ async def _finish(job_id: str, job: dict, sport: str, profile, chunks: list[dict
             moments.append(Moment.model_validate({**raw, "job_id": job_id}))
         except Exception:  # noqa: BLE001
             continue
+
+    # One recording out of the row of chunks, so everything after the event —
+    # packaging, a clip, a still from the source — has a file to read. Never
+    # fatal: the moments and their stills are already saved, and playback can
+    # be prepared later from the same chunks.
+    if analysed:
+        try:
+            await _compose_live_source(job_id)
+        except Exception:
+            logger.warning("could not join the chunks of %s into one recording",
+                           job_id, exc_info=True)
 
     best = max(analysed, key=lambda c: float(c.get("disciplineConfidence") or 0.0), default=None)
     await _record_game_details(

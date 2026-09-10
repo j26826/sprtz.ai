@@ -961,6 +961,43 @@ def mux_status(execution: str, output_uri: str, original_uri: str = "") -> dict:
 
 
 @mcp.tool
+def compose_live_source(job_id: str, chunk_uris: list[str]) -> dict:
+    """Join a live event's chunks into one object the rest of the pipeline can use.
+
+    A live event has no source video: it has a row of five-minute chunks, and
+    every stage after the analysis — packaging for playback, cutting a clip,
+    a still from the source rather than from a proxy — wants one file. GCS
+    composes them server-side in the bucket they already live in, so no bytes
+    pass through here and a twelve-hour event costs a few API calls.
+
+    Safe to call again as the event grows: the destination is rewritten from
+    whatever chunks are named now, which is how playback can be prepared
+    mid-event and again at the end.
+
+    Args:
+        job_id: The live event's job.
+        chunk_uris: The chunk objects, in order. Each must be in the media
+            bucket, which is where the recorder writes them.
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+    if not chunk_uris:
+        return {"status": "error", "error": "no chunks to compose", "job_id": job_id}
+    container = "mp4" if str(chunk_uris[0]).endswith(".mp4") else "ts"
+    dest = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/live/source.{container}"
+    try:
+        gcs.compose(list(chunk_uris), dest, "video/mp4" if container == "mp4" else "video/mp2t")
+        size = gcs.object_size(dest)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not compose the live source for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+    return {"status": "success", "job_id": job_id, "gcs_uri": dest, "bytes": size,
+            "chunks": len(chunk_uris),
+            "content_type": "video/mp4" if container == "mp4" else "video/mp2t",
+            "original_name": f"source.{container}"}
+
+
+@mcp.tool
 def mux_chunk(job_id: str, index: int, video_uri: str, audio_uri: str) -> dict:
     """Mux a live chunk's separate audio into its video, in this request.
 
