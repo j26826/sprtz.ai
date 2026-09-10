@@ -69,15 +69,19 @@ against the live project. Treat a merge as a deploy.
 
 ### Models and analysis
 
-- **Gemini 3.6 Flash for video analysis and search reranking, called through
-  Vertex's `global` location** — in this project every regional endpoint
-  returns 404 for the post-2.5 Flash models, so a model that is only global is
-  not a model in `us-central1`. Model and location therefore travel as a pair:
+- **Gemini 2.5 Flash for video analysis, in `us-central1`; Gemini 3.6 Flash
+  for search reranking, through Vertex's `global` location.** 3.6 Flash ran
+  the analysis for a day and its moments were judged less accurate on the
+  equestrian footage, so the analysis went back to 2.5; the lesson below about
+  structured output stays, because the reranker is still on 3.6 and any later
+  model may behave the same. In this project every regional endpoint returns
+  404 for the post-2.5 Flash models, so a model that is only global is not a
+  model in `us-central1`. Model and location therefore travel as a pair:
   `analysis_model`/`analysis_location` and `rerank_model`/`rerank_location` in
   Terraform, reaching the engine as `SPRTZ_ANALYSIS_MODEL`/`_LOCATION` and the
   catalog as `RERANK_MODEL`/`RERANK_LOCATION`. Each falls back to the engine's
   own model and region when unset. The **root agent, the game judgement and
-  grounding stay on Gemini 2.5 Flash** in `us-central1` (`gemini_model`), and
+  grounding are also on Gemini 2.5 Flash** in `us-central1` (`gemini_model`), and
   so does **gemini-embedding-001** (768-dim)
   for semantic search. The embedding width must equal the Firestore vector
   index dimension exactly or queries fail at read time, not write time.
