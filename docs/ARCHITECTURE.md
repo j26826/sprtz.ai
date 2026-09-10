@@ -22,7 +22,7 @@ native services and is provisioned by Terraform.
    │                     │  Vertex AI Agent Runtime             │
    │                     │  sprtz_producer (ADK)                │
    │                     │       │                              │
-   │                     │       └─► Gemini 3.6 Flash ──────────┼──► gs:// source
+   │                     │       └─► Gemini 2.5 Flash ──────────┼──► gs:// source
    │                     │           13 × 15-min segments,      │    (video_metadata
    │                     │           concurrent, then merged    │     offsets)
    │                     └───────────┬──────────────────────────┘
@@ -72,7 +72,7 @@ sprtz_producer  (LlmAgent — talks to the editor)
 | `sprtz_producer` | Talks to the editor. Answers questions about a job, searches the match semantically, adjusts clips, and delegates a full run to `analysis_pipeline`. |
 | `ingest_agent` | Probes the upload, records duration/fps/resolution/codec, works out the segment plan. |
 | `transcode_agent` | Packages the video into an HLS ladder behind the CDN so the editor can play it. |
-| `analysis_agent` | Runs the segmented Gemini 3.6 Flash pass over the whole match, merges the results, embeds and saves the moments. |
+| `analysis_agent` | Runs the segmented Gemini 2.5 Flash pass over the whole match, merges the results, embeds and saves the moments. |
 | `clip_agent` | Turns moments into publishable cuts: in/out points per moment type, overlap resolution, 9:16 target. |
 | `caption_agent` | Per-platform copy — on-screen hook, title, TikTok/Instagram/YouTube captions, hashtags. |
 | `publish_agent` | Validates each clip against platform limits and closes the job out. |
@@ -99,7 +99,7 @@ by a deploy is minutes lost rather than a job left "analysing" for ever.
 
 ### Why there is no separate audio agent
 
-Gemini 3.6 Flash consumes the video's audio track in the same pass as the
+Gemini 2.5 Flash consumes the video's audio track in the same pass as the
 picture, so commentary emphasis, crowd noise and the whistle are already
 evidence available to the single analysis call. A separate speech-to-text stage
 would add a service, a failure mode and a cost for signals the model already has.
@@ -116,7 +116,7 @@ code changes.
 A full match is far too long for one model call, so `analyse_segments`:
 
 1. Splits the video into 15-minute windows overlapping by 20 seconds.
-2. Sends each window to Gemini 3.6 Flash concurrently (bounded by a semaphore),
+2. Sends each window to Gemini 2.5 Flash concurrently (bounded by a semaphore),
    using `video_metadata` start/end offsets so the model reads the range straight
    out of GCS — no clipping, no re-upload.
 3. Merges the per-window results into one absolute-timestamped timeline,

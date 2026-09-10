@@ -64,13 +64,15 @@ variable "gemini_model" {
 variable "analysis_model" {
   type        = string
   description = "Gemini model for the per-segment video analysis."
-  default     = "gemini-3.6-flash"
+  # 2.5 Flash again: 3.6 Flash was tried on the equestrian footage and its
+  # moments were judged less accurate on the desk. The reranker stays on 3.6.
+  default     = "gemini-2.5-flash"
 }
 
 variable "analysis_location" {
   type        = string
   description = "Vertex location the analysis model is called from. `global` for the models only served there."
-  default     = "global"
+  default     = "us-central1"
 }
 
 variable "rerank_model" {
