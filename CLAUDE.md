@@ -256,7 +256,10 @@ job's own `updatedAt`, counts the restart on the job (`recovery.attempts`,
 capped at two — a job that dies every time is saying something), clears the
 previous findings, and tells the root agent to run `analysis_pipeline` again.
 The live tick does the equivalent for its own parts: a failed chunk is put
-back to `captured` up to three times, and a recorder execution that has died
+back to `captured` up to three times, and so is a chunk still `analyzing`
+from a claim older than the tick lock — the tick that claimed it died with
+its process, which is what a deploy over a live event does to the chunk in
+flight, and nothing else would ever ask for it again; and a recorder execution that has died
 or stopped reporting for five minutes while the event is still on is
 restarted, up to three times; a restarted recorder **resumes its chunk
 numbering** from what is on record, or the second execution's chunk 0 would

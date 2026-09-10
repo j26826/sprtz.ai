@@ -309,12 +309,16 @@ async def _advance(job_id: str, job: dict, live: dict, at: datetime, settings) -
     chunks = await _chunks(job_id)
     # A chunk whose analysis failed is asked for again, a bounded number of
     # times; the analysis itself retries the call, so what reaches here is a
-    # window the model would not answer, which usually answers later.
+    # window the model would not answer, which usually answers later. A chunk
+    # still claimed from longer ago than any tick may run belongs to a tick
+    # that died with its process — a deploy replaced the engine — and is put
+    # back the same way, or it would sit "analyzing" for the rest of the event.
     for chunk in chunks:
-        if chunk.get("status") == "failed":
+        if chunk.get("status") in ("failed", "analyzing"):
             reset = await mcp_client.call_tool(
                 "catalog", "reset_live_chunk",
-                {"job_id": job_id, "index": int(chunk.get("index", 0))})
+                {"job_id": job_id, "index": int(chunk.get("index", 0)),
+                 "stale_after_minutes": LOCK_MINUTES})
             if reset.get("reset"):
                 chunk["status"] = "captured"
     by_index = {int(c.get("index", -1)): c for c in chunks}

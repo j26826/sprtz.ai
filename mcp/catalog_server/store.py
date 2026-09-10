@@ -1607,16 +1607,31 @@ def note_recovery(job_id: str, reason: str) -> dict[str, Any]:
     return {"job_id": job_id, "attempts": attempts, "max_attempts": MAX_RECOVERIES}
 
 
-def reset_live_chunk(job_id: str, index: int) -> dict[str, Any]:
+def reset_live_chunk(job_id: str, index: int, stale_after_minutes: int = 0) -> dict[str, Any]:
     """Put a failed chunk back to ``captured`` so the tick analyses it again.
 
     A transaction for the same reason the claim is one, and bounded: a chunk
     that has failed ``MAX_CHUNK_ATTEMPTS`` times stays failed and is reported
     as missing rather than retried for the rest of the event.
+
+    With ``stale_after_minutes`` it also resets a chunk that is still
+    ``analyzing`` from a claim older than that: the tick that claimed it died
+    with its process — a deploy replaced the engine — and nothing else would
+    ever ask for that chunk again.
     """
+    from datetime import timedelta
+
     from google.cloud import firestore
 
     ref = _chunk_ref(job_id, index)
+
+    def _stale(doc: dict[str, Any]) -> bool:
+        if not stale_after_minutes or doc.get("status") != "analyzing":
+            return False
+        claimed = doc.get("claimedAt")
+        if claimed is None:
+            return True
+        return claimed < now() - timedelta(minutes=stale_after_minutes)
 
     @firestore.transactional
     def reset(transaction) -> tuple[bool, int]:
@@ -1625,7 +1640,9 @@ def reset_live_chunk(job_id: str, index: int) -> dict[str, Any]:
             return False, 0
         doc = snapshot.to_dict() or {}
         attempts = int(doc.get("attempts") or 1)
-        if doc.get("status") != "failed" or attempts >= MAX_CHUNK_ATTEMPTS:
+        if attempts >= MAX_CHUNK_ATTEMPTS:
+            return False, attempts
+        if doc.get("status") != "failed" and not _stale(doc):
             return False, attempts
         transaction.update(ref, {"status": "captured", "attempts": attempts + 1,
                                  "error": None, "resetAt": now()})

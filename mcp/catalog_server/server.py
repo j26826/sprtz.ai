@@ -646,15 +646,17 @@ def note_recovery(job_id: str, reason: str = "") -> dict:
 
 
 @mcp.tool
-def reset_live_chunk(job_id: str, index: int) -> dict:
+def reset_live_chunk(job_id: str, index: int, stale_after_minutes: int = 0) -> dict:
     """Return a failed live chunk to `captured` for another attempt, up to a limit.
 
     Args:
         job_id: The live event's job.
         index: The chunk's index.
+        stale_after_minutes: Also reset a chunk still `analyzing` from a claim older
+            than this — the tick that claimed it died with its process.
     """
     try:
-        return {"status": "success", **store.reset_live_chunk(job_id, index)}
+        return {"status": "success", **store.reset_live_chunk(job_id, index, stale_after_minutes=stale_after_minutes)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id, index=index)
 
