@@ -1066,13 +1066,18 @@ def _rerank(query: str, candidates: list[dict[str, Any]], limit: int) -> list[di
             config=types.GenerateContentConfig(
                 temperature=0.0,
                 response_mime_type="application/json",
-                response_schema=_RerankResult,
+                # JSON Schema rather than the class: given the class, the
+                # newer Flash models write ``relevance`` as an unbounded run
+                # of digits until the token cap, and the result is unparseable
+                # — which here degrades silently to vector order.
+                response_json_schema=_RerankResult.model_json_schema(),
                 max_output_tokens=8192,
                 thinking_config=types.ThinkingConfig(thinking_budget=2048),
             ),
         )
-        parsed = response.parsed
-        if not isinstance(parsed, _RerankResult) or not parsed.ranked:
+        parsed = _RerankResult.model_validate_json(
+            (getattr(response, "text", "") or "").strip())
+        if not parsed.ranked:
             raise ValueError("reranker returned nothing usable")
     except Exception:  # noqa: BLE001
         logger.warning("rerank failed; falling back to vector order", exc_info=True)

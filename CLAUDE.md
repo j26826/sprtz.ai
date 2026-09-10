@@ -80,6 +80,18 @@ against the live project. Treat a merge as a deploy.
   so does **gemini-embedding-001** (768-dim)
   for semantic search. The embedding width must equal the Firestore vector
   index dimension exactly or queries fail at read time, not write time.
+- **Structured output is requested as `response_json_schema`, never
+  `response_schema=<Pydantic class>`.** Handed the class, the SDK converts it
+  to Vertex's own Schema type, and gemini-3.6-flash under that constraint
+  writes a float as an unbounded run of digits — `"discipline_confidence":
+  0.0000…` for thirty thousand characters until the token cap, so the JSON
+  never closes. Nine of sixteen segments were "Unparseable response" on the
+  first 3.6 run, and the reranker degraded to vector order without a word.
+  The same shape passed as `cls.model_json_schema()` answers in seconds; the
+  thinking configuration made no difference either way. `response.parsed` is
+  only filled for the class form, so every site parses `response.text` itself.
+  `TestResponseSchemasAreJsonSchema` reads the three sources and fails on a
+  regression, because no unit test can see the difference.
 - A match is split into **15-minute segments overlapping by 20s**, analysed
   concurrently, then merged with temporal IoU per moment type. A 3-hour
   recording is 13 segments.

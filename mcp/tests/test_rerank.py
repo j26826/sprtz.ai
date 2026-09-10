@@ -40,8 +40,12 @@ def _ranked(pairs: list[tuple[int, float]]) -> store._RerankResult:
 
 
 def _response(parsed):
+    # The reranker reads the JSON text, not ``parsed``: the JSON-schema form of
+    # the request leaves ``response.parsed`` empty, so a double that only set
+    # it would be a mock of a shape the call no longer has.
     response = MagicMock()
     response.parsed = parsed
+    response.text = parsed.model_dump_json() if hasattr(parsed, "model_dump_json") else ""
     return response
 
 
