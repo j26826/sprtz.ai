@@ -95,6 +95,64 @@ class TestOutputLocation:
         assert config.output.uri == "gs://hls/jobs/j1/hls/"
 
 
+class TestAnalysisProxy:
+    """The 1 fps copy the analysis reads.
+
+    Gemini samples at one frame a second whatever it is given, so this is the
+    picture it reads anyway at a fraction of the bytes. It used to be an
+    ffmpeg pass inside the download job — one core decoding the whole
+    recording after the download, an hour on a long one.
+    """
+
+    @pytest.fixture
+    def proxy(self):
+        return transcoder.build_proxy_config("gs://media/jobs/j1/proxy/")
+
+    def test_it_is_one_frame_a_second(self, proxy):
+        h264 = proxy.elementary_streams[0].video_stream.h264
+        assert h264.frame_rate == 1
+
+    def test_it_is_480p_with_an_even_width(self, proxy):
+        h264 = proxy.elementary_streams[0].video_stream.h264
+        assert h264.height_pixels == 480
+        assert h264.width_pixels % 2 == 0
+
+    def test_the_audio_is_kept(self, proxy):
+        # The commentary and the crowd are half of what the model reads.
+        audio = [s for s in proxy.elementary_streams if s.audio_stream.codec]
+        assert len(audio) == 1
+
+    def test_it_is_one_mp4_not_a_package(self, proxy):
+        mux = proxy.mux_streams
+        assert len(mux) == 1
+        assert mux[0].container == "mp4"
+        assert not mux[0].segment_settings.individual_segments
+        assert not proxy.manifests
+
+    def test_the_uri_is_known_before_the_encode_runs(self):
+        # Transcoder names an unsegmented mux stream `<key>.mp4`, so the ingest
+        # stage can record the proxy without listing the prefix.
+        fake = MagicMock()
+        created = MagicMock()
+        created.name = "projects/p/locations/l/jobs/px"
+        fake.create_job.return_value = created
+
+        with patch.object(transcoder, "client", return_value=fake):
+            result = transcoder.create_proxy_job("gs://up/hls/j1/source/source.ts", "media", "j1")
+
+        sent = fake.create_job.call_args.kwargs["job"]
+        assert sent.input_uri == "gs://up/hls/j1/source/source.ts"
+        assert sent.output_uri == "gs://media/jobs/j1/proxy/"
+        assert sent.config.mux_streams[0].key == transcoder.PROXY_STREAM_KEY
+        assert result["analysis_uri"] == f"gs://media/jobs/j1/proxy/{transcoder.PROXY_STREAM_KEY}.mp4"
+        assert result["transcoder_job"] == "projects/p/locations/l/jobs/px"
+
+    def test_the_proxy_prefix_is_where_the_media_tool_clears(self):
+        # `make_analysis_proxy` deletes the prefix before starting; if the two
+        # ever disagree a stale proxy from an earlier attempt survives.
+        assert transcoder.proxy_output_uri("media", "j1") == "gs://media/jobs/j1/proxy/"
+
+
 class TestJobLifecycle:
     def _client(self, state_name: str, message: str = ""):
         job = MagicMock()

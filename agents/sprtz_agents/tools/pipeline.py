@@ -221,16 +221,15 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
 
     Runs `jobs/hls2mp4` as a Cloud Run Job through the media server and waits
     on it here, widening the poll as it goes — the same shape as waiting on a
-    Transcoder encode. Alongside the source it produces the constant-1 fps
-    480p proxy, which is what the analysis reads: the same picture Gemini
-    samples anyway, at a fraction of the bytes, so a long recording no longer
-    needs to be cut to fit under the fetch limit.
+    Transcoder encode. Once the object is in the bucket the 1 fps 480p proxy
+    is made from it by a Transcoder job (`_make_analysis_proxy`), which is
+    what the analysis reads: the same picture Gemini samples anyway, at a
+    fraction of the bytes, so a long recording no longer needs to be cut to
+    fit under the fetch limit.
     """
     settings = get_settings()
     await _progress(job_id, "ingest", 0.05, status="analyzing")
-    await _emit(job_id, "ingest",
-                "Downloading the HLS stream into storage, with a 1 fps copy for the analysis.",
-                hls_url=hls_url)
+    await _emit(job_id, "ingest", "Downloading the HLS stream into storage.", hls_url=hls_url)
 
     async def fail(reason: str) -> dict:
         await mcp_client.call_tool("catalog", "update_job_status", {
@@ -239,7 +238,7 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
         return {"status": "error", "job_id": job_id, "error": reason}
 
     started = await mcp_client.call_tool(
-        "media", "download_hls", {"job_id": job_id, "hls_url": hls_url, "proxy": True})
+        "media", "download_hls", {"job_id": job_id, "hls_url": hls_url})
     if started.get("status") != "started":
         return await fail(
             f"The HLS download could not be started: {started.get('error', 'unknown error')}")
@@ -263,25 +262,70 @@ async def _download_hls_source(job_id: str, hls_url: str) -> dict:
             return await fail("The HLS download did not finish in time.")
         if time.monotonic() - last_note > 300:
             await _emit(job_id, "ingest", "Still downloading the stream.")
+            # An event is not a heartbeat: the watchdog reads the job's own
+            # `updatedAt`, and a download that wrote nothing there for fifteen
+            # minutes was restarted mid-download, by a tick that could not
+            # tell it from a dead run. Same fraction again — progress only
+            # goes forward, so this moves the clock and not the bar.
+            await _progress(job_id, "ingest", 0.05)
             last_note = time.monotonic()
 
+    gcs_uri = probe.get("gcs_uri", "")
+    # The object goes on the job before the proxy is attempted: a proxy that
+    # fails leaves an upload like any other, which the analysis can still cut
+    # into windows, and a restart finds the download already done.
     await mcp_client.call_tool("catalog", "set_source", {
         "job_id": job_id,
-        "gcs_uri": probe.get("gcs_uri", ""),
-        "analysis_uri": probe.get("analysis_uri", ""),
+        "gcs_uri": gcs_uri,
         "original_name": probe.get("original_name", ""),
         "size_bytes": int(probe.get("bytes") or 0),
         "content_type": probe.get("content_type", ""),
     })
     size_gb = int(probe.get("bytes") or 0) / 1e9
-    await _emit(
-        job_id, "ingest",
-        f"Downloaded {size_gb:.2f} GB as {probe.get('original_name') or 'the source'}"
-        + (" and made the 1 fps analysis proxy." if probe.get("analysis_uri") else "."),
-        bytes=int(probe.get("bytes") or 0), analysis_uri=probe.get("analysis_uri", ""),
-    )
-    return {"status": "success", "job_id": job_id, "gcs_uri": probe.get("gcs_uri", ""),
-            "analysis_uri": probe.get("analysis_uri", "")}
+    await _emit(job_id, "ingest",
+                f"Downloaded {size_gb:.2f} GB as {probe.get('original_name') or 'the source'}.",
+                bytes=int(probe.get("bytes") or 0))
+    await _progress(job_id, "ingest", 0.1)
+
+    analysis_uri = await _make_analysis_proxy(job_id, gcs_uri)
+    return {"status": "success", "job_id": job_id, "gcs_uri": gcs_uri,
+            "analysis_uri": analysis_uri}
+
+
+async def _make_analysis_proxy(job_id: str, gcs_uri: str) -> str:
+    """Make the 1 fps proxy on Transcoder and record it on the job.
+
+    Returns the proxy's URI, or "" when there is none. Not having one is a
+    warning rather than a failure: the analysis falls back to cutting the
+    source into windows, which is how every uploaded match is read, so the
+    run goes on — slower and at the source's own size, and the feed says so.
+    """
+    await _emit(job_id, "ingest", "Making the 1 fps copy the analysis reads.")
+    started = await mcp_client.call_tool(
+        "media", "make_analysis_proxy", {"gcs_uri": gcs_uri, "job_id": job_id})
+    if started.get("status") != "started":
+        await _emit(job_id, "ingest",
+                    "The 1 fps copy could not be started; the analysis will cut the "
+                    f"source into windows instead ({started.get('error', 'unknown error')}).",
+                    level="warning")
+        return ""
+
+    outcome = await _await_transcode(job_id, started["transcoder_job"],
+                                     stage="ingest", what="1 fps copy",
+                                     heartbeat=("ingest", 0.1))
+    if not outcome.get("succeeded"):
+        await _emit(job_id, "ingest",
+                    "The 1 fps copy failed; the analysis will cut the source into "
+                    f"windows instead ({outcome.get('error') or outcome.get('state', 'unknown')}).",
+                    level="warning")
+        return ""
+
+    analysis_uri = started.get("analysis_uri", "")
+    await mcp_client.call_tool("catalog", "set_source", {
+        "job_id": job_id, "gcs_uri": gcs_uri, "analysis_uri": analysis_uri})
+    await _emit(job_id, "ingest", "Made the 1 fps copy the analysis reads.",
+                analysis_uri=analysis_uri)
+    return analysis_uri
 
 
 @stage("playback")
@@ -394,16 +438,34 @@ _POLL_MAX_SECONDS = 60
 _POLL_CEILING_SECONDS = 4 * 60 * 60
 
 
-async def _await_transcode(job_id: str, transcoder_job: str) -> dict:
-    """Wait for a Transcoder job, reporting progress into the job's feed."""
+# How often a wait on Transcoder touches the job while nothing changes. The
+# watchdog restarts a running job whose `updatedAt` is fifteen minutes old,
+# and an encode reports nothing between "running" and "succeeded".
+_HEARTBEAT_SECONDS = 300
+
+
+async def _await_transcode(job_id: str, transcoder_job: str, stage: str = "transcode",
+                           what: str = "Preview encode",
+                           heartbeat: tuple[str, float] = ("transcode", 0.1)) -> dict:
+    """Wait for a Transcoder job, reporting each state change into the job's feed.
+
+    ``heartbeat`` is the (stage, fraction) re-reported every few minutes so
+    the job's clock moves while the encode runs — the same fraction the
+    caller last reported, since progress only goes forward.
+    """
     waited = 0.0
+    since_heartbeat = 0.0
     interval = float(_POLL_FIRST_SECONDS)
     last_state = ""
 
     while waited < _POLL_CEILING_SECONDS:
         await asyncio.sleep(interval)
         waited += interval
+        since_heartbeat += interval
         interval = min(interval * 1.5, _POLL_MAX_SECONDS)
+        if since_heartbeat >= _HEARTBEAT_SECONDS:
+            await _progress(job_id, *heartbeat)
+            since_heartbeat = 0.0
 
         status = await mcp_client.call_tool(
             "media", "transcode_status", {"transcoder_job": transcoder_job}
@@ -417,7 +479,7 @@ async def _await_transcode(job_id: str, transcoder_job: str) -> dict:
         state = status.get("state", "")
         if state != last_state:
             last_state = state
-            await _emit(job_id, "transcode", f"Preview encode {state.lower()}.")
+            await _emit(job_id, stage, f"{what} {state.lower()}.")
         if status.get("done"):
             return status
 

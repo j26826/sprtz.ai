@@ -52,6 +52,31 @@ SEGMENT_SECONDS = 6
 
 MASTER_PLAYLIST = "master.m3u8"
 
+# The analysis proxy: the same 480p picture at one frame a second, audio kept.
+# Gemini samples a video at 1 fps whatever it is given, so this is the picture
+# it reads anyway at a fraction of the bytes — a 3.75-hour, 6.8 GB recording
+# becomes a few hundred megabytes, which fits under the model's fetch limit
+# without being cut into windows. It used to be made by ffmpeg inside the
+# hls2mp4 job, one core decoding the whole recording after the download; a
+# Transcoder job splits the encode across its own workers and reads the
+# source from the bucket, so a long recording is minutes rather than an hour
+# and the download job is only a download.
+PROXY_FRAME_RATE = 1
+PROXY_HEIGHT = PREVIEW_HEIGHT
+PROXY_WIDTH = PREVIEW_WIDTH
+# At one frame a second this is half a megabit per frame, which is a
+# still-quality picture; what is being bought is legibility of a score bug at
+# 480p, not motion.
+PROXY_BITRATE_BPS = 400_000
+PROXY_AUDIO_BITRATE_BPS = 64_000
+# One keyframe every ten frames. The analysis reads the file from the start,
+# so seekability only matters for the range reads that cut a window out of it.
+PROXY_GOP_SECONDS = 10
+# Transcoder names an unsegmented mux stream `<key>.mp4` under the output
+# prefix, so the proxy's URI is known before the encode has started.
+PROXY_STREAM_KEY = "proxy_1fps"
+PROXY_FILE_NAME = f"{PROXY_STREAM_KEY}.mp4"
+
 _client: Any = None
 
 
@@ -130,6 +155,69 @@ def build_preview_config(out_uri: str) -> Any:
         ],
         output=transcoder_v1.types.Output(uri=out_uri),
     )
+
+
+def proxy_output_uri(bucket: str, job_id: str) -> str:
+    return f"gs://{bucket}/jobs/{job_id}/proxy/"
+
+
+def build_proxy_config(out_uri: str) -> Any:
+    """One 480p, 1 fps MP4 with the audio kept — the file the analysis reads."""
+    from google.cloud.video import transcoder_v1
+    from google.protobuf import duration_pb2
+
+    return transcoder_v1.types.JobConfig(
+        elementary_streams=[
+            transcoder_v1.types.ElementaryStream(
+                key="video-1fps",
+                video_stream=transcoder_v1.types.VideoStream(
+                    h264=transcoder_v1.types.VideoStream.H264CodecSettings(
+                        height_pixels=PROXY_HEIGHT,
+                        width_pixels=PROXY_WIDTH,
+                        bitrate_bps=PROXY_BITRATE_BPS,
+                        frame_rate=PROXY_FRAME_RATE,
+                        gop_duration=duration_pb2.Duration(seconds=PROXY_GOP_SECONDS),
+                    ),
+                ),
+            ),
+            transcoder_v1.types.ElementaryStream(
+                key="audio-aac",
+                audio_stream=transcoder_v1.types.AudioStream(
+                    codec="aac",
+                    bitrate_bps=PROXY_AUDIO_BITRATE_BPS,
+                ),
+            ),
+        ],
+        mux_streams=[
+            transcoder_v1.types.MuxStream(
+                key=PROXY_STREAM_KEY,
+                container="mp4",
+                elementary_streams=["video-1fps", "audio-aac"],
+            ),
+        ],
+        output=transcoder_v1.types.Output(uri=out_uri),
+    )
+
+
+def create_proxy_job(source_uri: str, media_bucket: str, job_id: str) -> dict[str, Any]:
+    """Start the 1 fps analysis proxy encode. Returns as soon as it is accepted."""
+    from google.cloud.video import transcoder_v1
+
+    out_uri = proxy_output_uri(media_bucket, job_id)
+    job = transcoder_v1.types.Job(
+        input_uri=source_uri,
+        output_uri=out_uri,
+        config=build_proxy_config(out_uri),
+        ttl_after_completion_days=7,
+        labels={"sprtz_job": job_id[:63], "sprtz_kind": "proxy"},
+    )
+    created = client().create_job(parent=parent(), job=job)
+    logger.info("transcoder proxy job %s created for %s", created.name, job_id)
+    return {
+        "transcoder_job": created.name,
+        "output_uri": out_uri,
+        "analysis_uri": f"{out_uri}{PROXY_FILE_NAME}",
+    }
 
 
 def create_preview_job(source_uri: str, hls_bucket: str, job_id: str) -> dict[str, Any]:
