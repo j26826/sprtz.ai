@@ -599,6 +599,14 @@ segments differently from the ffmpeg packager that preceded it, so nothing is
 ever overwritten, and a playlist left by a half-finished run is one the CDN will
 serve.
 
+**A gap in a stream is filled, not refused.** A real recording can be missing
+frames in the middle — a LeMieux upload has two minutes with no audio at
+01:32:00 — and Transcoder rejects the whole encode for it: "Failed to
+generate output for elementary stream audio-aac. Media frames are missing
+starting at time 5520s and ending at time 5640s." Both jobs set
+`fill_content_gaps`, because no preview and no analysis proxy at all is a
+worse answer to two silent minutes than a filled gap.
+
 Two grants decide whether an encode works, and both fail *minutes in* rather
 than at job creation: the **Transcoder service agent** — not the media service
 account — needs read on the uploads bucket and write on the HLS bucket.
@@ -1286,8 +1294,11 @@ The pipeline is a sequence of agents. When the download failed, the analysis
 ran on nothing, and `finalize_job` wrote "the analysis produced no moments"
 over the real reason — the editor was told to re-run a job whose link had
 expired. The stages after ingest are `@stage(..., skip_if_failed=True)`: they
-read the job first and return `skipped` when it is already `failed`, leaving
-the earlier stage's reason in place. Ingest is exempt because a re-run starts
+read the job first and return `skipped` when it is already `failed`,
+`cancelled` or `cancelling`, leaving the earlier stage's reason in place.
+Cancelling is the sharper case: the stages after the cancelled analysis ran
+on and marked the job **failed** with "the analysis produced no moments",
+and the one thing cancelling promises not to do is report the run as broken. Ingest is exempt because a re-run starts
 there on a job that is failed by definition, and so is playback, which an
 editor asks for on its own.
 

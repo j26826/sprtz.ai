@@ -52,6 +52,15 @@ SEGMENT_SECONDS = 6
 
 MASTER_PLAYLIST = "master.m3u8"
 
+# A real recording can be missing frames in the middle of a stream — a
+# LeMieux upload has two minutes with no audio at 01:32:00 — and Transcoder
+# refuses the whole encode for it: "Failed to generate output for elementary
+# stream audio-aac. Media frames are missing starting at time 5520s and
+# ending at time 5640s." With this it fills the gap and encodes the rest,
+# which is what a preview and an analysis proxy both want: the alternative
+# is no picture at all because of two silent minutes.
+FILL_CONTENT_GAPS = True
+
 # The analysis proxy: the same 480p picture at one frame a second, audio kept.
 # Gemini samples a video at 1 fps whatever it is given, so this is the picture
 # it reads anyway at a fraction of the bytes — a 3.75-hour, 6.8 GB recording
@@ -215,6 +224,7 @@ def create_proxy_job(source_uri: str, media_bucket: str, job_id: str,
         input_uri=source_uri,
         output_uri=out_uri,
         config=build_proxy_config(out_uri, audio=audio),
+        fill_content_gaps=FILL_CONTENT_GAPS,
         ttl_after_completion_days=7,
         labels={"sprtz_job": job_id[:63], "sprtz_kind": "proxy"},
     )
@@ -237,6 +247,7 @@ def create_preview_job(source_uri: str, hls_bucket: str, job_id: str,
         input_uri=source_uri,
         output_uri=out_uri,
         config=build_preview_config(out_uri, audio=audio),
+        fill_content_gaps=FILL_CONTENT_GAPS,
         # Let finished jobs age out on their own. The package lives in GCS; the
         # job record is only interesting while it is running or has just failed.
         ttl_after_completion_days=7,
