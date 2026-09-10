@@ -590,24 +590,35 @@ def merge_segment_results(
                 candidates.append(moment)
 
     candidates.sort(key=lambda m: (m.start_sec, -m.confidence))
+    logger.info("merging %d detections from %d segment(s)", len(candidates), len(analyses))
 
+    # Sorted by start, so the only entries a candidate can overlap are the
+    # recent ones: walking back from the end and stopping once even the
+    # longest moment seen could no longer reach this candidate's start makes
+    # this near-linear. It was a scan of everything merged so far for every
+    # candidate, plus a second scan to find the match's index — cubic in the
+    # worst case, and a model that over-produces on a three-hour recording is
+    # exactly that worst case. The result is the same: the entries skipped are
+    # ones whose intersection with the candidate is empty.
     merged: list[Moment] = []
+    longest = 0.0
     for candidate in candidates:
-        match = next(
-            (
-                existing
-                for existing in merged
-                if existing.moment_type == candidate.moment_type
-                and _iou(existing, candidate) >= iou_threshold
-            ),
-            None,
-        )
-        if match is None:
+        index = None
+        for position in range(len(merged) - 1, -1, -1):
+            existing = merged[position]
+            if existing.start_sec + longest <= candidate.start_sec:
+                break
+            if (existing.moment_type == candidate.moment_type
+                    and _iou(existing, candidate) >= iou_threshold):
+                index = position
+                break
+        if index is None:
             merged.append(candidate)
+            longest = max(longest, candidate.end_sec - candidate.start_sec)
             continue
 
+        match = merged[index]
         stronger = match if match.confidence >= candidate.confidence else candidate
-        index = merged.index(match)
         merged[index] = stronger.model_copy(
             update={
                 "start_sec": min(match.start_sec, candidate.start_sec),
@@ -622,6 +633,7 @@ def merge_segment_results(
                 ),
             }
         )
+        longest = max(longest, merged[index].end_sec - merged[index].start_sec)
 
     merged.sort(key=lambda m: m.start_sec)
     return merged
