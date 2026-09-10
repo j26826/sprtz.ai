@@ -482,6 +482,14 @@ actually takes: analysis is 20-80 because it is an hour of Gemini calls against
 minutes for everything else, and equal slices would park the bar mid-way for
 most of a run. The web `STAGES` table mirrors it; change one and change both.
 
+**The ingest panel is idle once the job exists, not once the turn ends.**
+Every registration path handed the job to the agent and then awaited `ask()`,
+which stays open for the whole analysis, with the panel's status left on
+`analyzing` — so every ingest button was disabled for an hour, including
+Schedule Live on the other tab, and an engine that never answered left them
+disabled for good. The panel's work finishes when the match is registered;
+the run's progress is the stage strip's business.
+
 **Ingesting is not analysing.** "Ingest a new game" asks for the upload panel:
 there is no video yet and nothing to run. The agent used to answer it by
 starting `analysis_pipeline`, which spends an hour on the wrong match and holds
