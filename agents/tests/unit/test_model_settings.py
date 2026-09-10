@@ -94,3 +94,34 @@ class TestRerankingMovesAndEmbeddingsDoNot:
     def test_embeddings_keep_the_regional_client(self):
         body = re.search(r"def embed\(.*?(?=\ndef )", STORE, re.S).group(0)
         assert "genai_client()" in body and "rerank_client()" not in body
+
+
+class TestResponseSchemasAreJsonSchema:
+    """Every structured call hands Gemini a JSON Schema, never the Pydantic class.
+
+    Given the class, the SDK converts it to Vertex's own Schema type, and
+    gemini-3.6-flash under that constraint writes a float as an unbounded run
+    of digits — ``"discipline_confidence": 0.0000…`` for thirty thousand
+    characters until the token cap, and the JSON never closes. Nine of sixteen
+    segments failed that way on the first run, and the reranker degrades to
+    vector order without a word. The same shape as ``response_json_schema``
+    answers cleanly in seconds. No unit test can see the difference, so this
+    reads the source.
+    """
+
+    SITES = {"analysis.py": ANALYSIS, "pipeline.py": PIPELINE, "store.py": STORE}
+
+    def test_no_call_passes_the_class(self):
+        for name, src in self.SITES.items():
+            code = "\n".join(line for line in src.splitlines() if not line.lstrip().startswith("#"))
+            assert "response_schema=" not in code, f"{name} still passes a Pydantic class"
+
+    def test_every_structured_call_passes_json_schema(self):
+        for name, src in self.SITES.items():
+            assert ".model_json_schema()" in src, f"{name} has no response_json_schema"
+
+    def test_the_answer_is_parsed_from_the_text(self):
+        # ``response.parsed`` is only filled in for the class form, so a site
+        # that still reads it would return nothing on every call.
+        assert "getattr(response, \"parsed\"" not in PIPELINE
+        assert "response.parsed" not in STORE

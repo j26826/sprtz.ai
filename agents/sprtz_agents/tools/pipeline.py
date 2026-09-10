@@ -415,7 +415,7 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         "analysis",
         f"Analysing {segment_count} segments of {profile.display_name} with {settings.analysis_model}.",
         segments=segment_count,
-        model=settings.model,
+        model=settings.analysis_model,
     )
 
     async def segment_done(done: int, total: int) -> None:
@@ -763,7 +763,8 @@ async def _judge_game(sport: str, moments: list[Moment], segment_summaries: list
             config=types.GenerateContentConfig(
                 temperature=0.2,
                 response_mime_type="application/json",
-                response_schema=game_summary.Judgement,
+                # JSON Schema rather than the class — see analysis.py.
+                response_json_schema=game_summary.Judgement.model_json_schema(),
                 http_options=types.HttpOptions(timeout=2 * 60 * 1000),
             ),
         )
@@ -771,10 +772,12 @@ async def _judge_game(sport: str, moments: list[Moment], segment_summaries: list
         logger.warning("game judgement failed for a %s match", sport, exc_info=True)
         return {}
 
-    parsed = getattr(response, "parsed", None)
-    if isinstance(parsed, game_summary.Judgement):
-        return parsed.model_dump()
-    return {}
+    try:
+        return game_summary.Judgement.model_validate_json(
+            (getattr(response, "text", "") or "").strip()).model_dump()
+    except Exception:
+        logger.warning("game judgement was not parseable for a %s match", sport, exc_info=True)
+        return {}
 
 
 async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int = 100) -> int:

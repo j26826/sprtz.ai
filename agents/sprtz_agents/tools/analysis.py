@@ -176,7 +176,15 @@ async def _analyse_one(
         system_instruction=build_system_instruction(profile, metadata_language),
         temperature=0.2,
         response_mime_type="application/json",
-        response_schema=profile.segment_schema or SegmentAnalysis,
+        # The JSON Schema, not the Pydantic class. Handed the class, the SDK
+        # converts it to Vertex's own Schema type, and gemini-3.6-flash under
+        # that constraint writes a float as an unbounded run of digits —
+        # ``"discipline_confidence": 0.0000…`` for thirty thousand characters,
+        # until it hits the token cap and the JSON is unparseable. Nine of
+        # sixteen segments went that way on the first run. The same model
+        # given the same shape as ``response_json_schema`` answers in four
+        # seconds. ``test_response_schemas`` pins this.
+        response_json_schema=(profile.segment_schema or SegmentAnalysis).model_json_schema(),
         # A 15-minute window can legitimately contain 30+ moments.
         max_output_tokens=32768,
         # Without a thinking budget the model returns every moment at the same
