@@ -169,8 +169,14 @@ from a 480p proxy is not a still.
 states the duration; a transport stream has no such header, ffprobe reports
 the length of what it was given, and 32 MiB of a 6.9 GB recording probed as a
 149-second video — the analysis ran on one window and found nothing, twice.
-Anything else is probed in place over HTTPS, and `bytes` always comes from the
-object. **A source with no audio track is encoded without one**: Transcoder
+A container with no header is measured from its two ends instead: the
+last packet's time minus the first's, from two 32 MiB range reads
+(`_ends_probe`, tail aligned to the 188-byte packet). Not over HTTPS: the
+service's ffmpeg 7.1 read the whole 6.9 GB to answer that, where ffmpeg 9 on
+a laptop answered with one seek in a second, and the probe timed out at ten
+minutes. HTTPS remains the path for a non-faststart MP4. `bytes` always comes
+from the object. **The ffmpeg log line masks `-headers`** (`redacted`): it
+carried the bucket bearer token into Cloud Logging once per probe. **A source with no audio track is encoded without one**: Transcoder
 asked for an AAC stream from a silent file fails minutes in with "does not
 have any inputs with an audio track", so `transcode_hls` and
 `make_analysis_proxy` read the head first (`_source_has_audio`). **An HLS

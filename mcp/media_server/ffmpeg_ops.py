@@ -76,8 +76,23 @@ class FfmpegError(RuntimeError):
     pass
 
 
+def redacted(cmd: list[str]) -> list[str]:
+    """The command with any HTTP header value masked.
+
+    ``-headers`` carries the bearer token that lets ffmpeg read the bucket,
+    and the first version of this log line printed it — a credential for the
+    media bucket, in Cloud Logging, once per probe.
+    """
+    out = list(cmd)
+    for i, arg in enumerate(out[:-1]):
+        if arg == "-headers":
+            out[i + 1] = "Authorization: Bearer ***"
+    return out
+
+
 def _run(cmd: list[str], timeout: int = 3600) -> str:
-    logger.info("running: %s", shlex.join(cmd[:12]) + (" ..." if len(cmd) > 12 else ""))
+    shown = redacted(cmd)
+    logger.info("running: %s", shlex.join(shown[:12]) + (" ..." if len(shown) > 12 else ""))
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()[-12:]
@@ -134,7 +149,7 @@ def probe(path: str | Path, bearer_token: str | None = None) -> dict:
             "ffprobe", "-v", "error", *_PROBE_HARDENING,
             *header_args,
             "-show_entries",
-            "format=duration,size,bit_rate,format_name",
+            "format=duration,start_time,size,bit_rate,format_name",
             "-show_entries",
             "stream=index,codec_type,codec_name,width,height,avg_frame_rate,channels,sample_rate",
             "-of", "json",
@@ -159,6 +174,7 @@ def probe(path: str | Path, bearer_token: str | None = None) -> dict:
 
     return {
         "duration_sec": float(fmt.get("duration") or 0.0),
+        "start_sec": float(fmt.get("start_time") or 0.0),
         "bytes": int(fmt.get("size") or 0),
         "bitrate": int(fmt.get("bit_rate") or 0),
         "container": fmt.get("format_name", ""),

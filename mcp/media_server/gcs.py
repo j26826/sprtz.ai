@@ -72,18 +72,18 @@ def download(gcs_uri: str, dest: Path) -> Path:
     return dest
 
 
-def download_range(gcs_uri: str, dest: Path, end_byte: int) -> Path:
-    """Fetch only the first ``end_byte`` bytes.
+def download_range(gcs_uri: str, dest: Path, end_byte: int, start_byte: int = 0) -> Path:
+    """Fetch bytes ``start_byte`` to ``end_byte`` of an object into ``dest``.
 
-    ffprobe only needs the header and the moov atom, so a 3 GB match does not
-    have to cross the wire to read its duration — as long as the file is
-    faststart. The caller falls back to a full download when it is not.
+    ffprobe only needs the header and the moov atom of a faststart MP4, so a
+    3 GB match does not have to cross the wire to read its duration; a
+    transport stream has no header and is read at both ends instead.
     """
     bucket_name, blob_name = split_uri(gcs_uri)
     dest.parent.mkdir(parents=True, exist_ok=True)
     blob = client().bucket(bucket_name).blob(blob_name)
     with dest.open("wb") as handle:
-        blob.download_to_file(handle, start=0, end=end_byte)
+        blob.download_to_file(handle, start=start_byte, end=end_byte)
     return dest
 
 
