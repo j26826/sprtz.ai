@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse
 
 import requests
 
-from media_server import ffmpeg_ops, gcs, runjobs, transcoder
+from media_server import ffmpeg_ops, gcs, hls, runjobs, transcoder
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("mcp-media")
@@ -40,6 +40,7 @@ CDN_BASE_URL = os.environ.get("CDN_BASE_URL", "").rstrip("/")
 # The two Cloud Run Jobs this service starts, as full resource names. Empty
 # means the deployment has none, and the tools that need them say so.
 HLS2MP4_JOB = os.environ.get("HLS2MP4_JOB", "")
+REMUX_JOB = os.environ.get("REMUX_JOB", "")
 LIVE_CAPTURE_JOB = os.environ.get("LIVE_CAPTURE_JOB", "")
 LIVE_CHUNK_SECONDS = int(os.environ.get("LIVE_CHUNK_SECONDS", "300") or 300)
 # Cloud Run's writable filesystem is memory-backed, so scratch is only ever
@@ -693,30 +694,71 @@ def _proxy_prefix(job_id: str) -> str:
 
 
 PLAYLIST_CHECK_TIMEOUT = 15
+PLAYLIST_MAX_BYTES = 4 * 1024 * 1024
 
 
-def check_playlist(hls_url: str) -> str:
-    """Why a playlist URL cannot be downloaded, or "" when it answers.
+def fetch_playlist(hls_url: str) -> tuple[str, str]:
+    """``(problem, text)``: why a playlist URL cannot be used, or its contents.
 
     A signed CDN link expires, and the download job then costs a three-minute
     cold start to report "the job did not succeed" with the 403 in its own
-    log. One small request here says which HTTP status the URL answers, in
-    seconds, before anything is started.
+    log. One request here says which HTTP status the URL answers, in
+    seconds, before anything is started — and hands back the playlist, which
+    is also how a separate audio rendition is found.
     """
     try:
-        with requests.get(hls_url, stream=True, timeout=PLAYLIST_CHECK_TIMEOUT,
-                          headers={"Range": "bytes=0-1023"}) as resp:
+        with requests.get(hls_url, stream=True, timeout=PLAYLIST_CHECK_TIMEOUT) as resp:
             if resp.status_code >= 400:
                 reason = f"The playlist URL answered HTTP {resp.status_code} {resp.reason}"
                 if resp.status_code in (401, 403):
                     reason += " — a signed link that has expired, or one that needs a token"
-                return reason + "."
-            head = next(resp.iter_content(1024), b"") or b""
+                return reason + ".", ""
+            chunks: list[bytes] = []
+            size = 0
+            for chunk in resp.iter_content(64 * 1024):
+                chunks.append(chunk or b"")
+                size += len(chunk or b"")
+                if size > PLAYLIST_MAX_BYTES:
+                    break
+            body = b"".join(chunks)
     except requests.RequestException as exc:
-        return f"The playlist URL could not be fetched: {type(exc).__name__}: {exc}."
-    if b"#EXTM3U" not in head:
-        return "The URL answered, but not with an HLS playlist (no #EXTM3U at the top)."
-    return ""
+        return f"The playlist URL could not be fetched: {type(exc).__name__}: {exc}.", ""
+    if b"#EXTM3U" not in body[:1024]:
+        return "The URL answered, but not with an HLS playlist (no #EXTM3U at the top).", ""
+    return "", body.decode("utf-8", "replace")
+
+
+def check_playlist(hls_url: str) -> str:
+    """Why a playlist URL cannot be downloaded, or "" when it answers."""
+    return fetch_playlist(hls_url)[0]
+
+
+def separate_audio_for(master_text: str, hls_url: str) -> str:
+    """The audio playlist a video-only MPEG-TS variant needs, or "".
+
+    The download tool muxes a separate audio rendition into a CMAF recording
+    itself and leaves a transport stream silent, so only the TS case needs
+    the second fetch — and which case it is takes one read of the variant's
+    media playlist. Anything unreadable here is "", which is the recording
+    as the tool leaves it.
+    """
+    if not hls.is_master(master_text):
+        return ""
+    try:
+        variant = hls.pick_variant(hls.parse_master(master_text, hls_url))
+        audio_url = hls.separate_audio_url(master_text, hls_url, variant)
+        if not audio_url or variant is None:
+            return ""
+        problem, media_text = fetch_playlist(variant.url)
+        if problem:
+            return ""
+        if hls.container_of(hls.parse_media(media_text, variant.url)) != "ts":
+            return ""
+        return audio_url
+    except Exception:  # noqa: BLE001
+        logger.warning("could not tell whether %s has a separate audio rendition", hls_url,
+                       exc_info=True)
+        return ""
 
 
 @mcp.tool
@@ -744,9 +786,10 @@ def download_hls(job_id: str, hls_url: str) -> dict:
         return {"status": "error", "error": "HLS2MP4_JOB is not configured."}
     if not UPLOADS_BUCKET:
         return {"status": "error", "error": "UPLOADS_BUCKET is not configured."}
-    problem = check_playlist(hls_url)
+    problem, master_text = fetch_playlist(hls_url)
     if problem:
         return {"status": "error", "error": problem, "job_id": job_id}
+    audio_playlist_url = separate_audio_for(master_text, hls_url)
     try:
         # Anything already here is from an attempt that did not finish.
         gcs.delete_prefix(UPLOADS_BUCKET, _hls_source_prefix(job_id))
@@ -759,7 +802,10 @@ def download_hls(job_id: str, hls_url: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not start the HLS download for %s", job_id)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
-    return {"status": "started", "job_id": job_id, "execution": execution}
+    return {"status": "started", "job_id": job_id, "execution": execution,
+            # Non-empty when the recording will land silent and needs
+            # `mux_audio` once it is in the bucket.
+            "audio_playlist_url": audio_playlist_url}
 
 
 @mcp.tool
@@ -804,6 +850,73 @@ def hls_download_status(execution: str, job_id: str) -> dict:
         "content_type": source.content_type or ("video/mp2t" if source.name.endswith(".ts") else "video/mp4"),
         "original_name": source.name.rsplit("/", 1)[-1],
     }
+
+
+def _muxed_uri(job_id: str) -> str:
+    return f"gs://{UPLOADS_BUCKET}/{_hls_source_prefix(job_id)}muxed/source.ts"
+
+
+@mcp.tool
+def mux_audio(job_id: str, gcs_uri: str, audio_playlist_url: str) -> dict:
+    """Start muxing a separate audio rendition into a silent HLS recording.
+
+    A Cloud Run Job on this image (`media_server.remux`): it fetches the
+    audio playlist's segments, then one ffmpeg stream-copies the video from
+    the bucket and the audio into a new transport stream written straight
+    back to the bucket. Returns at once; poll with `mux_status`. The output
+    path is known up front.
+
+    Args:
+        job_id: Job the recording belongs to.
+        gcs_uri: gs:// URI of the video-only recording.
+        audio_playlist_url: The audio rendition's playlist, as `download_hls`
+            reported it.
+    """
+    if not REMUX_JOB:
+        return {"status": "error", "error": "REMUX_JOB is not configured."}
+    output_uri = _muxed_uri(job_id)
+    try:
+        gcs.delete_prefix(UPLOADS_BUCKET, f"{_hls_source_prefix(job_id)}muxed/")
+        execution = runjobs.run(REMUX_JOB, {
+            "JOB_ID": job_id, "VIDEO_URI": gcs_uri,
+            "AUDIO_PLAYLIST_URL": audio_playlist_url, "OUTPUT_URI": output_uri,
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not start the audio mux for %s", job_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "job_id": job_id}
+    return {"status": "started", "job_id": job_id, "execution": execution,
+            "output_uri": output_uri}
+
+
+@mcp.tool
+def mux_status(execution: str, output_uri: str, original_uri: str = "") -> dict:
+    """Where an audio mux is; once done, the muxed object and its size.
+
+    On success the silent original is deleted, since the muxed recording is
+    the source from then on and the two together are twice the bytes.
+
+    Args:
+        execution: The execution name `mux_audio` returned.
+        output_uri: The output it named.
+        original_uri: The video-only recording to remove once replaced.
+    """
+    try:
+        state = runjobs.execution_state(execution)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
+    if state["state"] != "succeeded":
+        return {"status": state["state"], **state}
+    size = gcs.object_size(output_uri)
+    if not size:
+        return {"status": "failed", "execution": execution,
+                "error": "the mux finished but wrote no object"}
+    if original_uri:
+        try:
+            gcs.delete_object(original_uri)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not remove the silent original %s", original_uri, exc_info=True)
+    return {"status": "succeeded", "execution": execution, "gcs_uri": output_uri,
+            "bytes": size, "content_type": "video/mp2t", "original_name": "source.ts"}
 
 
 @mcp.tool

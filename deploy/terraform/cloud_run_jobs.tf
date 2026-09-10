@@ -99,6 +99,49 @@ resource "google_cloud_run_v2_job" "live_capture" {
   depends_on = [google_project_service.services]
 }
 
+# --- Audio remux (media_server.remux, same image as mcp-media) -----------------
+# A recorded HLS whose audio is a separate rendition lands silent as MPEG-TS;
+# this fetches the audio and stream-copies both into one recording, straight
+# back to the bucket. Minutes of network, no encode.
+resource "google_cloud_run_v2_job" "remux" {
+  project             = var.project_id
+  name                = "${local.prefix}-remux"
+  location            = var.region
+  deletion_protection = var.environment == "prod"
+  labels              = local.common_labels
+
+  template {
+    task_count = 1
+
+    template {
+      service_account = google_service_account.mcp_media.email
+      timeout         = "${var.remux_timeout_seconds}s"
+      max_retries     = 0
+
+      containers {
+        image   = "${local.image_base}/mcp-media:${var.image_tag}"
+        command = ["python", "-m", "media_server.remux"]
+
+        resources {
+          limits = {
+            cpu = "1"
+            # The audio rendition is held on the memory-backed disk while
+            # ffmpeg reads it; a day of 128 kbps is under 1.5 GB.
+            memory = "2Gi"
+          }
+        }
+
+        env {
+          name  = "GOOGLE_CLOUD_PROJECT"
+          value = var.project_id
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.services]
+}
+
 # The media service starts these and reads their executions. run.developer on
 # the job resource rather than on the project: it is the narrowest role that
 # carries run.jobs.runWithOverrides, and it reaches nothing else.
@@ -163,4 +206,12 @@ resource "google_cloud_scheduler_job" "live_tick" {
   }
 
   depends_on = [google_project_service.services]
+}
+
+resource "google_cloud_run_v2_job_iam_member" "media_runs_remux" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.remux.name
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.mcp_media.email}"
 }

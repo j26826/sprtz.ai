@@ -299,6 +299,12 @@ variable "hls_download_timeout_seconds" {
   default     = 14400
 }
 
+variable "remux_timeout_seconds" {
+  description = "Deadline for muxing a separate audio rendition into a downloaded HLS recording. Network-bound: a few minutes per hour of video."
+  type        = number
+  default     = 3600
+}
+
 variable "live_capture_timeout_seconds" {
   description = "Deadline for one live capture execution — the longest event plus its lead-in. Cloud Run Jobs allow up to 24 hours."
   type        = number
