@@ -121,6 +121,13 @@ def catalog():
                     c["status"] = "analyzing"
                     return {"claimed": True}
             return {"claimed": False}
+        if tool == "reset_live_chunk" and state.get("stale_resets") is not None:
+            for c in state["chunks"]:
+                if c["index"] == args["index"] and c["status"] == "analyzing" and args.get("stale_after_minutes"):
+                    c["status"] = "captured"
+                    state["stale_resets"].append(args)
+                    return {"reset": True}
+            return {"reset": False}
         if tool == "reset_live_chunk":
             for c in state["chunks"]:
                 if c["index"] == args["index"] and c["status"] == "failed" and c.get("attempts", 1) < 3:
@@ -294,6 +301,23 @@ class TestLive:
         assert seen["segment_uri"].endswith("chunk_0000.ts")
         warnings = [a for a in _calls(catalog, "emit_event") if a.get("level") == "warning"]
         assert any("without its audio" in w["message"] for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_a_chunk_claimed_by_a_tick_that_died_is_analysed_again(self, catalog):
+        _live(catalog)
+        catalog["stale_resets"] = []
+        catalog["chunks"] = [_chunk(0, 1, 50, status="analyzing", claimedAt=_iso(-40))]
+        analysis = SimpleNamespace(segment_summary="", competition="", venue="", discipline="",
+                                   discipline_confidence=0.0)
+
+        async def fake_analyse(uri, plan, total, sport, sem, language, segment_uri=""):
+            return plan, analysis, None
+
+        with patch.object(live, "_analyse_one", fake_analyse), \
+             patch.object(live, "merge_segment_results", lambda a, sport, job_id: []):
+            out = await live.live_tick("j1")
+        assert catalog["stale_resets"][0]["stale_after_minutes"] == live.LOCK_MINUTES
+        assert out["analysed_now"] == 1
 
     @pytest.mark.asyncio
     async def test_a_chunk_that_does_not_follow_on_is_said_so(self, catalog):
