@@ -91,18 +91,32 @@ async def _progress(job_id: str, stage_name: str, fraction: float = 1.0,
         logger.warning("could not report progress for %s", job_id, exc_info=True)
 
 
-def stage(name: str):
+def stage(name: str, skip_if_failed: bool = False):
     """Mark the job failed if a stage raises, instead of leaving it running.
 
     A stage that dies takes its progress reporting with it, so the job keeps the
     status it had and reads as still working for ever — which is what a
     container going down mid-response looks like from here. Recording the
     failure is what turns that into something the editor can see and retry.
+
+    ``skip_if_failed`` is for the stages that only make sense after the ones
+    before them: the pipeline is a sequence of agents, and a stage that
+    returned an error does not stop the next one being asked. When the
+    download failed, the analysis then found nothing, the finish wrote "the
+    analysis produced no moments" over the real reason, and the editor was
+    told to re-run a job whose link had expired. Ingest is left out — a
+    re-run starts there on a job that is failed by definition.
     """
     def decorate(func):
         @functools.wraps(func)
         async def run(*args, **kwargs):
             job_id = kwargs.get("job_id") or (args[0] if args else "")
+            if skip_if_failed and job_id:
+                job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+                if job.get("status") == "failed":
+                    logger.info("stage %s skipped: job %s already failed", name, job_id)
+                    return {"status": "skipped", "job_id": job_id,
+                            "error": job.get("error") or "an earlier stage failed"}
             try:
                 return await func(*args, **kwargs)
             except Exception as exc:
@@ -491,7 +505,7 @@ async def _await_transcode(job_id: str, transcoder_job: str, stage: str = "trans
     }
 
 
-@stage("analysis")
+@stage("analysis", skip_if_failed=True)
 async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "") -> dict:
     """Analyse the whole match and save the key moments it finds.
 
@@ -960,7 +974,7 @@ async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int =
     return saved
 
 
-@stage("clips")
+@stage("clips", skip_if_failed=True)
 async def propose_clips(
     job_id: str,
     max_clips: int,
@@ -1806,7 +1820,7 @@ async def save_clip_copy(
     )
 
 
-@stage("captions")
+@stage("captions", skip_if_failed=True)
 async def finalize_job(job_id: str) -> dict:
     """Check every clip is publishable and mark the job ready for export.
 

@@ -125,3 +125,66 @@ class TestReportingFailureIsSurvivable:
 
         assert result["status"] == "error"
         assert "the original problem" in result["error"]
+
+
+class TestAFailedRunStops:
+    """The pipeline is a sequence of agents; an error return does not stop the next one.
+
+    The download failed on an expired link, the analysis then found nothing,
+    and the finish wrote "the analysis produced no moments" over the real
+    reason — so the editor was told to re-run a job whose link was dead.
+    """
+
+    def _job(self, status, error=""):
+        async def call(server, tool, args=None):
+            if tool == "get_job":
+                return {"job_id": args["job_id"], "status": status, "error": error}
+            return {"status": "success"}
+        return AsyncMock(side_effect=call)
+
+    @pytest.mark.asyncio
+    async def test_a_later_stage_skips_a_job_that_already_failed(self):
+        ran = []
+
+        @pipeline.stage("clips", skip_if_failed=True)
+        async def later(job_id: str) -> dict:
+            ran.append(job_id)
+            return {"status": "success"}
+
+        mock = self._job("failed", "The HLS download failed: HTTP 403")
+        with patch.object(pipeline.mcp_client, "call_tool", mock):
+            out = await later("job-1")
+
+        assert out["status"] == "skipped"
+        assert "HTTP 403" in out["error"]
+        assert not ran
+        assert not _status_updates(mock), "the reason on the job is the earlier stage's"
+
+    @pytest.mark.asyncio
+    async def test_a_running_job_goes_through(self):
+        @pipeline.stage("clips", skip_if_failed=True)
+        async def later(job_id: str) -> dict:
+            return {"status": "success", "ran": True}
+
+        with patch.object(pipeline.mcp_client, "call_tool", self._job("analyzing")):
+            assert (await later("job-1")).get("ran")
+
+    @pytest.mark.asyncio
+    async def test_ingest_runs_on_a_failed_job_because_that_is_what_a_re_run_is(self):
+        @pipeline.stage("ingest")
+        async def first(job_id: str) -> dict:
+            return {"status": "success", "ran": True}
+
+        with patch.object(pipeline.mcp_client, "call_tool", self._job("failed", "old reason")):
+            assert (await first("job-1")).get("ran")
+
+    def test_the_stages_after_ingest_are_the_ones_that_skip(self):
+        from pathlib import Path
+
+        src = Path(pipeline.__file__).read_text()
+        for name in ("analysis", "clips"):
+            assert f'@stage("{name}", skip_if_failed=True)' in src, name
+        assert '@stage("ingest")\nasync def inspect_source' in src
+        # Playback is also a tool the editor calls on its own, on a job whose
+        # analysis may well have failed; it does not skip.
+        assert '@stage("playback")\nasync def prepare_playback' in src

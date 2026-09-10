@@ -151,6 +151,12 @@ same picture Gemini samples anyway at a fraction of the bytes. The download
 tool can make the proxy itself (`--proxy-1fps`) and the first release let it —
 that is one core decoding the whole recording after the download, an hour on
 a 3.75-hour match, where Transcoder spreads it and reads the bucket directly.
+The download job pulls sixteen segments at once (`MAX_PARALLEL`, streamed
+straight into GCS, so the bound is the instance's network); eight managed 28
+MB/s on a 6.9 GB recording. **The playlist is asked before the execution is
+started** (`check_playlist`): a signed CDN link expires — JW Player's carries
+`exp=` — and without the check the job spent a three-minute cold start to say
+"the job did not succeed", with the 403 only in its own log.
 The object goes on the job *before* the proxy is attempted, and a proxy that
 fails is a warning: the analysis then cuts the source into windows as it does
 for an upload. The Transcoder service agent needs write on the media bucket
@@ -1161,6 +1167,16 @@ publish all ran successfully on zero moments and marked the job complete. The
 sport is read off the job now, the stage instructions say plainly that a
 question is the end of the run rather than a pause, and `inspect_source` returns
 the sport so the stages after it inherit the fact instead of asking for it.
+
+**A stage that returns an error does not stop the next stage being asked.**
+The pipeline is a sequence of agents. When the download failed, the analysis
+ran on nothing, and `finalize_job` wrote "the analysis produced no moments"
+over the real reason — the editor was told to re-run a job whose link had
+expired. The stages after ingest are `@stage(..., skip_if_failed=True)`: they
+read the job first and return `skipped` when it is already `failed`, leaving
+the earlier stage's reason in place. Ingest is exempt because a re-run starts
+there on a job that is failed by definition, and so is playback, which an
+editor asks for on its own.
 
 **A run that analysed nothing is not a finished run.** "0 of 0 clips ready to
 publish" reads as a match with no highlights in it. `finalize_job` marks the job

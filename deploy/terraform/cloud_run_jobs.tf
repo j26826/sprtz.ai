@@ -36,9 +36,13 @@ resource "google_cloud_run_v2_job" "hls2mp4" {
           }
         }
 
+        # Segment fetches in flight at once, streamed straight into GCS so
+        # memory is not the bound — the instance's network is. Eight pulled a
+        # 6.9 GB recording at about 28 MB/s, well under what the instance and
+        # the CDN will do; raise further only after measuring the download.
         env {
           name  = "MAX_PARALLEL"
-          value = "8"
+          value = "16"
         }
         # Everything else — source URL, destinations, whether to make the
         # proxy — is set per execution by mcp/media_server/server.py.
