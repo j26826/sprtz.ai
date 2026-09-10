@@ -586,9 +586,16 @@ copy nobody edits.
 A missing key falls back to en-GB, never to the key itself: a half-translated
 locale should read as slightly English, not print `header.signOut` mid-sentence.
 Static chrome carries `data-i18n`; the chat and its cards call `t()` as they
-render, so switching language re-renders rather than reloads. The greeting is
-rebuilt only when it is the only message on screen — rewriting something the
-editor has already read would be worse than leaving it.
+render, so switching language re-renders rather than reloads. Messages already
+on screen keep their text — rewriting something the editor has already read
+would be worse than leaving it in the previous language.
+
+**There is no greeting.** A new session used to open with an agent card
+("Upload a match and I will watch all of it…") and three action buttons; the
+scope card asks the only question a new session has, and the suggestion chips
+under the composer carry the same three prompts. The card was removed at the
+editor's request, and with it the locale switch's special case for rebuilding
+it.
 
 `STAGES` in `app.js` mirrors `STAGE_SPANS` in the agent's pipeline. Change one
 and change both.

@@ -111,9 +111,6 @@ const STRINGS = {
     'auth.notEnabled': 'That sign-in method is not enabled on this project.',
     'auth.failed': 'Sign-in failed.',
 
-    'greeting':
-      'Upload a match and I will watch all of it, mark every moment that clears '
-      + 'confidence, and cut what you ask for.\n\nTell me what you want and I will cut it.',
     'action.ingest': 'Ingest a new game',
     'action.processing': "What's still processing?",
     'action.bestMoments': 'Show me the best moments',
@@ -308,9 +305,6 @@ const STRINGS = {
       + 'they were written in.',
     // Only what actually differs. Everything else falls through to en-GB.
     'signin.blurb': 'Sign in to analyze a match and cut it into short-form clips.',
-    'greeting':
-      'Upload a match and I will watch all of it, mark every moment that clears '
-      + 'confidence, and cut what you ask for.\n\nTell me what you want and I will cut it.',
     'ingest.start': 'Start analysis',
     'ingest.analysing': 'Analyzing…',
     'live.chunks': 'chunks analyzed',
@@ -417,9 +411,6 @@ const STRINGS = {
     'auth.notEnabled': 'Diese Anmeldemethode ist in diesem Projekt nicht aktiviert.',
     'auth.failed': 'Anmeldung fehlgeschlagen.',
 
-    'greeting':
-      'Laden Sie ein Spiel hoch. Ich sehe es vollständig durch, markiere jede Szene, '
-      + 'die sicher genug ist, und schneide, was Sie brauchen.\n\nSagen Sie mir, was Sie wollen.',
     'action.ingest': 'Neues Spiel einlesen',
     'action.processing': 'Was läuft gerade noch?',
     'action.bestMoments': 'Zeig mir die besten Szenen',
@@ -703,9 +694,6 @@ const STRINGS = {
     'auth.notEnabled': 'Questo metodo di accesso non è abilitato in questo progetto.',
     'auth.failed': 'Accesso non riuscito.',
 
-    'greeting':
-      'Carica una partita: la guardo tutta, segno ogni azione che supera la soglia '
-      + 'di confidenza e monto quello che mi chiedi.\n\nDimmi cosa ti serve.',
     'action.ingest': 'Carica una nuova partita',
     'action.processing': 'Cosa è ancora in lavorazione?',
     'action.bestMoments': 'Mostrami le azioni migliori',
@@ -989,10 +977,6 @@ const STRINGS = {
     'auth.notEnabled': "Cette méthode de connexion n'est pas activée sur ce projet.",
     'auth.failed': 'Échec de la connexion.',
 
-    'greeting':
-      "Importez un match : je le regarde en entier, je marque chaque action qui "
-      + "dépasse le seuil de confiance, et je monte ce que vous demandez.\n\n"
-      + 'Dites-moi ce qu’il vous faut.',
     'action.ingest': 'Importer un nouveau match',
     'action.processing': 'Qu’est-ce qui est encore en cours ?',
     'action.bestMoments': 'Montrez-moi les meilleures actions',
@@ -1277,9 +1261,6 @@ const STRINGS = {
     'auth.notEnabled': 'Ese método de inicio de sesión no está habilitado en este proyecto.',
     'auth.failed': 'No se pudo iniciar sesión.',
 
-    'greeting':
-      'Sube un partido: lo veo entero, marco cada jugada que supera el umbral de '
-      + 'confianza y monto lo que me pidas.\n\nDime qué necesitas.',
     'action.ingest': 'Cargar un partido nuevo',
     'action.processing': '¿Qué sigue en proceso?',
     'action.bestMoments': 'Muéstrame las mejores jugadas',
