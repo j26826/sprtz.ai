@@ -32,7 +32,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                original_name: str, size_bytes: int, content_type: str = "",
                metadata_language: str = "en", context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "", event_start: str = "",
-               event_end: str = "", chunk_sec: int = 0) -> dict:
+               event_end: str = "", chunk_sec: int = 0, make_clips: bool = True) -> dict:
     """Open a new analysis job for an uploaded video, an HLS URL, or a live event.
 
     Args:
@@ -48,6 +48,8 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         context_urls: Pages the editor says are about this recording, for grounding.
         kind: "upload", "hls" (a playlist to download first) or "live" (a
             playlist to record between two times).
+        make_clips: Whether to cut clips and write their copy after the
+            analysis. False analyses the match and stops at the moments.
         hls_url: The playlist URL, for hls and live.
         event_start: ISO 8601 start of a live event.
         event_end: ISO 8601 end of a live event.
@@ -57,7 +59,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         return {"status": "success", **store.create_job(
             job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
             content_type, metadata_language, context_urls or [],
-            kind, hls_url, event_start, event_end, chunk_sec)}
+            kind, hls_url, event_start, event_end, chunk_sec, make_clips=make_clips)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 

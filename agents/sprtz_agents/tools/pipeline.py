@@ -1165,6 +1165,10 @@ async def propose_clips(
     lead-in and follow-through for each moment type, and saves one suggestion per
     clip. Captions are written separately by the caption stage.
 
+    Skipped entirely when the match was registered with clips turned off: a
+    competition day is hundreds of moments, and an editor who wants the log
+    does not want twenty suggestions and a Gemini call each for their copy.
+
     Args:
         job_id: Identifier of the job.
         max_clips: How many suggestions to produce.
@@ -1173,6 +1177,12 @@ async def propose_clips(
     Returns:
         dict listing the clips that were created.
     """
+    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+    if not job.get("makeClips", True):
+        await _emit(job_id, "clips",
+                    "Clips were not asked for on this match; the moments are the result.")
+        return {"status": "skipped", "job_id": job_id, "clips": [],
+                "reason": "clips were not requested for this match"}
     job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     sport = job.get("sport") or "handball"
     duration = float((job.get("media") or {}).get("durationSec") or 0.0)
@@ -2046,9 +2056,26 @@ async def finalize_job(job_id: str) -> dict:
     # whose analysis never happened finished every later stage successfully and
     # reported "0 of 0 clips ready", which reads as a match with no highlights
     # in it rather than as an analysis that did not run.
-    counts = (await mcp_client.call_tool(
-        "catalog", "get_job", {"job_id": job_id})).get("counts") or {}
+    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+    counts = job.get("counts") or {}
     analysed = int(counts.get("moments") or 0)
+
+    # No clips because none were asked for is a finished run, not an empty
+    # one: the moments are what this match was analysed for.
+    if not job.get("makeClips", True):
+        await mcp_client.call_tool("catalog", "update_job_status", {
+            "job_id": job_id,
+            "status": "ready" if analysed else "needs_attention",
+            "stage": "complete", "progress": 100,
+        })
+        await _emit(job_id, "publish",
+                    f"{analysed} moments found. Clips were not asked for on this match.",
+                    level="info" if analysed else "warning", moments=analysed)
+        return {"status": "success", "job_id": job_id,
+                "job_status": "ready" if analysed else "needs_attention",
+                "clips_total": 0, "clips_ready": 0, "clips_with_problems": [],
+                "moments": analysed, "clips_requested": False}
+
     if not clips and not analysed:
         reason = (
             "The analysis stage produced no moments, so there was nothing to cut. "

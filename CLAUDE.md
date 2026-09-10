@@ -1362,6 +1362,17 @@ and the one thing cancelling promises not to do is report the run as broken. Ing
 there on a job that is failed by definition, and so is playback, which an
 editor asks for on its own.
 
+**A match can be analysed without being cut.** A competition day is hundreds
+of moments, and an editor who wants the log does not want twenty clip
+suggestions and a Gemini call each for their copy. `makeClips` is fixed on
+the job at registration — the same reasoning as the metadata language: what
+a match was analysed *for* does not change because the panel's checkbox did.
+`propose_clips` returns `skipped` without reading the moments, the caption
+stage then finds no clips to write for, and `finalize_job` reports the run
+`ready` on its moments rather than failing it for the clips nobody asked
+for. Absent on an older job, it means True, so nothing already on the desk
+changes.
+
 **A run that analysed nothing is not a finished run.** "0 of 0 clips ready to
 publish" reads as a match with no highlights in it. `finalize_job` marks the job
 `failed` with a reason when there are no clips *and* no moments — a quiet match

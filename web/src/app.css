@@ -1401,6 +1401,13 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 /* ── Context links: at upload, and on analyse-again ────────────────────── */
 
+/* The one question in the ingest panel that is a choice rather than a value:
+   a checkbox with its label and hint stacked beside it. */
+.ingest-clips { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; }
+.ingest-clips input { margin-top: 3px; flex: none; }
+.ingest-clips .field-label { display: block; }
+.ingest-clips .setting-hint { margin-top: 2px; }
+
 .ingest-context { margin-top: var(--space-4); }
 .ctx-textarea {
   width: 100%;
