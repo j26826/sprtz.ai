@@ -26,6 +26,8 @@ from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+import requests
+
 from media_server import ffmpeg_ops, gcs, runjobs, transcoder
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
@@ -639,6 +641,33 @@ def _proxy_prefix(job_id: str) -> str:
     return f"jobs/{job_id}/proxy/"
 
 
+PLAYLIST_CHECK_TIMEOUT = 15
+
+
+def check_playlist(hls_url: str) -> str:
+    """Why a playlist URL cannot be downloaded, or "" when it answers.
+
+    A signed CDN link expires, and the download job then costs a three-minute
+    cold start to report "the job did not succeed" with the 403 in its own
+    log. One small request here says which HTTP status the URL answers, in
+    seconds, before anything is started.
+    """
+    try:
+        with requests.get(hls_url, stream=True, timeout=PLAYLIST_CHECK_TIMEOUT,
+                          headers={"Range": "bytes=0-1023"}) as resp:
+            if resp.status_code >= 400:
+                reason = f"The playlist URL answered HTTP {resp.status_code} {resp.reason}"
+                if resp.status_code in (401, 403):
+                    reason += " — a signed link that has expired, or one that needs a token"
+                return reason + "."
+            head = next(resp.iter_content(1024), b"") or b""
+    except requests.RequestException as exc:
+        return f"The playlist URL could not be fetched: {type(exc).__name__}: {exc}."
+    if b"#EXTM3U" not in head:
+        return "The URL answered, but not with an HLS playlist (no #EXTM3U at the top)."
+    return ""
+
+
 @mcp.tool
 def download_hls(job_id: str, hls_url: str) -> dict:
     """Start downloading an HLS (.m3u8) source into the uploads bucket.
@@ -664,6 +693,9 @@ def download_hls(job_id: str, hls_url: str) -> dict:
         return {"status": "error", "error": "HLS2MP4_JOB is not configured."}
     if not UPLOADS_BUCKET:
         return {"status": "error", "error": "UPLOADS_BUCKET is not configured."}
+    problem = check_playlist(hls_url)
+    if problem:
+        return {"status": "error", "error": problem, "job_id": job_id}
     try:
         # Anything already here is from an attempt that did not finish.
         gcs.delete_prefix(UPLOADS_BUCKET, _hls_source_prefix(job_id))
