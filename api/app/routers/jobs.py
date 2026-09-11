@@ -718,7 +718,12 @@ async def get_playback(
     """
     job = await _load_job(job_id, user)
     playback = job.get("playback") or {}
-    if not playback.get("hlsUrl"):
+    # A live event plays from the stream its recorder writes as it goes, and
+    # prefers it to a package even when one exists: a package made mid-event is
+    # a snapshot of the chunks at that moment, and every moment found after it
+    # would seek past its end. The stream is always the whole event so far.
+    live = _live_stream(job)
+    if not (live or playback.get("hlsUrl")):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Playback is still being prepared for this job.",
@@ -731,6 +736,7 @@ async def get_playback(
             key_name=settings.cdn_signing_key_name,
             key_value=settings.cdn_signing_key,
             ttl_seconds=settings.cdn_signed_url_ttl,
+            **({"folder": "live", "playlist": "index.m3u8"} if live else {}),
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(
@@ -772,10 +778,30 @@ async def get_playback(
         "hls_url": signed["hls_url"],
         "poster_url": signed["poster_url"],
         "expires_at": signed["expires_at"],
-        "renditions": playback.get("renditions", []),
+        "renditions": ["source"] if live else playback.get("renditions", []),
         "segment_seconds": playback.get("segmentSeconds", 2),
         "duration_sec": (job.get("media") or {}).get("durationSec", 0.0),
+        # "live" while the recorder is still writing the stream, "recorded" once
+        # it has finished, "package" for an encode.
+        "source": ("live" if live == "recording" else "recorded") if live else "package",
     }
+
+
+def _live_stream(job: dict) -> str:
+    """Whether a live event has a stream to play, and whether it is still growing.
+
+    Returns "recording", "finished", or "" when there is none. Read from what
+    the recorder reported rather than from the bucket: it names the playlist
+    only once a segment is in it, and a playlist with nothing listed is a
+    player that spins for ever. The URL is built from the job id, never from
+    the stored path, so nothing written to the job can point a player elsewhere.
+    """
+    if job.get("kind") != "live":
+        return ""
+    capture = ((job.get("live") or {}).get("capture") or {})
+    if not capture.get("stream"):
+        return ""
+    return "recording" if capture.get("state") == "recording" else "finished"
 
 
 @router.get("/{job_id}/moments")

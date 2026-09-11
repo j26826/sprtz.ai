@@ -11,6 +11,7 @@ from sprtz_agents.tools.rides import (
     check_total,
     fuse,
     high_scoring,
+    is_placeholder,
     match_watchlist,
     normalise_name,
     untrusted,
@@ -224,3 +225,45 @@ class TestAnUnrecognisedTestType:
     def test_an_empty_test_type_is_still_a_straight_test(self):
         rides = [{"order": 1, "test_type": "", "total_pct": 76.0, "score_check": "ok"}]
         assert [r["order"] for r in high_scoring(rides)] == [1]
+
+
+class TestARoundNobodyCouldName:
+    """A placeholder is not a reading.
+
+    The model writes "unknown" where it can see a round and cannot read the
+    graphic — the prompt asks for that rather than a guess — and it was voted in
+    as a name. The LeMieux day's last ride was a rider called "unknown" on a
+    horse called "unknown", with three moments credited to them.
+    """
+
+    @pytest.mark.parametrize("name", [
+        "unknown", "Unknown", "UNKNOWN", "unknown rider", "Unknown Horse",
+        "n/a", "N/A", "none", "not visible", "-", "?", "", "  "])
+    def test_these_say_nobody_was_identified(self, name):
+        assert is_placeholder(name)
+
+    @pytest.mark.parametrize("name", [
+        "Bryony Goodwin", "Krack DE", "Sheepcote Just Daisy", "Unkas", "Nonesuch"])
+    def test_these_are_names(self, name):
+        # A name that merely starts like a placeholder is still a name.
+        assert not is_placeholder(name)
+
+    def test_a_round_read_only_as_unknown_is_named_nobody(self):
+        assert canonical_identity([("unknown", "unknown"), ("Unknown", "UNKNOWN")]) == ("", "")
+
+    def test_a_placeholder_never_outvotes_a_real_reading(self):
+        readings = [("unknown", "Krack DE"), ("unknown", "Krack DE"), ("Bryony Goodwin", "unknown")]
+        assert canonical_identity(readings) == ("Bryony Goodwin", "Krack DE")
+
+    def test_unnamed_fragments_still_make_one_ride_not_several(self):
+        """This decides what a ride is called, not which fragments are one ride:
+        blanking the names before fusion would stop adjacent unnamed fragments
+        joining, and one round would come apart into as many as it had windows."""
+        rides = fuse([
+            frag(0, 0, 300, "Bryony Goodwin", "Krack DE"),
+            frag(4, 1200, 1450, "unknown", "unknown"),
+            frag(5, 1450, 1500, "Unknown", "UNKNOWN"),
+        ])
+        assert len(rides) == 2
+        assert (rides[1]["rider"], rides[1]["horse"]) == ("", "")
+        assert (rides[1]["start_sec"], rides[1]["end_sec"]) == (1200.0, 1500.0)

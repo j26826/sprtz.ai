@@ -273,7 +273,44 @@ chunk is small, unlike a whole recording) before `_analyse_one`, reads the
 thumbnails from it, and records `muxedUri` so a retried chunk is not muxed
 twice. A mux that fails is a warning and the chunk is analysed silent.
 
-**A live event's chunks become one recording so it can be watched.** It has
+**A live event is a stream while it is on.** It had nothing to play until
+someone packaged it, and packaging is an encode of the whole recording — so
+every moment found while the event was on opened on "not packaged for playback
+yet", eleven times on the LeMieux day with nobody pressing the button. The
+recorder already holds each segment as it arrives, so it also writes it into
+the **HLS bucket** under `jobs/{job}/live/`, with an `index.m3u8` beside them
+(`LiveStream`, pure). The CDN serves that prefix and the signed cookie is
+already scoped to `/jobs/{job}/`, so `/playback` points the player at it with
+no encode and no new grant — the media service account already held
+`objectAdmin` on that bucket. It sits beside `hls/` rather than in it because an
+encode clears `hls/` before writing. Four details carry it:
+
+- **Time on the playlist is time on the event.** A segment that could not be
+  fetched keeps its place as `EXT-X-GAP`, and segments that slid past unfetched
+  are held at the target duration; leaving them out would pull everything after
+  earlier and every later moment would open on the wrong seconds. A gap before
+  the first segment is not written, since the event's clock starts there.
+- **The playlist is uncacheable** (`no-cache, no-store`). The CDN caches purely
+  by origin headers, so that header is the whole arrangement; segments are
+  immutable and cache for a day.
+- **`EVENT`, not a sliding window**, so the whole day stays seekable; the finish
+  adds `EXT-X-ENDLIST` and it becomes a plain VOD. A restarted recorder reads
+  the playlist back and carries it on — never ended, or a player would be told
+  an event that is still on had finished.
+- **The recording comes first.** A failed stream write is a warning and nothing
+  more: a recorder that dropped a segment because its playback copy failed would
+  be the worst trade available.
+
+`/playback` prefers the stream to a package for a live event: a package made
+mid-event is a snapshot of the chunks at that moment, and every moment found
+after it would seek past its end. It reports `source` as `live`, `recorded` or
+`package`, and builds the URL from the job id rather than the stored path. The
+segments are written twice — once for the analysis, once for the player — so a
+live event costs about twice its size in storage. A separate audio rendition is
+not in the stream: JW-style events play video-only there, and the package and
+the per-chunk mux still carry their audio.
+
+**A live event's chunks also become one recording**, for what comes after. It has
 no source video — it has a row of five-minute chunks — so `prepare_playback`
 refused it with "has no source video" and every moment the analysis had
 found opened on "This match has not been packaged for playback yet".
@@ -1768,6 +1805,17 @@ That consensus is **weighted by confidence, not counted**. An eventing broadcast
 shows all three phases, so segments legitimately disagree; counting alone lets
 four unsure glimpses of the dressage phase outvote two confident cross-country
 ones.
+
+**A placeholder is not a name.** The model writes "unknown" where it can see a
+round and cannot read the graphic — the prompt asks for that rather than a
+guess — and `canonical_identity` voted it in, so the LeMieux day ended on a
+rider called "unknown" on a horse called "unknown", with moments credited to
+them. `is_placeholder` leaves those readings out of the vote: a round nobody
+could name is named nobody and shows as a dash. It decides what a ride is
+called, not which fragments are the same ride — blanking names before fusion
+would stop adjacent unnamed fragments joining, and one round would come apart
+into as many as it had windows. Because every tick re-fuses the day from the
+stored fragments, an event already recorded heals on its next fusion.
 
 **An unrecognised test type keeps its place, and loses only its bar.**
 `high_scoring` looked its threshold up by exact lowercase string and skipped

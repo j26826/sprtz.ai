@@ -82,6 +82,28 @@ def _similar(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+# What the model writes when it can see there is a competitor and cannot read
+# who. The prompt asks for exactly that rather than a guess — an invented name
+# is worse than a blank, because an editor publishes it — and "unknown" is the
+# answer it gives. Compared after normalise_name, so case and punctuation do
+# not matter.
+_PLACEHOLDERS = frozenset({
+    "unknown", "unk", "n a", "na", "none", "nil", "not visible", "not shown",
+    "not legible", "illegible", "unreadable", "unidentified", "unnamed",
+    "no name", "tbc", "tba", "rider", "horse",
+})
+
+
+def is_placeholder(name: str) -> bool:
+    """Whether a reading says nobody was identified rather than naming anyone.
+
+    "Unknown rider" and "unknown horse" count too: the word is the model's way
+    of filling a field it was told not to guess, not a competitor's name.
+    """
+    key = normalise_name(name)
+    return not key or key in _PLACEHOLDERS or key.startswith("unknown ")
+
+
 def canonical_identity(readings: list[tuple[str, str]]) -> tuple[str, str]:
     """The spelling a group of readings agrees on.
 
@@ -89,9 +111,17 @@ def canonical_identity(readings: list[tuple[str, str]]) -> tuple[str, str]:
     correct reading is the one that recurs. Rider and horse are voted
     separately, because a segment often catches one line of the graphic and not
     the other.
+
+    **A placeholder is not a reading.** The model writes "unknown" where it can
+    see a round and cannot read the graphic, and that used to be voted in as a
+    name — the LeMieux day's last ride was a rider called "unknown" on a horse
+    called "unknown", with three moments credited to them. It is left out of the
+    vote, so a round nobody could name is named nobody and shows as a dash.
+    Placeholders still group with each other as they did — this decides what a
+    ride is called, not which fragments are the same ride.
     """
-    riders = Counter(r.strip() for r, _ in readings if r.strip())
-    horses = Counter(h.strip() for _, h in readings if h.strip())
+    riders = Counter(r.strip() for r, _ in readings if not is_placeholder(r))
+    horses = Counter(h.strip() for _, h in readings if not is_placeholder(h))
     rider = riders.most_common(1)[0][0] if riders else ""
     horse = horses.most_common(1)[0][0] if horses else ""
     return rider, horse
