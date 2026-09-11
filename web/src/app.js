@@ -40,7 +40,8 @@ import {
   clampTo, nextSpeed, playRange, shortClock, widen,
 } from './player.js';
 import {
-  filterByTypes, groupByRide, momentTypesIn, notesForRide, rideNamedIn, ridesAsked,
+  countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
+  rideNamedIn, ridesAsked,
 } from './ridegroups.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
@@ -861,7 +862,8 @@ function momentTile(m, opts = {}) {
     // a ride group, whose heading already says it once for every tile.
     m.rider && !opts.inRide
       ? `${m.startNumber ? `#${m.startNumber} ` : ''}${m.identitySource === 'schedule' ? '~' : ''}${m.rider}` : '',
-    m.label || m.momentType,
+    // With the movement on the frame it is not in the line under it as well.
+    opts.typeBadge ? '' : (m.label || m.momentType),
     `${Math.round(m.endSec - m.startSec)}s`,
     m.confidence == null ? '' : `${Math.round(m.confidence * 100)}%`,
   ].filter(Boolean).join(' \u00b7 ');
@@ -877,6 +879,7 @@ function momentTile(m, opts = {}) {
           ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
           : '<span class="thumb-stripes"></span>'}
         ${clip ? `<span class="tile-star" title="${esc(t('moment.inReel'))}">${STAR}</span>` : ''}
+        ${opts.typeBadge ? `<span class="thumb-type">${esc(m.label || m.momentType || '')}</span>` : ''}
         <span class="thumb-clock">${clock(m.startSec)}</span>
       </button>
       ${opts.game ? `<div class="tile-game">${esc(opts.game.title || m.jobId || '')}${
@@ -885,7 +888,7 @@ function momentTile(m, opts = {}) {
       <div class="tile-meta">${esc(meta)}</div>
       ${m.rerankReason ? `<div class="tile-why">${esc(m.rerankReason)}</div>` : ''}
       <div class="tile-actions">
-        <button class="${opts.bigDetails ? 'btn-solid' : 'link-btn'}" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-details="${esc(m.momentId)}"`}>${esc(t('moment.details'))}</button>
+        <button class="${opts.bigDetails ? 'btn-accent' : 'link-btn'}" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-details="${esc(m.momentId)}"`}>${esc(t('moment.details'))}</button>
         ${opts.add ? `<button class="btn-outline" data-desk-add="${esc(opts.add)}">${esc(t('moment.add'))}</button>` : clip
           ? `<button class="btn-outline" data-remove-clip="${esc(m.momentId)}">${esc(t('moment.remove'))}</button>`
           : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
@@ -1024,11 +1027,9 @@ function ridesFor(msg) {
  * every tile under each of them. So the two axes are separated: the rail is
  * the running order and stays where it is while the pane changes, the type
  * filter crosses every ride at once, and the pane is one ride's moments.
- * Choosing Half-pass narrows the rail to the riders who rode one, which is the
- * question that filter is really asking.
  *
- * The head is unchanged — what narrowed the rides, how many of the event's
- * that left, and the sort, which still decides the order inside the pane.
+ * The count is moments rather than rides, because the pane is what it
+ * describes: this ride's visible moments against everything the event holds.
  */
 function ridesCard(msg, index) {
   const found = ridesFor(msg);
@@ -1038,7 +1039,7 @@ function ridesCard(msg, index) {
     return emptyCard(`${found.empty}${note}`);
   }
 
-  const { asked, event, total } = found;
+  const { asked, event } = found;
   // A type the moments no longer carry is dropped rather than left selected:
   // the filter lives on the message and outlives a re-render, while an
   // analysis still running changes what there is to choose from.
@@ -1047,37 +1048,41 @@ function ridesCard(msg, index) {
   const shown = filterByTypes(asked.groups, picked);
   const current = shown.find((g) => String(g.ride.order) === String(msg.ride)) || shown[0];
   if (!current) return emptyCard(t('rides.noMatch'));
+  // The type counts are of this ride before the type filter — of the live
+  // moments the tiles are drawn from, not the tree's own list, or a count of
+  // three beside a filter that yields two tiles reads as a broken card.
+  const unfiltered = asked.groups.find((g) => g.ride === current.ride) || current;
 
+  const all = asked.groups.reduce((n, g) => n + g.moments.length, 0);
   const bar = asked.score ? `${asked.score.inclusive ? '≥' : '>'} ${asked.score.min}%` : '';
   const title = [t('rides.title'), ...asked.names, bar].filter(Boolean).join(' · ');
-  const count = shown.length === total
-    ? String(total) : `${shown.length} ${t('pager.of')} ${total}`;
   const sort = msg.sort === 'time' ? 'time' : 'score';
 
   return `
-    <div class="list">
+    <div class="list rides-board-card">
       <div class="list-head">
         <div class="panel-head-title">${esc(title)}</div>
         <div class="panel-head-meta">
-          <span class="list-count">${esc(count)}</span>
-          ${['score', 'time'].map((key) => `
-            <button class="link-btn" data-sort="${index}:${key}"
-                    aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
+          <span class="list-count">${current.moments.length} ${esc(t('pager.of'))} ${all}</span>
+          <div class="segmented">
+            ${['score', 'time'].map((key) => `
+              <button class="seg-btn" data-sort="${index}:${key}"
+                      aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
+          </div>
         </div>
       </div>
       ${eventHead(event, { prominent: true })}
       ${asked.unchecked
         ? `<div class="ride-group-empty">${esc(t('rides.unchecked').replace('{n}', String(asked.unchecked)))}</div>`
         : ''}
-      ${typeFilter(types, picked, index, Boolean(msg.typesOpen))}
       <div class="ride-board">
         <div class="ride-rail">
-          <div class="ride-tabs-head">${esc(t('rides.runningOrder'))}</div>
-          <div class="ride-tabs" role="tablist" aria-label="${esc(t('rides.runningOrder'))}">
+          <div class="ride-tabs-head">${esc(t('rides.riderHorseTiming'))}</div>
+          <div class="ride-tabs" role="tablist" aria-label="${esc(t('rides.riderHorseTiming'))}">
             ${shown.map((group) => rideTab(group, index, current)).join('')}
           </div>
         </div>
-        ${ridePane(current, index, msg)}
+        ${ridePane(current, index, msg, types, picked, unfiltered.moments)}
       </div>
     </div>`;
 }
@@ -1089,57 +1094,74 @@ function ridesCard(msg, index) {
  * A dropdown rather than a row of chips because a class contains a dozen
  * movements and a row of them becomes a second navigation competing with the
  * rail — the rail is what the eye follows here, and the filter should stay one
- * control. Multi-select because "half-pass and pirouette" is one question
- * rather than two.
+ * control. What is chosen comes back out as chips beside it, so a narrowed
+ * board says what narrowed it without being opened.
  *
- * The types are the ones the moments actually carry (`momentTypesIn`), not the
- * sport's whole catalogue: a filter offering two dozen movements that match
- * nothing is a filter nobody trusts. Nothing chosen reads as the whole ride,
- * because that is what the card shows before anyone touches it.
+ * The list is the whole event's types (`momentTypesIn`), so it does not
+ * reshuffle when another rider is opened; the number beside each is the open
+ * ride's (`countTypesIn`), because that is the ride being looked at. They are
+ * the types the moments actually carry rather than the sport's catalogue: a
+ * dressage catalogue is thirty movements where a class holds six, and a filter
+ * offering two dozen choices that match nothing is one nobody trusts.
  *
  * Open state lives on the message, as the page and the sort do: render()
  * rebuilds the transcript, so anything the DOM would have held is lost.
  */
-function typeFilter(types, picked, index, open) {
+function typeFilter(types, picked, index, open, moments) {
   if (!types.length) return '';
+  const counts = countTypesIn(moments);
   const chosen = types.filter((ty) => picked.includes(ty.key));
   let label = t('rides.allTypes');
-  if (chosen.length && chosen.length <= 2) label = chosen.map((ty) => ty.label).join(', ');
-  else if (chosen.length) label = t('rides.typesPicked').replace('{n}', String(chosen.length));
-
-  const option = (key, name, count, on) => `
-    <button class="type-opt" data-type-pick="${esc(`${index}:${key}`)}" aria-pressed="${on}">
-      <span class="type-opt-box" aria-hidden="true"></span>
-      <span class="type-opt-name">${esc(name)}</span>
-      ${count == null ? '' : `<span class="list-count">${count}</span>`}
-    </button>`;
+  if (chosen.length === 1) label = chosen[0].label;
+  else if (chosen.length) label = t('rides.typesSelected').replace('{n}', String(chosen.length));
 
   return `
     <div class="ride-filter">
       <div class="type-filter">
-        <button class="btn-outline type-filter-toggle" data-type-menu="${index}"
-                aria-expanded="${open}">${esc(`${t('rides.types')}: ${label}`)}</button>
+        <button class="type-filter-toggle" data-type-menu="${index}" aria-expanded="${open}">
+          <span class="type-filter-label">${esc(label)}</span>
+          <span class="type-filter-caret" aria-hidden="true">${open ? '▲' : '▼'}</span>
+        </button>
         ${open ? `
           <div class="type-menu" role="group" aria-label="${esc(t('rides.types'))}">
-            ${option('', t('rides.allTypes'), null, !chosen.length)}
-            ${types.map((ty) => option(ty.key, ty.label, ty.count, picked.includes(ty.key))).join('')}
+            <div class="type-menu-head">
+              <span class="type-menu-title">${esc(t('rides.types'))}</span>
+              <button class="link-btn" data-type-pick="${index}:">${esc(t('rides.clear'))}</button>
+            </div>
+            <div class="type-menu-list">
+              ${types.map((ty) => `
+                <button class="type-opt" data-type-pick="${esc(`${index}:${ty.key}`)}"
+                        aria-pressed="${picked.includes(ty.key)}">
+                  <span class="type-opt-box" aria-hidden="true"></span>
+                  <span class="type-opt-name">${esc(ty.label)}</span>
+                  <span class="list-count">${counts[ty.key] || 0}</span>
+                </button>`).join('')}
+            </div>
           </div>` : ''}
       </div>
+      ${chosen.map((ty) => `
+        <button class="type-chip" data-type-pick="${esc(`${index}:${ty.key}`)}"
+                title="${esc(t('rides.removeType'))}">
+          <span>${esc(ty.label)}</span><span class="type-chip-x" aria-hidden="true">&times;</span>
+        </button>`).join('')}
     </div>`;
 }
+
+
+const rideTabId = (index, ride) => `ride-tab-${index}-${ride.order ?? 'x'}`;
 
 
 /**
  * One ride as a tab: who rode, on what, and when they were in the arena.
  *
- * Three lines of the ride table's own row, in its order — running number, then
- * the rider, then the horse and the span. The rider is what the rail is read
- * down, so it is the line in the sans; the horse and the clock qualify it and
- * take the mono, as every reading in this app does.
+ *     Loretta Joynson
+ *     Tresais Lancelot · 2:25:15–2:31:58            5
+ *
+ * The rider is what the rail is read down, so it is the line in the sans; the
+ * horse and the span qualify it and take the mono, as every reading in this
+ * app does. The count is what the type filter leaves, so a rider who did none
+ * of the chosen movement reads zero rather than disappearing.
  */
-const rideTabId = (index, ride) => `ride-tab-${index}-${ride.order ?? 'x'}`;
-
-
 function rideTab({ ride, moments }, index, current) {
   const who = `${ride.startNumber ? `#${ride.startNumber} ` : ''}${
     ride.identitySource === 'schedule' ? '~' : ''}${ride.rider || '—'}`;
@@ -1152,7 +1174,6 @@ function rideTab({ ride, moments }, index, current) {
             id="${esc(rideTabId(index, ride))}"
             data-ride-tab="${esc(`${index}:${ride.order ?? ''}`)}"
             ${published ? `title="${esc(published)}"` : ''}>
-      <span class="ride-num">${esc(String(ride.order ?? ''))}</span>
       <span class="ride-who">
         <span class="ride-rider">${esc(who)}</span>
         <span class="ride-horse">${esc(under)}</span>
@@ -1163,16 +1184,19 @@ function rideTab({ ride, moments }, index, current) {
 
 
 /**
- * The open ride: how it scored, and its moments.
+ * The open ride: the type filter, how it scored, and its moments.
  *
  * The heading carries what the group heading used to — the test, the total and
  * the placing, with the check on a total that failed one — and Watch, which
- * puts the whole ride in the player. The tiles below it are the same tiles the
- * flat list shows, paged, with Details raised to a solid button: opening a
- * moment's record is the thing a ride is read for, and a link beside a
- * bordered Add button reads as the lesser of the two.
+ * puts the whole ride in the player. The tiles are the same tiles the flat
+ * list shows, with the movement on the frame and Details raised to a button
+ * across the foot of each: opening a moment's record is what a ride is read
+ * for, and a link beside a bordered Add read as the lesser of the two.
+ *
+ * A ride with nothing of the chosen types says so and says how to get back,
+ * because an empty pane beside a rail full of names reads as a broken card.
  */
-function ridePane({ ride, moments }, index, msg) {
+function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide) {
   const result = ride.result || {};
   const check = rideCheck({ score_check: result.scoreCheck });
   const reading = [
@@ -1182,8 +1206,17 @@ function ridePane({ ride, moments }, index, msg) {
   ].filter(Boolean).join(' · ');
   const view = pageOf(moments, msg.page);
 
+  let body = `<div class="ride-group-empty">${esc(t('ride.none'))}</div>`;
+  if (moments.length) {
+    body = `<div class="tile-row">${view.slice
+      .map((m) => momentTile(m, { inRide: true, bigDetails: true, typeBadge: true })).join('')}</div>`;
+  } else if (picked.length) {
+    body = `<div class="ride-group-empty">${esc(t('rides.noTypeHere'))}</div>`;
+  }
+
   return `
     <div class="ride-pane" role="tabpanel" aria-labelledby="${esc(rideTabId(index, ride))}">
+      ${typeFilter(types, picked, index, Boolean(msg.typesOpen), ofThisRide)}
       <div class="ride-pane-head">
         <div class="ride-who">
           <span class="ride-rider">${esc(ride.rider || '—')}</span>
@@ -1195,10 +1228,7 @@ function ridePane({ ride, moments }, index, msg) {
         <button class="btn-outline" data-watch-ride="${esc(String(ride.order ?? ''))}"
                 >${esc(t('ride.watch'))}</button>
       </div>
-      ${moments.length
-    ? `<div class="tile-row">${view.slice
-      .map((m) => momentTile(m, { inRide: true, bigDetails: true })).join('')}</div>`
-    : `<div class="ride-group-empty">${esc(t('ride.none'))}</div>`}
+      ${body}
       ${pagerRow(view, index)}
     </div>`;
 }
@@ -1216,7 +1246,7 @@ function eventHead(event, { prominent = false } = {}) {
           ${event.outcome ? `<div class="game-outcome">${esc(event.outcome)}</div>` : ''}
         </div>
         <div class="moment-actions">
-          <button class="${prominent ? 'btn-outline' : 'link-btn'}"
+          <button class="${prominent ? 'btn-accent btn-accent-lg' : 'link-btn'}"
                   data-game-details="1">${esc(t('moment.details'))}</button>
         </div>
       </div>
