@@ -7,6 +7,7 @@ import datetime
 import logging
 import re
 import uuid
+from typing import Literal
 
 import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -81,6 +82,10 @@ class CreateJobRequest(BaseModel):
     # the metadata language: an editor who asked only for the log does
     # not get twenty clip suggestions and a Gemini call each for copy.
     make_clips: bool = True
+    # "editor" when a person typed the title rather than it being taken off a
+    # filename. Defaulting to "derived" keeps an older caller's match named by
+    # whatever the analysis reads off the screen, which is what it got before.
+    title_source: Literal["editor", "derived"] = "derived"
     # Whose upload prefix the object sits under. Defaults to the caller, and is
     # only ever different when picking up an orphan somebody else left: the
     # path was written with their uid and the bytes are still there under it.
@@ -204,6 +209,7 @@ async def create_job(
             # Ownership comes from the verified IAP assertion, never from the body.
             "owner_uid": user.uid,
             "title": body.title,
+            "title_source": body.title_source,
             "sport": body.sport,
             "gcs_uri": gcs_uri,
             "original_name": body.filename,
@@ -235,6 +241,10 @@ class RegisterSourceRequest(BaseModel):
     # the metadata language: an editor who asked only for the log does
     # not get twenty clip suggestions and a Gemini call each for copy.
     make_clips: bool = True
+    # "editor" when a person typed the title rather than it being taken off a
+    # filename. Defaulting to "derived" keeps an older caller's match named by
+    # whatever the analysis reads off the screen, which is what it got before.
+    title_source: Literal["editor", "derived"] = "derived"
     context_urls: list[str] = Field(default_factory=list)
 
     @field_validator("context_urls")
@@ -318,6 +328,7 @@ async def create_job_from_source(
             "job_id": uuid.uuid4().hex[:16],
             "owner_uid": user.uid,
             "title": body.title,
+            "title_source": body.title_source,
             "sport": body.sport,
             "gcs_uri": f"gs://{bucket_name}/{object_name}",
             "original_name": object_name.rsplit("/", 1)[-1],
@@ -357,6 +368,10 @@ class HlsSourceRequest(BaseModel):
     # the metadata language: an editor who asked only for the log does
     # not get twenty clip suggestions and a Gemini call each for copy.
     make_clips: bool = True
+    # "editor" when a person typed the title rather than it being taken off a
+    # filename. Defaulting to "derived" keeps an older caller's match named by
+    # whatever the analysis reads off the screen, which is what it got before.
+    title_source: Literal["editor", "derived"] = "derived"
     context_urls: list[str] = Field(default_factory=list)
     # The 1 fps proxy the analysis reads instead of the source. Off only for
     # a source that is already small.
@@ -393,6 +408,7 @@ async def create_job_from_hls(
             "job_id": uuid.uuid4().hex[:16],
             "owner_uid": user.uid,
             "title": body.title,
+            "title_source": body.title_source,
             "sport": body.sport,
             "gcs_uri": "",
             "original_name": body.hls_url.rsplit("/", 1)[-1].split("?", 1)[0] or "stream.m3u8",
@@ -426,6 +442,10 @@ class LiveEventRequest(BaseModel):
     # the metadata language: an editor who asked only for the log does
     # not get twenty clip suggestions and a Gemini call each for copy.
     make_clips: bool = True
+    # "editor" when a person typed the title rather than it being taken off a
+    # filename. Defaulting to "derived" keeps an older caller's match named by
+    # whatever the analysis reads off the screen, which is what it got before.
+    title_source: Literal["editor", "derived"] = "derived"
     context_urls: list[str] = Field(default_factory=list)
 
     @field_validator("hls_url")
@@ -479,6 +499,7 @@ async def create_live_event(
             "job_id": uuid.uuid4().hex[:16],
             "owner_uid": user.uid,
             "title": body.title,
+            "title_source": body.title_source,
             "sport": body.sport,
             "gcs_uri": "",
             "original_name": "",
@@ -605,6 +626,35 @@ async def _load_job(job_id: str, user: CallerIdentity) -> dict:
     if job.get("status") == "error":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No job {job_id}.")
     return job
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, v: str) -> str:
+        title = v.strip()
+        if not title:
+            raise ValueError("A title cannot be empty.")
+        return title
+
+
+@router.patch("/{job_id}/title")
+async def rename_job(
+    job_id: str, body: RenameRequest, user: CallerIdentity = Depends(current_user),
+):
+    """Rename a match, and its game record with it.
+
+    The browser cannot write job documents — Firestore rules deny it — so this
+    is the one door, as it is for the context links. One name in both places:
+    a desk that answers with two different names for one recording is a desk
+    nobody trusts.
+    """
+    result = await clients.call_mcp("catalog", "rename_job", {"job_id": job_id, "title": body.title})
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+    return result
 
 
 class ContextRequest(BaseModel):

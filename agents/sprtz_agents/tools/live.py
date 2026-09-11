@@ -59,6 +59,7 @@ from sprtz_agents.tools.pipeline import (
     _patch_moment_identities,
     _persist_moments,
     _record_game_details,
+    chosen_title,
     record_game_facts,
 )
 
@@ -655,6 +656,7 @@ async def _record_facts_so_far(job_id: str, job: dict, sport: str, profile, chun
         competitions=[c["competition"] for c in analysed if c.get("competition")],
         venues=[c["venue"] for c in analysed if c.get("venue")],
         fallback_title=job.get("title", ""),
+        chosen=chosen_title(job),
         discipline=discipline,
         discipline_confidence=confidence,
         rides=rides,
@@ -695,6 +697,7 @@ async def _finish(job_id: str, job: dict, sport: str, profile, chunks: list[dict
         competitions=[c["competition"] for c in analysed if c.get("competition")],
         venues=[c["venue"] for c in analysed if c.get("venue")],
         fallback_title=job.get("title", ""),
+        chosen=chosen_title(job),
         discipline=discipline,
         discipline_confidence=confidence,
         not_confirmed=merge_not_confirmed([c.get("notConfirmed") or [] for c in analysed]),

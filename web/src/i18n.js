@@ -361,6 +361,12 @@ const STRINGS = {
     'ingest.liveNeeds': 'Add a stream URL, a start and an end.',
     'opener.link.status': 'Check status',
     'opener.back': 'Back to the start',
+    'rename.action': 'Rename',
+    'rename.hint': 'Rename this match',
+    'rename.label': 'Match name',
+    'rename.save': 'Save',
+    'rename.cancel': 'Cancel',
+    'rename.failed': 'That name could not be saved',
   },
 
   'en-US': {
@@ -732,6 +738,12 @@ const STRINGS = {
     'ingest.liveNeeds': 'Stream-URL, Start und Ende angeben.',
     'opener.link.status': 'Status prüfen',
     'opener.back': 'Zurück zum Anfang',
+    'rename.action': 'Umbenennen',
+    'rename.hint': 'Diese Aufnahme umbenennen',
+    'rename.label': 'Name der Aufnahme',
+    'rename.save': 'Speichern',
+    'rename.cancel': 'Abbrechen',
+    'rename.failed': 'Dieser Name konnte nicht gespeichert werden',
   },
 
   it: {
@@ -1081,6 +1093,12 @@ const STRINGS = {
     'ingest.liveNeeds': 'Aggiungi un URL dello stream, un inizio e una fine.',
     'opener.link.status': 'Controlla lo stato',
     'opener.back': 'Torna all’inizio',
+    'rename.action': 'Rinomina',
+    'rename.hint': 'Rinomina questa registrazione',
+    'rename.label': 'Nome della registrazione',
+    'rename.save': 'Salva',
+    'rename.cancel': 'Annulla',
+    'rename.failed': 'Non è stato possibile salvare questo nome',
   },
 
   fr: {
@@ -1433,6 +1451,12 @@ const STRINGS = {
     'ingest.liveNeeds': 'Ajoutez une URL de flux, un début et une fin.',
     'opener.link.status': 'Voir l’état',
     'opener.back': 'Retour au début',
+    'rename.action': 'Renommer',
+    'rename.hint': 'Renommer cet enregistrement',
+    'rename.label': 'Nom de l enregistrement',
+    'rename.save': 'Enregistrer',
+    'rename.cancel': 'Annuler',
+    'rename.failed': 'Ce nom n a pas pu être enregistré',
   },
 
   es: {
@@ -1782,6 +1806,12 @@ const STRINGS = {
     'ingest.liveNeeds': 'Añade una URL de emisión, un inicio y un fin.',
     'opener.link.status': 'Ver el estado',
     'opener.back': 'Volver al inicio',
+    'rename.action': 'Cambiar nombre',
+    'rename.hint': 'Cambiar el nombre de esta grabación',
+    'rename.label': 'Nombre de la grabación',
+    'rename.save': 'Guardar',
+    'rename.cancel': 'Cancelar',
+    'rename.failed': 'No se pudo guardar ese nombre',
   },
 };
 

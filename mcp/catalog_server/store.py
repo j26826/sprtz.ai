@@ -587,6 +587,36 @@ def update_job_context(job_id: str, context_urls: list[str]) -> dict[str, Any]:
     return {"job_id": job_id, "context_urls": list(context_urls or [])}
 
 
+def rename_job(job_id: str, title: str) -> dict[str, Any]:
+    """Give a job the name an editor typed, and give it to its game record too.
+
+    One name, in both places. The game composes its own title from what was
+    read on screen and that is usually the better one — but an editor who
+    renames a match has said which name they want, and a desk that answers with
+    two different names for one recording is a desk nobody trusts. So this
+    writes both, and marks the job so a later analysis keeps the chosen name
+    rather than composing over it.
+
+    ``updatedAt`` is deliberately not touched. The watchdog reads it to decide
+    whether a run has died, and the editor shows a running job that has been
+    silent for fifteen minutes as stalled — typing a new name is not progress,
+    and it must not make a dead run look alive for another quarter of an hour.
+    """
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("A title cannot be empty.")
+
+    job_ref(job_id).update({"title": title, "titleSource": "editor"})
+    # The game record is a separate top-level document and may not exist yet:
+    # it is written when the analysis has something to say. When it arrives it
+    # will read titleSource off the job and keep this name.
+    game = db().collection("games").document(job_id)
+    renamed_game = bool(game.get().exists)
+    if renamed_game:
+        game.update({"title": title, "updatedAt": now()})
+    return {"job_id": job_id, "title": title, "renamed_game": renamed_game}
+
+
 def get_job(job_id: str) -> dict[str, Any]:
     snapshot = job_ref(job_id).get()
     if not snapshot.exists:
@@ -669,7 +699,8 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "",
                event_start: str = "", event_end: str = "",
-               chunk_sec: int = 0, make_clips: bool = True) -> dict[str, Any]:
+               chunk_sec: int = 0, make_clips: bool = True,
+               title_source: str = "derived") -> dict[str, Any]:
     """Open a job. Three kinds, told apart by where the video comes from.
 
     ``upload`` has its source in the bucket already. ``hls`` has only a URL and
@@ -682,6 +713,12 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
     payload = {
         "ownerUid": owner_uid,
         "title": title,
+        # Whether a person typed this name or it was taken off a filename. The
+        # game record composes its own title from what was read on screen, and
+        # that is the better name for a handball upload called
+        # GAME_2026_03_11_FINAL.mp4 — but not for one an editor sat down and
+        # named. "editor" wins over the composed title; "derived" does not.
+        "titleSource": "editor" if title_source == "editor" else "derived",
         "sport": sport,
         "kind": kind,
         "hlsUrl": hls_url,

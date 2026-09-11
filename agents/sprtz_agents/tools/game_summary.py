@@ -131,7 +131,7 @@ def judgement_prompt(sport: str, digest: str) -> str:
 
 
 def compose_title(*, home: str, away: str, competition: str, fallback: str,
-                  discipline: str = "") -> str:
+                  discipline: str = "", chosen: str = "") -> str:
     """Name the match from what was actually read.
 
     Composed here rather than asked of a model, for the same reason the rest of
@@ -139,7 +139,17 @@ def compose_title(*, home: str, away: str, competition: str, fallback: str,
     fixture, and one that names the wrong competition is worse than no title at
     all. When nothing on screen identified the match this falls back to what the
     editor called the upload, which is at least a name they chose themselves.
+
+    **A name an editor typed is not a fallback.** `chosen` is the title from
+    the ingest panel or a rename — someone sat down and named this recording —
+    and it wins outright. Without that the desk showed two names for one match:
+    the job said what had been typed and the game said "dressage — LeMieux
+    National Dressage Championships", composed from the screen. Composing is
+    still right for an upload called GAME_2026_03_11_FINAL.mp4, which is why
+    `fallback` is still last rather than first.
     """
+    if chosen:
+        return chosen
     if home and away:
         pairing = f"{home} v {away}"
         return f"{pairing} — {competition}" if competition else pairing
@@ -164,6 +174,7 @@ def assemble(
     venues: list[str],
     judgement: dict | None = None,
     fallback_title: str = "",
+    chosen_title: str = "",
     discipline: str = "",
     discipline_confidence: float = 0.0,
     not_confirmed: list[dict] | None = None,
@@ -191,7 +202,7 @@ def assemble(
         title=compose_title(
             home=home_team, away=away_team,
             competition=competition, fallback=fallback_title,
-            discipline=discipline,
+            discipline=discipline, chosen=chosen_title,
         ),
         home_team=home_team,
         away_team=away_team,

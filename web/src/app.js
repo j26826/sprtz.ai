@@ -100,6 +100,10 @@ const state = {
   pendingUploads: [],     // uploaded to GCS but never registered as a job
   thumbs: { urls: {}, asked: new Set() },  // momentId -> signed URL for its still
   details: null,          // the moment whose popup is open, and playing inside it
+  // The title being edited: { jobId, value, at }. The transcript re-renders on
+  // every Firestore write, so a half-typed name has to live here rather than in
+  // the field, the same reason the ingest panel's inputs do.
+  renaming: null,
   unsubscribe: [],
 };
 
@@ -2052,6 +2056,68 @@ const GAME_DETAIL_ROWS = [
 ];
 
 
+/**
+ * A title that can be renamed where it is read.
+ *
+ * One name belongs to a match, and it is shown in three places — the job row,
+ * the live row and the game card — so it is editable in all three rather than
+ * behind a settings page nobody would look for. Saving writes the job and its
+ * game record together, so the two cannot disagree afterwards.
+ *
+ * The value is held in state while it is being typed: the transcript is
+ * rebuilt with innerHTML on every Firestore write, and an analysis writes
+ * often, so a name typed into the DOM would vanish mid-word.
+ */
+function editableTitle(jobId, text, cls) {
+  if (state.renaming?.jobId !== jobId) {
+    return `<div class="${cls} is-titled">
+      <span class="titled-text">${esc(text)}</span>
+      <button class="link-btn rename-btn" data-rename="${esc(jobId)}"
+              title="${esc(t('rename.hint'))}">${esc(t('rename.action'))}</button>
+    </div>`;
+  }
+  return `<div class="${cls} is-renaming">
+    <input class="composer-input rename-input" data-rename-input
+           aria-label="${esc(t('rename.label'))}" value="${esc(state.renaming.value)}" />
+    <button class="btn-accent" data-rename-save="${esc(jobId)}"
+            ${state.renaming.value.trim() ? '' : 'disabled'}>${esc(t('rename.save'))}</button>
+    <button class="link-btn" data-rename-cancel="1">${esc(t('rename.cancel'))}</button>
+  </div>`;
+}
+
+
+/**
+ * Save a new name for a match, in both places it is kept.
+ *
+ * The field closes first and the request goes afterwards: the listener will
+ * bring the new name back within the second, and leaving the box open until
+ * the round trip returns makes a rename feel like a form submission rather
+ * than an edit. A failure says so in the transcript and the old name is still
+ * what the listener is showing, so nothing is lost.
+ */
+async function saveRename(jobId) {
+  const title = (state.renaming?.value || '').trim();
+  if (!title) return;
+  state.renaming = null;
+  render();
+  try {
+    await api(`/api/jobs/${jobId}/title`, {
+      method: 'PATCH', body: JSON.stringify({ title }),
+    });
+    // A session named after this match is named after the match, not after the
+    // string it happened to have when it was opened.
+    const session = state.sessions.find((x) => x.id === state.sessionKey);
+    if (session && session.jobId === jobId) {
+      updateSession(state.sessionKey, { title });
+      state.sessions = listSessions();
+      render();
+    }
+  } catch (err) {
+    say(`${t('rename.failed')}: ${err.message || err}`);
+  }
+}
+
+
 function gameHeadline(g) {
   return g.title
     || [g.homeTeam || g.groundedHomeTeam, g.awayTeam || g.groundedAwayTeam]
@@ -2219,7 +2285,7 @@ function gameCard() {
       <div class="row">
         <div class="game-row">
           <div style="min-width:0">
-            <div class="moment-label">${esc(gameHeadline(g))}</div>
+            ${editableTitle(g.jobId || g.id || state.jobId, gameHeadline(g), 'moment-label')}
             <div class="moment-meta">${esc(meta || t('game.notIdentified'))}</div>
             ${g.eventOutcome ? `<div class="game-outcome">${esc(g.eventOutcome)}</div>` : ''}
           </div>
@@ -2695,7 +2761,7 @@ function jobsCard(msg, index) {
       <div class="job">
         ${state.reanalyse?.jobId === j.id ? reanalysePanel(j) : ''}
         <div class="job-top">
-          <div class="job-name">${esc(j.title || j.source?.originalName || j.id)}</div>
+          ${editableTitle(j.id, j.title || j.source?.originalName || j.id, 'job-name')}
           <div class="job-status" data-tone="${tone}">${
             stalled ? esc(t('jobs.stalled')) : esc(j.status || 'unknown')}</div>
         </div>
@@ -2759,7 +2825,7 @@ function liveJobRow(j) {
   return `
       <div class="job">
         <div class="job-top">
-          <div class="job-name">${esc(j.title || j.id)}</div>
+          ${editableTitle(j.id, j.title || j.id, 'job-name')}
           <div class="job-status" data-tone="${tone}">${esc(t(`live.${live.state}`) || live.state)}</div>
         </div>
         <div class="job-stage">${esc(line)}</div>
@@ -3288,6 +3354,17 @@ function render() {
       </div>` : '');
 
   if (state.playing) mountPlayer();
+  // The field is destroyed and rebuilt by every render — an analysis writes
+  // often enough that a rename typed across two of them would lose its caret
+  // mid-word. The same restoration the scope search box does.
+  if (state.renaming) {
+    const field = document.querySelector('[data-rename-input]');
+    if (field && document.activeElement !== field) {
+      const at = Math.min(state.renaming.at ?? field.value.length, field.value.length);
+      field.focus();
+      field.setSelectionRange(at, at);
+    }
+  }
   loadThumbs();
 }
 
@@ -3794,6 +3871,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
       // whoever opens it later.
       metadata_language: getSettings().metadataLanguage,
       make_clips: state.upload.makeClips,
+      title_source: state.upload.title.trim() ? 'editor' : 'derived',
       context_urls: contextUrlList(),
       // Only set when picking up an orphan somebody else left: the bytes are
       // under their prefix, not this caller's.
@@ -3911,6 +3989,7 @@ async function registerFromStorage() {
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
         make_clips: state.upload.makeClips,
+        title_source: state.upload.title.trim() ? 'editor' : 'derived',
       context_urls: contextUrlList(),
       }),
     });
@@ -3959,6 +4038,7 @@ async function registerFromHls() {
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
         make_clips: state.upload.makeClips,
+        title_source: state.upload.title.trim() ? 'editor' : 'derived',
         context_urls: contextUrlList(),
       }),
     });
@@ -4015,6 +4095,7 @@ async function scheduleLiveEvent() {
         event_end: new Date(l.end).toISOString(),
         metadata_language: getSettings().metadataLanguage,
         make_clips: state.upload.makeClips,
+        title_source: l.title.trim() ? 'editor' : 'derived',
         context_urls: contextUrlList(),
       }),
     });
@@ -4107,6 +4188,19 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+document.addEventListener('keydown', (event) => {
+  if (!state.renaming || !event.target.matches?.('[data-rename-input]')) return;
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveRename(state.renaming.jobId);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    state.renaming = null;
+    render();
+  }
+});
+
+
 document.addEventListener('click', (event) => {
   const hit = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
     + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
@@ -4118,6 +4212,7 @@ document.addEventListener('click', (event) => {
     + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
     + '[data-desk-add],[data-register-hls],[data-schedule-live],'
     + '[data-opener],[data-opener-back],[data-ingest-src],'
+    + '[data-rename],[data-rename-save],[data-rename-cancel],'
     + '[data-scope-pick],[data-scope-sport],[data-scope-disc],[data-scope-game],'
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
     + '[data-pc],[data-player-range],[data-watch-ride],'
@@ -4159,6 +4254,16 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.ingestSrc) { state.upload.src = hit.dataset.ingestSrc; render(); return; }
   if (hit.dataset.opener) { onOpenerClick(hit); return; }
   if (hit.dataset.openerBack) { onOpenerBack(hit); return; }
+  if (hit.dataset.rename) {
+    const job = state.jobs.find((j) => j.id === hit.dataset.rename);
+    const game = state.games.find((g) => (g.jobId || g.id) === hit.dataset.rename);
+    const text = job?.title || game?.title || '';
+    state.renaming = { jobId: hit.dataset.rename, value: text, at: text.length };
+    render();
+    return;
+  }
+  if (hit.dataset.renameSave) { saveRename(hit.dataset.renameSave); return; }
+  if (hit.dataset.renameCancel) { state.renaming = null; render(); return; }
   if (hit.dataset.showAll) {
     const msg = state.msgs[Number(hit.dataset.showAll)];
     if (msg) { msg.showAll = true; msg.page = 0; }
@@ -4380,6 +4485,14 @@ document.addEventListener('input', (event) => {
     if (again) { again.focus(); again.setSelectionRange(at, at); }
   } else if (el.matches('[data-make-clips]')) {
     u.makeClips = el.checked;
+  } else if (el.matches('[data-rename-input]')) {
+    if (!state.renaming) return;
+    const wasEmpty = !state.renaming.value.trim();
+    state.renaming.value = el.value;
+    state.renaming.at = el.selectionStart;
+    // Only when Save changes between enabled and not: re-rendering on every
+    // keystroke would move the caret to the end of the field.
+    if (wasEmpty !== !state.renaming.value.trim()) render();
   } else if (el.matches('[data-ingest-title]')) {
     u.title = el.value;
   } else if (el.matches('[data-live-title]')) {

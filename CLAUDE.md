@@ -378,6 +378,25 @@ competition, then whatever the editor called the upload. Not generated: a
 model-written title is a sentence that sounds like a fixture, and one naming the
 wrong competition is worse than no title.
 
+**A name a person gave is not a fallback, it is the name.** The desk showed two
+for one recording: the job said what had been typed into the ingest panel and
+the game said `dressage — LeMieux National Dressage Championships`, composed
+from the screen. `titleSource` on the job says which it is wearing — `editor`
+for a title someone typed or renamed, `derived` for one taken off a filename or
+a URL, and absent means derived so nothing already on the desk changes its name.
+Only `editor` beats the composed title (`compose_title(chosen=…)`, fed by
+`pipeline.chosen_title`); a filename still loses to what was read on screen,
+which is the whole reason composing exists.
+
+**A match can be renamed where its name is read** — the job row, the live row
+and the game card, all three inline. `PATCH /api/jobs/{id}/title` is the one
+door, as it is for the context links, and `store.rename_job` writes the job and
+its game record together so the two cannot disagree afterwards; a job with no
+record yet is still renamed, and the record reads `titleSource` when it arrives.
+It deliberately does **not** touch `updatedAt`: the watchdog reads that to
+decide whether a run has died and the editor shows fifteen minutes of silence
+as stalled, so typing a new name must not make a dead run look alive.
+
 It also carries `team1`/`team2` (home and away as printed on the score bug),
 `scoreTeam1`/`scoreTeam2` at that moment, and `actionTeam` — the side the action
 belongs to, named to match `team1` or `team2` so the two join.
