@@ -385,6 +385,42 @@ def get_game(job_id: str) -> dict:
 
 
 @mcp.tool
+def list_game_rides(job_id: str) -> dict:
+    """A competition day's rides in running order, as the game record holds
+    them: rider, horse, start and end, test type, judges' marks, total, rank,
+    score check and where the score came from. One document read.
+
+    Args:
+        job_id: Job whose rides to read.
+    """
+    try:
+        return {"status": "success", "job_id": job_id, "rides": store.get_rides(job_id)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "job_id": job_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def get_event_tree(job_id: str) -> dict:
+    """One event as a tree: the event, each ride in running order (a rider on
+    one horse), and the moments that happened during each ride.
+
+    Moments outside every ride are listed under ``unassignedMoments``. A sport
+    without rides returns no riders and every moment unassigned.
+
+    Args:
+        job_id: Job whose event to read.
+    """
+    try:
+        return {"status": "success", **store.event_tree(job_id)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "job_id": job_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def knn_search_games(query: str, owner_uid: str, limit: int = 5) -> dict:
     """Find whole matches by meaning — teams, competition, venue, how it felt.
 
@@ -596,7 +632,9 @@ def claim_live_chunk(job_id: str, index: int) -> dict:
 def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = "",
                       continuity: dict | None = None, summary: str = "",
                       competition: str = "", venue: str = "", discipline: str = "",
-                      discipline_confidence: float = 0.0, muxed_uri: str = "") -> dict:
+                      discipline_confidence: float = 0.0, muxed_uri: str = "",
+                      ride_fragments: list[dict] | None = None,
+                      not_confirmed: list[dict] | None = None) -> dict:
     """Record the outcome of analysing one live chunk.
 
     Args:
@@ -611,11 +649,14 @@ def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = ""
         discipline: Discipline code the chunk reported, if any.
         discipline_confidence: Its confidence.
         muxed_uri: The chunk with its audio muxed in, when the tick made one.
+        ride_fragments: The rides this chunk saw, absolute and not yet stitched.
+        not_confirmed: What this chunk looked for and did not find.
     """
     try:
         return {"status": "success", **store.finish_live_chunk(
             job_id, index, moments, error, continuity, summary, competition, venue,
-            discipline, discipline_confidence, muxed_uri=muxed_uri)}
+            discipline, discipline_confidence, muxed_uri=muxed_uri,
+            ride_fragments=ride_fragments, not_confirmed=not_confirmed)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id, index=index)
 

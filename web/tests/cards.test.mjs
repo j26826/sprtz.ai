@@ -147,3 +147,41 @@ describe("the desk's key moments", () => {
     'find the best saves across all games': 'search',
   });
 });
+
+
+// The four examples the composer offers. Whatever else changes here, what the
+// placeholder suggests has to land on the card that answers it.
+describe('the composer\'s own examples', () => {
+  routes({
+    'show me all events': 'games',
+    'show me the ride for Gareth Hughes': 'rides',
+    'best pirouettes': 'moments',
+    'rides scoring more than 70%': 'rides',
+  });
+});
+
+describe('events are games', () => {
+  routes({
+    'list every event': 'games',
+    'show all equestrian events': 'games',
+    'which competitions do we have': 'games',
+    // Still the log, not the list.
+    'show the event log': 'activity',
+    // Still getting one in.
+    'upload a new event': 'ingest',
+  });
+});
+
+describe('rides', () => {
+  routes({
+    'show all rides': 'rides',
+    "show me Hughes' ride": 'rides',
+    'which rider scored highest': 'rides',
+    'riders over 72 percent': 'rides',
+    'show the moments from the ride for Anna Berger': 'rides',
+    'rides in every event': 'rides',
+    // Doing something with a ride is still that action.
+    'cut a 30 second short of the ride for Anna Berger': 'reel',
+    'publish the ride for Anna Berger': 'publish',
+  });
+});

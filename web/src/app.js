@@ -36,7 +36,10 @@ import {
 import {
   filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
 } from './search.js';
-import { playRange } from './player.js';
+import {
+  clampTo, nextSpeed, playRange, shortClock, sourceReference, widen,
+} from './player.js';
+import { groupByRide, notesForRide, rideNamedIn, ridesAsked } from './ridegroups.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
 } from './settings.js';
@@ -59,6 +62,8 @@ const state = {
   msgs: [],
   jobs: [],
   game: null,          // the match-level record for the selected job
+  eventTree: null,     // { jobId, event } — the selected job's rides and their moments
+  gameFor: null,       // the job whose game listener has answered, so "none" is not said too early
   games: [],           // every match with a game record, for the games list
   sessions: [],
   sessionKey: null,    // the open session, which may not have a job yet
@@ -72,7 +77,10 @@ const state = {
   sessionId: null,
   sports: ['handball'],
   platforms: { tiktok: true, instagram: true, youtube: false },
-  playing: null,          // { momentId, start, end }
+  // What the player is on: { key, momentId, rideOrder, start, end, label,
+  // full, loop, rate }. key names the popup's player slot and stays put while
+  // the range changes — a chip or Widen re-aims the same video.
+  playing: null,
   upload: {
     file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '', gcsUri: '',
     // Whether this match is cut as well as read. Sent with the registration
@@ -460,6 +468,10 @@ function selectJob(jobId) {
   state.moments = [];
   state.clips = [];
   state.game = null;
+  state.gameFor = null;
+  state.eventTree = null;
+  eventTreeKey = '';
+  clearTimeout(eventTreeTimer);
   state.events = [];
   state.playing = null;
   // Signed per job and per moment id, so nothing here survives the switch.
@@ -475,12 +487,18 @@ function selectJob(jobId) {
   // it is a separate listener rather than part of the job document.
   state.unsubscribe.push(onSnapshot(doc(db, 'games', jobId), (snap) => {
     state.game = snap.exists() ? snap.data() : null;
+    state.gameFor = jobId;
+    refreshEventTree();
     render();
-  }, () => { state.game = null; }));
+  }, () => { state.game = null; state.gameFor = jobId; }));
 
   state.unsubscribe.push(onSnapshot(
     query(collection(db, 'jobs', jobId, 'moments'), orderBy('startSec', 'asc'), limit(500)),
-    (snap) => { state.moments = snap.docs.map((d) => ({ id: d.id, ...d.data() })); render(); },
+    (snap) => {
+      state.moments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      refreshEventTree();
+      render();
+    },
   ));
 
   state.unsubscribe.push(onSnapshot(
@@ -492,6 +510,48 @@ function selectJob(jobId) {
     query(collection(db, 'jobs', jobId, 'events'), orderBy('ts', 'desc'), limit(80)),
     (snap) => { state.events = snap.docs.map((d) => ({ id: d.id, ...d.data() })); render(); },
   ));
+}
+
+
+/**
+ * Fetch the open match's event tree — its rides and the moments in each — when
+ * it has rides.
+ *
+ * Which ride a moment belongs to is the catalog's decision, not the browser's
+ * (GET /api/jobs/{id}/event), so this asks rather than works it out. It asks
+ * again only when something the answer depends on changed: the rides, or which
+ * ride any moment is joined to. Debounced, because an analysis writing moments
+ * fires the listener many times in a row.
+ */
+let eventTreeTimer = null;
+let eventTreeKey = '';
+
+function refreshEventTree() {
+  clearTimeout(eventTreeTimer);
+  const jobId = state.jobId;
+  const rides = Array.isArray(state.game?.rides) ? state.game.rides : [];
+  if (!jobId || !rides.length) return;
+
+  const key = [
+    jobId,
+    rides.map((r) => `${r.order}@${r.start_sec}-${r.end_sec}`).join(','),
+    state.moments.map((m) => `${m.momentId}:${m.rideOrder ?? ''}`).join(','),
+  ].join('|');
+  if (key === eventTreeKey) return;
+
+  eventTreeTimer = setTimeout(async () => {
+    eventTreeKey = key;
+    try {
+      const { event } = await api(`/api/jobs/${encodeURIComponent(jobId)}/event`);
+      if (state.jobId !== jobId) return;
+      state.eventTree = { jobId, event };
+      render();
+    } catch (err) {
+      // The flat list still stands; the next change asks again.
+      eventTreeKey = '';
+      console.warn('event tree', err);
+    }
+  }, 400);
 }
 
 /* ────────────────────────────────────────────────────── transcript ── */
@@ -795,8 +855,10 @@ function momentTile(m, opts = {}) {
   const clip = opts.open ? null : state.clips.find((c) => c.momentId === m.momentId);
   const meta = [
     // H.No and rider first: on a competition day that is what a tile is
-    // scanned for. A schedule-inferred name is marked with a tilde.
-    m.rider ? `${m.startNumber ? `#${m.startNumber} ` : ''}${m.identitySource === 'schedule' ? '~' : ''}${m.rider}` : '',
+    // scanned for. A schedule-inferred name is marked with a tilde. Not inside
+    // a ride group, whose heading already says it once for every tile.
+    m.rider && !opts.inRide
+      ? `${m.startNumber ? `#${m.startNumber} ` : ''}${m.identitySource === 'schedule' ? '~' : ''}${m.rider}` : '',
     m.label || m.momentType,
     `${Math.round(m.endSec - m.startSec)}s`,
     m.confidence == null ? '' : `${Math.round(m.confidence * 100)}%`,
@@ -834,6 +896,9 @@ function momentsCard(msg, index) {
   const found = momentsFor(msg);
   if (!found.list.length) return emptyCard(t('moments.none'));
 
+  const event = eventFor(msg);
+  if (event) return rideGroupsCard(msg, index, found, event);
+
   const view = pageOf(found.list, msg.page);
   const inReel = found.list
     .filter((m) => state.clips.some((c) => c.momentId === m.momentId)).length;
@@ -852,6 +917,222 @@ function momentsCard(msg, index) {
 
 
 /**
+ * The open event's tree, when this message is about it and it has rides.
+ *
+ * Only for the open job: the tree is fetched for the match whose listeners are
+ * running, and an earlier answer about another match keeps the flat list it
+ * was given rather than borrowing this one's rides.
+ */
+function eventFor(msg) {
+  const tree = state.eventTree;
+  const jobId = msg.jobId || state.jobId;
+  if (!tree || tree.jobId !== jobId) return null;
+  return tree.event?.riders?.length ? tree.event : null;
+}
+
+
+// Rides per page. A ride is a heading and a row of tiles, so a page of them is
+// already long; a class of forty is forty headings, which is what the pager is for.
+const RIDES_PER_PAGE = 4;
+
+
+/**
+ * A competition day as event, then rides, then moments.
+ *
+ * The same filter, sort and count as the flat list — the head is shared — but
+ * the tiles sit under the ride they happened in, each ride headed by who rode
+ * it and how it scored. The event's own details stay a click away in the game
+ * popup; the heading names the event so the groups have something to belong to.
+ */
+function rideGroupsCard(msg, index, found, event) {
+  const groups = groupByRide(event, found.list, { filtered: found.narrowed });
+  const view = pageOf(groups, msg.page, RIDES_PER_PAGE);
+  const inReel = found.list
+    .filter((m) => state.clips.some((c) => c.momentId === m.momentId)).length;
+
+  return `
+    <div class="list">
+      ${momentsHead({ ...found, sort: msg.sort }, index, inReel)}
+      ${eventHead(event)}
+      ${view.slice.map(rideGroup).join('')}
+      ${pagerRow(view, index)}
+    </div>`;
+}
+
+
+/**
+ * Which event a question about rides is about.
+ *
+ * A named match first, when it has rides. Then the event that ran the rider
+ * or horse the question names — in the session's scope before the whole desk,
+ * and the open event whenever it is one of them, so asking about someone who
+ * rode here does not jump elsewhere. With no name, the open event if it has
+ * rides, else the first in scope that does.
+ */
+function rideJobFor(question) {
+  const idOf = (g) => g.jobId || g.id;
+  const hasRides = (g) => Array.isArray(g.rides) && g.rides.length > 0;
+  const named = gameNamedIn(question);
+  if (named && hasRides(named)) return idOf(named);
+
+  const inScope = gamesInScope(state.scope, state.games).filter(hasRides);
+  const everywhere = state.games.filter(hasRides);
+  const riding = (games) => games.filter((g) => g.rides.some((r) => rideNamedIn(question, r)));
+  const byName = riding(inScope).length ? riding(inScope) : riding(everywhere);
+  const pool = byName.length ? byName : inScope;
+  const open = pool.find((g) => idOf(g) === state.jobId);
+  if (open) return state.jobId;
+  if (!byName.length && hasRides(state.game || {})) return state.jobId;
+  return pool[0] ? idOf(pool[0]) : state.jobId;
+}
+
+
+/**
+ * What a rides card has to show, or why it has nothing.
+ *
+ * `asked` only when there are rides to show — cardAnswersIt reads it, so the
+ * agent's reply stays visible behind every empty state.
+ */
+function ridesFor(msg) {
+  const jobId = msg.jobId || state.jobId;
+  // The tree is the open event's; an earlier answer about another event says
+  // so rather than borrowing this one's rides.
+  if (!jobId || jobId !== state.jobId) return { empty: t('rides.elsewhere') };
+  if (state.gameFor !== jobId) return { empty: t('rides.loading') };
+  const stored = Array.isArray(state.game?.rides) ? state.game.rides : [];
+  if (!stored.length) return { empty: t('rides.none') };
+  const tree = state.eventTree;
+  if (!tree || tree.jobId !== jobId) return { empty: t('rides.loading') };
+
+  const moments = selectMoments(state.moments, { sort: msg.sort }).list;
+  const all = groupByRide(tree.event, moments).filter((g) => g.ride);
+  if (!all.length) return { empty: t('rides.none') };
+  const asked = ridesAsked(all, msg.rideQuery || '');
+  if (!asked.groups.length) return { empty: t('rides.noMatch'), unchecked: asked.unchecked };
+  return { event: tree.event, total: all.length, asked };
+}
+
+
+/**
+ * The rides a question asked for, each with its moments under it.
+ *
+ * The same ride groups as the moments card, but the ride is the answer here:
+ * the head says what narrowed them — a name, a score bar — and how many of the
+ * event's rides that left, and the moments inside each follow the card's sort.
+ */
+function ridesCard(msg, index) {
+  const found = ridesFor(msg);
+  if (!found.asked) {
+    const note = found.unchecked
+      ? ` ${t('rides.unchecked').replace('{n}', String(found.unchecked))}` : '';
+    return emptyCard(`${found.empty}${note}`);
+  }
+
+  const { asked, event, total } = found;
+  const view = pageOf(asked.groups, msg.page, RIDES_PER_PAGE);
+  const bar = asked.score ? `${asked.score.inclusive ? '≥' : '>'} ${asked.score.min}%` : '';
+  const title = [t('rides.title'), ...asked.names, bar].filter(Boolean).join(' · ');
+  const count = asked.narrowed ? `${asked.groups.length} ${t('pager.of')} ${total}` : String(total);
+  const sort = msg.sort === 'time' ? 'time' : 'score';
+
+  return `
+    <div class="list">
+      <div class="list-head">
+        <div class="panel-head-title">${esc(title)}</div>
+        <div class="panel-head-meta">
+          <span class="list-count">${esc(count)}</span>
+          ${['score', 'time'].map((key) => `
+            <button class="link-btn" data-sort="${index}:${key}"
+                    aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
+        </div>
+      </div>
+      ${eventHead(event)}
+      ${asked.unchecked
+        ? `<div class="ride-group-empty">${esc(t('rides.unchecked').replace('{n}', String(asked.unchecked)))}</div>`
+        : ''}
+      ${view.slice.map(rideGroup).join('')}
+      ${pagerRow(view, index)}
+    </div>`;
+}
+
+
+function eventHead(event) {
+  const meta = [event.discipline, event.competition, event.venue, event.date]
+    .filter(Boolean).join(' · ');
+  return `
+    <div class="event-head">
+      <div class="game-row">
+        <div class="event-head-text">
+          <div class="moment-label">${esc(event.title || '')}</div>
+          ${meta ? `<div class="moment-meta">${esc(meta)}</div>` : ''}
+          ${event.outcome ? `<div class="game-outcome">${esc(event.outcome)}</div>` : ''}
+        </div>
+        <div class="moment-actions">
+          <button class="link-btn" data-game-details="1">${esc(t('moment.details'))}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+
+/**
+ * One ride and its moments.
+ *
+ * The heading is the ride-table row from the game popup, reshaped: running
+ * order, start number and rider, the horse and when they were in the arena,
+ * then the result. Names in the sans and readings in the mono, as the table
+ * has them. A ride with no moments says so rather than showing nothing.
+ */
+function rideGroup({ ride, moments }) {
+  const tiles = moments.length
+    ? `<div class="tile-row">${moments.map((m) => momentTile(m, { inRide: !!ride })).join('')}</div>`
+    : `<div class="ride-group-empty">${esc(t('ride.none'))}</div>`;
+
+  if (!ride) {
+    return `
+      <section class="ride-group">
+        <div class="ride-group-head">
+          <span class="ride-num"></span>
+          <span class="ride-who"><span class="ride-rider">${esc(t('ride.outside'))}</span></span>
+          <span class="ride-group-result"></span>
+          <span></span>
+          <span class="list-count">${moments.length}</span>
+        </div>
+        ${tiles}
+      </section>`;
+  }
+
+  const result = ride.result || {};
+  const who = `${ride.startNumber ? `#${ride.startNumber} ` : ''}${
+    ride.identitySource === 'schedule' ? '~' : ''}${ride.rider || '—'}`;
+  // The published spelling qualifies the on-screen one; it never replaces it.
+  const published = [ride.groundedRider, ride.groundedHorse].filter(Boolean).join(' / ');
+  const check = rideCheck({ score_check: result.scoreCheck });
+  const reading = [
+    ride.testType ? t(`ride.${ride.testType}`) : '',
+    result.totalPct == null ? '' : `${Number(result.totalPct).toFixed(3)}%`,
+    result.place == null ? '' : `${t('ride.place')} ${result.place}`,
+  ].filter(Boolean).join(' · ');
+
+  return `
+    <section class="ride-group">
+      <div class="ride-group-head">
+        <span class="ride-num">${esc(String(ride.order ?? ''))}</span>
+        <span class="ride-who" ${published ? `title="${esc(published)}"` : ''}>
+          <span class="ride-rider">${esc(who)}</span>
+          <span class="ride-horse">${esc(ride.horse || '')} · ${clock(ride.startSec)}–${clock(ride.endSec)}</span>
+        </span>
+        <span class="ride-group-result">${esc(reading)}${check.text
+          ? `<span class="ride-check" data-tone="${check.tone}">${esc(check.text)}</span>` : ''}</span>
+        <button class="link-btn" data-watch-ride="${esc(String(ride.order ?? ''))}">${esc(t('ride.watch'))}</button>
+        <span class="list-count">${moments.length}</span>
+      </div>
+      ${tiles}
+    </section>`;
+}
+
+
+/**
  * A slot, not the player itself.
  *
  * render() rebuilds the transcript's innerHTML, which would destroy a live
@@ -860,8 +1141,8 @@ function momentsCard(msg, index) {
  * The player element is created once and re-parented into this slot after each
  * render, so playback survives.
  */
-function playerMarkup(m) {
-  return `<div class="player-slot" data-slot="${esc(m.momentId)}"></div>`;
+function playerMarkup(key) {
+  return `<div class="player-slot" data-slot="${esc(key)}"></div>`;
 }
 
 // Everything the analysis recorded, in the order someone would read it: what
@@ -906,36 +1187,310 @@ const DETAIL_ROWS = [
 ];
 
 
+function jobDuration(jobId) {
+  return Number(state.jobs.find((j) => j.id === (jobId || state.jobId))?.media?.durationSec || 0);
+}
+
+
+/** A ride of the open event, from its tree. */
+function treeRide(order) {
+  const tree = state.eventTree;
+  if (order == null || !tree || tree.jobId !== state.jobId) return null;
+  return (tree.event?.riders || []).find((r) => r.order === order) || null;
+}
+
+
+/** The ride a moment happened in — the tree's say, then the order stored on it. */
+function rideOf(m) {
+  const tree = state.eventTree;
+  if (!m || !tree || tree.jobId !== state.jobId) return null;
+  return (tree.event?.riders || []).find((r) => (r.moments || []).some((x) => x.momentId === m.momentId))
+    || treeRide(m.rideOrder);
+}
+
+
+function rideLabel(ride) {
+  return [ride.rider, ride.testType ? t(`ride.${ride.testType}`) : ''].filter(Boolean).join(' · ');
+}
+
+
+/**
+ * Open a moment in the player.
+ *
+ * The moment plays beside its record rather than instead of it. Opening the
+ * details of a play is the point at which someone wants to see it, and the
+ * facts are what they are checking it against — reading "double save" and
+ * watching the save are the same act here. Three seconds either side of what
+ * was asked for — the moment's own times, or a clip's trim — so the play is
+ * seen in its context. Every way into the player comes through here: the
+ * row's thumbnail, the details button, and the reel's Play.
+ */
 function openDetails(momentId, range = null) {
   const m = momentById(momentId);
   if (!m) return;
+  const ride = rideOf(m);
+  openPlayer({
+    key: momentId,
+    moment: m,
+    rideOrder: ride ? ride.order : null,
+    label: m.label || m.momentType || '',
+    title: m.summary || m.label || t('moment.details'),
+    ...playRange(range?.start ?? m.startSec, range?.end ?? m.endSec, { duration: jobDuration(m.jobId) }),
+  });
+}
 
+
+/** Open a whole ride in the player, from its first second to its last. */
+function openRide(order) {
+  const ride = treeRide(order);
+  if (!ride) return;
+  openPlayer({
+    key: `ride-${order}`,
+    moment: null,
+    rideOrder: order,
+    full: true,
+    label: rideLabel(ride),
+    title: [ride.rider, ride.horse].filter(Boolean).join(' · '),
+    start: ride.startSec,
+    end: ride.endSec,
+  });
+}
+
+
+function openPlayer(p) {
+  $('details-title').textContent = p.title;
+  // The slot holds the live player; the block under it is redrawn on its own,
+  // so re-aiming the player never rebuilds the video.
+  $('details-player').innerHTML = `${playerMarkup(p.key)}<div class="player-under"></div>`;
+  state.details = p.key;
+  state.playing = { full: false, loop: false, rate: 1, ...p };
+  renderDetailsBody();
+  showDetailsModal(true);
+  mountPlayer();
+}
+
+
+/**
+ * Everything around the player. Under it: the ride this is part of, how it
+ * scored and where that score came from, the chips that move the player
+ * through it, and the cut into the source for what is playing. Beside it:
+ * what the analysis looked for and did not find, the incidents, and the
+ * moment's own record. Redrawn when the range changes, so the chip that is
+ * playing and the reference into the source always describe what is on
+ * screen.
+ */
+function renderDetailsBody() {
+  const p = state.playing;
+  if (!p) return;
+  const ride = treeRide(p.rideOrder);
+  const panel = ride ? ridePanel(ride, p) : null;
+  const under = $('details-player').querySelector('.player-under');
+  if (under) under.innerHTML = panel ? panel.summary : '';
+  const body = $('details-body');
+  body.className = 'detail-body';
+  body.innerHTML = (panel ? panel.reference : '') + (p.moment ? momentRecord(p.moment, Boolean(ride)) : '');
+}
+
+
+function momentRecord(m, underRide) {
   const rows = DETAIL_ROWS
     .map(([key, read]) => [t(key), read(m)])
     .filter(([, value]) => value !== '' && value != null);
+  return `
+    ${underRide ? `<div class="panel-label panel-label-record">${esc(t('ride.thisMoment'))}</div>` : ''}
+    <div class="detail-grid">${rows.map(([label, value]) => `
+      <div class="detail-key">${esc(label)}</div>
+      <div class="detail-value">${esc(String(value))}</div>`).join('')}</div>`;
+}
 
-  $('details-title').textContent = m.summary || m.label || t('moment.details');
-  $('details-body').innerHTML = rows.map(([label, value]) => `
-    <div class="detail-key">${esc(label)}</div>
-    <div class="detail-value">${esc(String(value))}</div>`).join('');
 
-  // The moment plays beside its record rather than instead of it. Opening the
-  // details of a play is the point at which someone wants to see it, and the
-  // facts are what they are checking it against — reading "double save" and
-  // watching the save are the same act here.
-  $('details-player').innerHTML = playerMarkup(m);
-  state.details = momentId;
-  // Three seconds either side of what was asked for — the moment's own
-  // times, or a clip's trim — so the play is seen in its context. Every way
-  // into the player comes through here: the row's thumbnail, the details
-  // button, and the reel's Play.
-  const duration = Number(state.jobs.find((j) => j.id === (m.jobId || state.jobId))?.media?.durationSec || 0);
-  state.playing = {
-    momentId,
-    ...playRange(range?.start ?? m.startSec, range?.end ?? m.endSec, { duration }),
-  };
-  showDetailsModal(true);
-  mountPlayer();
+/**
+ * Where a ride's score came from, in words.
+ *
+ * Built only from what the record says — read off the screen or taken from
+ * the published results, whether the total agrees with its own marks, and
+ * what the published figure is when it differs. Nothing here is a judgement
+ * the pipeline did not make.
+ */
+function provenanceText(result) {
+  const r = result || {};
+  const parts = [];
+  if (r.scoreSource === 'observed') parts.push(t('provenance.observed'));
+  else if (r.scoreSource) parts.push(t('provenance.published').replace('{source}', r.scoreSource));
+  else if (r.totalPct == null) parts.push(t('provenance.none'));
+
+  const check = String(r.scoreCheck || '');
+  const confirmed = /^ok, confirmed by (.+)$/.exec(check);
+  if (check === 'ok') parts.push(t('provenance.consistent'));
+  else if (confirmed) parts.push(t('provenance.confirmed').replace('{source}', confirmed[1]));
+  else if (check) parts.push(check);
+
+  if (r.groundedTotalPct != null && r.totalPct != null
+      && Number(r.groundedTotalPct).toFixed(3) !== Number(r.totalPct).toFixed(3)) {
+    parts.push(t('provenance.differs').replace('{pct}', Number(r.groundedTotalPct).toFixed(3)));
+  }
+  return parts.join(' ');
+}
+
+
+function panelSection(label, inner) {
+  return `<div class="panel-section"><div class="panel-label">${esc(label)}</div>${inner}</div>`;
+}
+
+
+/**
+ * One ride, for the player: who, how it scored, what happened in it, and how
+ * to take it elsewhere.
+ *
+ * The moments are chips that re-aim the player, with the whole ride first.
+ * What was looked for and not found is the part of the event's record noted
+ * in this ride's own analysis windows. Scores come only from what the record
+ * holds — a technical and an artistic mark are not split out by the analysis,
+ * so they are not shown rather than guessed.
+ */
+function ridePanel(ride, p) {
+  const r = ride.result || {};
+  const judges = Array.isArray(state.game?.judges) ? state.game.judges : [];
+  // One tile per judge, keyed by where they sat (E, H, C) when the record
+  // knows it: the marks are read in that order off the results graphic.
+  const marks = (r.judgeMarks || []).map((mark, i) =>
+    [`${t('ride.judge')} ${judges[i]?.position || i + 1}`, `${Number(mark).toFixed(2)}%`]);
+  const tiles = [
+    [t('ride.total'), r.totalPct == null ? '' : `${Number(r.totalPct).toFixed(3)}%`],
+    [t('ride.place'), r.place == null ? '' : String(r.place)],
+    ...marks,
+    [t('ride.published'), r.groundedTotalPct == null ? '' : `${Number(r.groundedTotalPct).toFixed(3)}%`],
+  ].filter(([, value]) => value);
+  const check = rideCheck({ score_check: r.scoreCheck });
+  const who = `${ride.startNumber ? `#${ride.startNumber} ` : ''}${
+    ride.identitySource === 'schedule' ? '~' : ''}${ride.rider || '—'}`;
+  const sub = [ride.horse, ride.testType ? t(`ride.${ride.testType}`) : '', `${clock(ride.startSec)}–${clock(ride.endSec)}`]
+    .filter(Boolean).join(' · ');
+
+  const moments = ride.moments || [];
+  const chips = [
+    `<button class="range-chip" data-player-range="full" aria-pressed="${Boolean(p.full)}">
+       ${esc(t('player.fullRide'))} <span>${clock(ride.startSec)}</span></button>`,
+    ...moments.map((mo) => `
+     <button class="range-chip" data-player-range="${esc(mo.momentId)}"
+             aria-pressed="${!p.full && p.moment?.momentId === mo.momentId}">
+       ${esc(mo.label || mo.momentType || '')} <span>${clock(mo.startSec)}</span></button>`),
+  ].join('');
+
+  const notes = notesForRide(state.game?.notConfirmed, ride.segments);
+  const incidents = moments.filter((mo) => mo.category === 'incident' || mo.requiresHumanReview);
+  const job = state.jobs.find((j) => j.id === state.jobId);
+  const ref = sourceReference(job?.source?.originalName || '', p,
+    p.full ? `ride-${ride.order}` : `${p.label}-${Math.round(p.start)}`);
+
+  // Two halves. Under the player, the ride itself and the chips that drive
+  // the player — beside its own controls, where a hand already is. Beside it,
+  // the reference material an editor reads rather than acts on.
+  const summary = `
+    <section class="ride-panel">
+      <div class="ride-panel-head">
+        <div class="ride-panel-rider">${esc(who)}</div>
+        <div class="ride-panel-sub">${esc(sub)}</div>
+        ${ride.identitySource === 'schedule' ? `<div class="ride-panel-note">${esc(t('ride.fromSchedule'))}</div>` : ''}
+      </div>
+      ${tiles.length ? `<div class="score-tiles">${tiles.map(([k, v]) => `
+        <div class="score-tile"><div class="score-key">${esc(k)}</div><div class="score-value">${esc(v)}</div></div>`).join('')}</div>` : ''}
+      ${check.text ? `<div class="ride-callout" data-tone="${check.tone}">${esc(check.text)}</div>` : ''}
+      ${panelSection(t('ride.provenance'), `<div class="panel-line">${esc(provenanceText(r))}</div>${
+        r.scoreboard ? `<pre class="source-ref">${esc(r.scoreboard)}</pre>` : ''}`)}
+      ${panelSection(t('ride.momentsInRide'), `<div class="range-chips">${chips}</div>`)}
+      ${panelSection(t('ride.reference'), `
+        <pre class="source-ref" data-source-ref>${esc(ref.at)}\n${esc(ref.command)}</pre>
+        <button class="link-btn" data-copy-ref="1">${esc(t('player.copy'))}</button>`)}
+    </section>`;
+
+  // What the analysis found beyond the moments: what it looked for and could
+  // not confirm, and whether anything went wrong in the arena.
+  const reference = `
+    <section class="ride-panel">
+      ${notes.length ? panelSection(t('ride.lookedFor'), notes.map((n) => `
+        <div class="panel-line"><b>${esc(n.momentType)}</b> — ${esc(n.notes.join(' '))}</div>`).join('')) : ''}
+      ${panelSection(t('ride.incidents'), incidents.length
+        ? incidents.map((mo) => `<div class="panel-line"><b>${esc(mo.label || mo.momentType)}</b>
+            <span class="mono-soft">${clock(mo.startSec)}</span> — ${esc(mo.summary || '')}</div>`).join('')
+        : `<div class="panel-line">${esc(t('ride.noIncidents'))}</div>`)}
+    </section>`;
+
+  return { summary, reference };
+}
+
+
+/** Re-aim the open player at the whole ride, or at one moment of it. */
+function setPlayerRange(which) {
+  const p = state.playing;
+  if (!p) return;
+  const ride = treeRide(p.rideOrder);
+  if (which === 'full') {
+    if (!ride) return;
+    Object.assign(p, { full: true, start: ride.startSec, end: ride.endSec, label: rideLabel(ride) });
+  } else {
+    const mo = momentById(which) || (ride?.moments || []).find((x) => x.momentId === which);
+    if (!mo) return;
+    Object.assign(p, {
+      full: false,
+      moment: mo,
+      label: mo.label || mo.momentType || '',
+      ...playRange(mo.startSec, mo.endSec, { duration: jobDuration() }),
+    });
+    $('details-title').textContent = mo.summary || mo.label || t('moment.details');
+  }
+  renderDetailsBody();
+  const video = playerEl?.querySelector('video');
+  if (video) {
+    video.currentTime = p.start;
+    video.play().catch(() => {});
+  }
+  syncPlayer();
+}
+
+
+/** One of the player's controls. */
+function playerControl(kind) {
+  const p = state.playing;
+  const video = playerEl?.querySelector('video');
+  if (!p || !video) return;
+  if (kind === 'play') {
+    if (video.paused) {
+      // Play from the top when the range has been watched to its end.
+      if (video.currentTime >= p.end - 0.05 || video.currentTime < p.start) video.currentTime = p.start;
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  } else if (kind === 'back' || kind === 'fwd') {
+    video.currentTime = clampTo(p, video.currentTime + (kind === 'back' ? -5 : 5));
+  } else if (kind === 'loop') {
+    p.loop = !p.loop;
+  } else if (kind === 'speed') {
+    p.rate = nextSpeed(p.rate);
+    video.playbackRate = p.rate;
+  } else if (kind === 'widen') {
+    Object.assign(p, widen(p, { duration: jobDuration() }), { full: false });
+    renderDetailsBody();
+  } else if (kind === 'ride') {
+    setPlayerRange('full');
+    return;
+  }
+  syncPlayer();
+}
+
+
+async function copyReference(button) {
+  const text = $('details').querySelector('[data-source-ref]')?.textContent || '';
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = t('player.copied');
+  } catch {
+    // Clipboard refused (an insecure origin, a denied permission): select the
+    // text instead, so a keyboard copy still works.
+    const pre = $('details').querySelector('[data-source-ref]');
+    if (pre) window.getSelection()?.selectAllChildren(pre);
+  }
 }
 
 
@@ -1545,6 +2100,8 @@ function openGameDetails(game) {
     : '';
 
   $('details-title').textContent = gameHeadline(g);
+  // The player's column is laid out as panels; a game record is the table.
+  $('details-body').className = 'detail-grid';
   $('details-body').innerHTML = rows.map(([label, value]) => `
     <div class="detail-key">${esc(label)}</div>
     <div class="detail-value">${esc(String(value))}</div>`).join('')
@@ -1880,26 +2437,18 @@ function openSearchResult(index, k) {
   if (row.job_id && row.job_id !== state.jobId) selectJob(row.job_id);
   const m = Object.fromEntries(Object.entries(row).map(([key, v]) =>
     [key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), v]));
-  const rows = DETAIL_ROWS.map(([key, read]) => [t(key), read(m)])
-    .filter(([, value]) => value !== '' && value != null);
-  $('details-title').textContent = m.summary || m.label || t('moment.details');
-  $('details-body').innerHTML = rows.map(([label, value]) => `
-    <div class="detail-key">${esc(label)}</div>
-    <div class="detail-value">${esc(String(value))}</div>`).join('');
-  $('details-player').innerHTML = playerMarkup(m);
-  state.details = m.momentId;
-  // The same shape openDetails builds — mountPlayer reads momentId, start
-  // and end off it. This used to be the bare id: the player then looked for
-  // a slot for a moment called undefined, found none, and never asked the
-  // API for the stream, so a moment opened from a search or desk result had
-  // no player while the same moment from its own card played.
-  const duration = Number(state.jobs.find((j) => j.id === (m.jobId || state.jobId))?.media?.durationSec || 0);
-  state.playing = {
-    momentId: m.momentId,
-    ...playRange(Number(m.startSec) || 0, Number(m.endSec) || 0, { duration }),
-  };
-  showDetailsModal(true);
-  mountPlayer();
+  // The same entry openDetails uses, from the row rather than the listener:
+  // the match may only just have been selected, and its moments not arrived.
+  // A ride panel needs that match's tree, which is not here yet either, so a
+  // result opens as the moment alone.
+  openPlayer({
+    key: m.momentId,
+    moment: m,
+    rideOrder: null,
+    label: m.label || m.momentType || '',
+    title: m.summary || m.label || t('moment.details'),
+    ...playRange(Number(m.startSec) || 0, Number(m.endSec) || 0, { duration: jobDuration(m.jobId) }),
+  });
 }
 
 
@@ -2294,6 +2843,9 @@ function actionsRow(msg) {
  */
 function cardAnswersIt(m) {
   if (m.showMoments) return momentsFor(m).list.length > 0;
+  // Only a card with rides in it answers; "no ride matched" leaves the
+  // agent's own reply on screen, which may know why.
+  if (m.showRides) return Boolean(ridesFor(m).asked);
   if (m.showGames) return state.games.length > 0;
   if (m.showGame) return Boolean(state.game);
   return false;
@@ -2328,6 +2880,7 @@ function render() {
       ${m.showSearch ? searchPanel(m, i) + searchCard(m, i) : ''}
       ${m.showDeskMoments ? deskMomentsCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
+      ${m.showRides ? ridesCard(m, i) : ''}
       ${m.showIngest ? ingestCard() : ''}
       ${m.showReel ? reelCard(m, i) : ''}
       ${m.showJobs ? jobsCard(m, i) : ''}
@@ -2439,40 +2992,130 @@ async function ensurePlaybackUrl() {
   return playbackUrl;
 }
 
-function buildPlayerEl(m) {
+/**
+ * The player: the frame, what range it is on, a scrubber across that range,
+ * and the controls an editor judges a movement with.
+ *
+ * Built once per open popup and kept across renders; the range it plays lives
+ * in state.playing and is read on every tick, so a chip, Widen or Full ride
+ * re-aims this same video rather than building another. The scrubber and the
+ * clock are relative to the range, not the match — "0:04 / 5:06" into the
+ * ride, not two hours into the recording.
+ */
+function buildPlayerEl() {
   const el = document.createElement('div');
   el.className = 'inline-player';
   el.innerHTML = `
-    <video playsinline controls preload="none"></video>
-    <div class="player-bar">
-      <span>${clock(m.startSec)} → ${clock(m.endSec)}</span>
-      <span style="flex:1"></span>
-      <button class="link-btn" data-close-player="1">${esc(t('player.close'))}</button>
+    <div class="player-frame">
+      <video playsinline preload="none"></video>
+      <span class="player-tag" data-player-tag></span>
+    </div>
+    <div class="scrub" data-scrub role="slider" tabindex="0" aria-label="${esc(t('player.position'))}">
+      <div class="scrub-track" data-scrub-track><div class="scrub-fill" data-scrub-fill></div></div>
+    </div>
+    <div class="player-controls">
+      <button class="btn-solid player-play" data-pc="play">${esc(t('player.play'))}</button>
+      <button class="pc" data-pc="back" aria-label="${esc(t('player.back5'))}">−5s</button>
+      <button class="pc" data-pc="fwd" aria-label="${esc(t('player.fwd5'))}">+5s</button>
+      <button class="pc" data-pc="loop" aria-pressed="false">${esc(t('player.loop'))}</button>
+      <button class="pc" data-pc="speed" aria-label="${esc(t('player.speed'))}">1×</button>
+      <button class="pc" data-pc="widen" title="${esc(t('player.widenHint'))}">${esc(t('player.widen'))}</button>
+      <button class="pc" data-pc="ride" aria-pressed="false">${esc(t('player.fullRide'))}</button>
+      <span class="player-time" data-player-time>0:00 / 0:00</span>
     </div>`;
+
+  const video = el.querySelector('video');
+  const scrub = el.querySelector('[data-scrub]');
+  // Clicking the picture is play/pause, as on every player people know.
+  video.addEventListener('click', () => playerControl('play'));
+
+  // Drag or click along the bar to move inside the range; arrow keys step a
+  // second, which is what finding the frame a foot lands on takes.
+  const seekTo = (clientX) => {
+    const p = state.playing;
+    if (!p) return;
+    const box = el.querySelector('[data-scrub-track]').getBoundingClientRect();
+    const share = Math.min(Math.max((clientX - box.left) / Math.max(box.width, 1), 0), 1);
+    video.currentTime = p.start + share * (p.end - p.start);
+    syncPlayer();
+  };
+  scrub.addEventListener('pointerdown', (e) => {
+    scrub.setPointerCapture(e.pointerId);
+    seekTo(e.clientX);
+    const move = (ev) => seekTo(ev.clientX);
+    scrub.addEventListener('pointermove', move);
+    scrub.addEventListener('pointerup', () => scrub.removeEventListener('pointermove', move), { once: true });
+  });
+  scrub.addEventListener('keydown', (e) => {
+    const p = state.playing;
+    if (!p || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault();
+    video.currentTime = clampTo(p, video.currentTime + (e.key === 'ArrowLeft' ? -1 : 1));
+    syncPlayer();
+  });
+
+  // The out point is read from state on every tick, because the range moves.
+  video.addEventListener('timeupdate', () => {
+    const p = state.playing;
+    if (!p) return;
+    if (video.currentTime >= p.end) {
+      if (p.loop) video.currentTime = p.start;
+      else video.pause();
+    }
+    syncPlayer();
+  });
+  video.addEventListener('play', syncPlayer);
+  video.addEventListener('pause', syncPlayer);
   return el;
 }
 
+
+/** Bring the controls in line with what is playing and where it is. */
+function syncPlayer() {
+  const p = state.playing;
+  if (!playerEl || !p) return;
+  const video = playerEl.querySelector('video');
+  const length = Math.max(0, p.end - p.start);
+  const at = Math.min(Math.max((video.currentTime || p.start) - p.start, 0), length);
+  const q = (sel) => playerEl.querySelector(sel);
+
+  q('[data-player-tag]').textContent = `${p.label} · ${clock(p.start)}–${clock(p.end)} ${t('player.inSource')}`;
+  q('[data-scrub-fill]').style.width = `${length ? (at / length) * 100 : 0}%`;
+  const scrub = q('[data-scrub]');
+  scrub.setAttribute('aria-valuemin', '0');
+  scrub.setAttribute('aria-valuemax', String(Math.round(length)));
+  scrub.setAttribute('aria-valuenow', String(Math.round(at)));
+  scrub.setAttribute('aria-valuetext', `${shortClock(at)} / ${shortClock(length)}`);
+  q('[data-player-time]').textContent = `${shortClock(at)} / ${shortClock(length)}`;
+  q('[data-pc="play"]').textContent = video.paused ? t('player.play') : t('player.pause');
+  q('[data-pc="loop"]').setAttribute('aria-pressed', String(Boolean(p.loop)));
+  q('[data-pc="speed"]').textContent = `${p.rate}×`;
+  const ride = q('[data-pc="ride"]');
+  ride.hidden = p.rideOrder == null;
+  ride.setAttribute('aria-pressed', String(Boolean(p.full)));
+}
+
+
 /** Re-parent the live player into this render's slot, building it once. */
 async function mountPlayer() {
-  const { momentId, start, end } = state.playing;
+  const { key, start } = state.playing;
   // A moment plays in its details popup and nowhere else. The transcript used
   // to hold a slot of its own under the row, which meant two elements with the
   // same data-slot and the wrong one — the one behind the dialog — winning on
   // document order.
-  const slot = state.details === momentId
-    ? $('details-player').querySelector(`[data-slot="${CSS.escape(momentId)}"]`)
+  const slot = state.details === key
+    ? $('details-player').querySelector(`[data-slot="${CSS.escape(key)}"]`)
     : null;
   if (!slot) return;
 
-  if (playerFor !== momentId) {
+  if (playerFor !== key) {
     destroyPlayer();
-    // The range being played, not the moment's own: a clip carries its own
-    // trim, and the bar under the video is what says where it stops.
-    playerEl = buildPlayerEl({ startSec: start, endSec: end });
-    playerFor = momentId;
+    playerEl = buildPlayerEl();
+    playerFor = key;
   }
 
   if (playerEl.parentElement !== slot) slot.appendChild(playerEl);
+  syncPlayer();
 
   const video = playerEl.querySelector('video');
   if (video.dataset.mounted) return;
@@ -2500,6 +3143,11 @@ async function mountPlayer() {
   }
 
   if (hls) { hls.destroy(); hls = null; }
+  const begin = () => {
+    video.currentTime = state.playing?.start ?? start;
+    video.playbackRate = state.playing?.rate || 1;
+    video.play().catch(() => {});
+  };
   if (window.Hls?.isSupported()) {
     hls = new window.Hls({
       startPosition: start,
@@ -2520,19 +3168,25 @@ async function mountPlayer() {
     });
     hls.loadSource(url);
     hls.attachMedia(video);
-    hls.on(window.Hls.Events.MANIFEST_PARSED, () => { video.currentTime = start; video.play().catch(() => {}); });
+    hls.on(window.Hls.Events.MANIFEST_PARSED, begin);
   } else {
     video.src = url;                       // Safari plays HLS natively
-    video.addEventListener('loadedmetadata', () => {
-      video.currentTime = start; video.play().catch(() => {});
-    }, { once: true });
+    video.addEventListener('loadedmetadata', begin, { once: true });
   }
-
-  // Stop at the out point — this is what replaces a timeline.
-  video.addEventListener('timeupdate', () => {
-    if (video.currentTime >= end) video.pause();
-  });
 }
+
+
+// Space plays and pauses, and the arrow keys step five seconds, while the
+// player is open — unless someone is typing, or the scrubber (which steps a
+// second) has the focus.
+document.addEventListener('keydown', (e) => {
+  if (!state.playing || !playerEl || $('details').classList.contains('hidden')) return;
+  if (e.target.closest('input, textarea, select, [data-scrub], button')) return;
+  if (e.key === ' ') { e.preventDefault(); playerControl('play'); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); playerControl('back'); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); playerControl('fwd'); }
+});
+
 
 function destroyPlayer() {
   if (hls) { hls.destroy(); hls = null; }
@@ -2669,6 +3323,17 @@ function attachCards(index, question) {
     msg.searchResults = null;
   } else if (card === 'activity') {
     msg.showActivity = true;
+  } else if (card === 'rides') {
+    // The rides of one event, narrowed by the rider, horse or score bar the
+    // question names. Which event: the one that ran the named rider — the
+    // open one if it did — else the open one if it has rides at all, else the
+    // first in scope that has. Selecting it re-points the listeners, and the
+    // card waits for its tree rather than answering from the last match's.
+    msg.showRides = true;
+    msg.rideQuery = question;
+    msg.sort = 'score';
+    msg.jobId = rideJobFor(question);
+    if (msg.jobId && msg.jobId !== state.jobId) selectJob(msg.jobId);
   } else if (card === 'games') {
     msg.showGames = true;
     // "show all game details" asked for the records. Leaving each behind its
@@ -3068,8 +3733,14 @@ document.addEventListener('click', (event) => {
     + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
     + '[data-desk-add],[data-ingest-tab],[data-register-hls],[data-schedule-live],'
     + '[data-scope-pick],[data-scope-sport],[data-scope-disc],[data-scope-game],'
-    + '[data-scope-done],[data-scope-back],[data-scope-change]');
+    + '[data-scope-done],[data-scope-back],[data-scope-change],'
+    + '[data-pc],[data-player-range],[data-copy-ref],[data-watch-ride]');
   if (!hit) return;
+
+  if (hit.dataset.pc) { playerControl(hit.dataset.pc); return; }
+  if (hit.dataset.playerRange) { setPlayerRange(hit.dataset.playerRange); return; }
+  if (hit.dataset.copyRef) { copyReference(hit); return; }
+  if (hit.dataset.watchRide) { openRide(Number(hit.dataset.watchRide)); return; }
 
   if (hit.dataset.ask) {
     const q = hit.dataset.ask;

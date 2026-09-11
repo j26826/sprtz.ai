@@ -539,6 +539,190 @@ button.tile:hover { border-color: var(--color-accent); }
   color: var(--color-neutral-700);
 }
 
+/* The player's own controls. The frame carries the range it is on, in the
+   mono — it is the model's reading of where the moment is — on a dark chip,
+   because the picture behind it is not a UI surface (the same reasoning as
+   the thumbnail clock). The bar and the clock under it are relative to the
+   range: "0:04 / 5:06" into the ride, not two hours into the recording. */
+.player-frame { position: relative; }
+.player-tag {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.66);
+  color: #FFFFFF;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  pointer-events: none;
+}
+
+.scrub {
+  padding: 9px 12px;
+  background: var(--color-bg);
+  cursor: pointer;
+  touch-action: none;
+}
+.scrub-track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-neutral-400);
+}
+.scrub-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+.scrub-fill::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  transform: translateY(-50%);
+}
+
+.player-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 10px;
+  background: var(--color-bg);
+}
+.player-play { min-width: 68px; padding: 8px 14px; border-radius: var(--radius-sm); }
+.pc {
+  border: var(--rule-hair) solid var(--color-neutral-400);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  padding: 7px 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.pc:hover { border-color: var(--color-accent); }
+.pc[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+}
+.player-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+/* Beside the player: the ride it is part of, then the moment's own record. */
+.detail-body { min-width: 0; }
+.ride-panel { display: grid; gap: var(--space-4); padding: 14px 16px 16px; }
+.ride-panel-rider { font-size: 16px; font-weight: 600; }
+.ride-panel-sub {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-neutral-700);
+}
+.ride-panel-note { margin-top: 4px; font-size: 11px; color: var(--color-neutral-700); }
+
+/* The ride's readings, one tile each. Separate boxes rather than one ruled
+   block: a ride has anything from one reading to six, and a shared grid shows
+   its empty cells as dead space when the last row is short. */
+.score-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 6px;
+}
+.score-tile {
+  min-width: 0;
+  padding: 8px 10px;
+  border: var(--rule-hair) solid var(--color-neutral-400);
+  border-radius: var(--radius-sm);
+  background: var(--color-neutral-100);
+}
+.score-key {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.score-value {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.ride-callout {
+  padding: 7px 10px;
+  border-left: 2px solid var(--color-neutral-500);
+  background: var(--color-neutral-200);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.ride-callout[data-tone="failed"] { border-left-color: var(--color-accent-2); color: var(--color-accent-2); }
+.ride-callout[data-tone="confirmed"] { border-left-color: var(--color-accent); }
+
+.panel-section { display: grid; gap: 6px; justify-items: start; }
+.panel-section > * { max-width: 100%; }
+.panel-section > .source-ref, .panel-section > .range-chips { justify-self: stretch; }
+.panel-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+.panel-label-record {
+  padding: 12px 16px 6px;
+  border-top: var(--rule-hair) solid var(--color-neutral-300);
+}
+.panel-line { font-size: 12px; line-height: 1.45; color: var(--color-neutral-800); }
+.mono-soft { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-neutral-700); }
+
+.range-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.range-chip {
+  border: var(--rule-hair) solid var(--color-neutral-400);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  padding: 5px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.range-chip span { margin-left: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--color-neutral-700); }
+.range-chip:hover { border-color: var(--color-accent); }
+.range-chip[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+}
+.range-chip[aria-pressed="true"] span { color: var(--color-accent-800); }
+
+.source-ref {
+  margin: 0;
+  padding: 8px 10px;
+  border: var(--rule-hair) solid var(--color-neutral-300);
+  border-radius: var(--radius-sm);
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Ingest */
 
 .dropzone {
@@ -1150,6 +1334,9 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   padding: 11px 14px;
   cursor: pointer;
   font-family: var(--font-body);
+  /* A <button> takes the browser's own text colour, not the page's — black,
+     which on the dark rail left every session name unreadable. */
+  color: var(--color-text);
 }
 
 /* The open session is marked with a rule rather than a fill, so the list keeps
@@ -1203,8 +1390,11 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 .detail-player {
   border-right: var(--rule) solid var(--color-rule);
-  background: var(--color-neutral-900);
+  /* The card's own surface: the video carries its matte (.inline-player), and
+     the ride's summary sits under it on the same ground as the column beside. */
+  background: var(--color-neutral-100);
 }
+.player-under:not(:empty) { border-top: var(--rule-hair) solid var(--color-neutral-300); }
 
 /* A game record has nothing to play, so it gets the whole width rather than a
    black column where a video would be. */
@@ -1214,7 +1404,10 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 /* Sticky against the card's own scroll, so a long record scrolls past a video
    that stays where it is. The column stretches to the row height by default,
    which is what gives this somewhere to stick. */
-.detail-player .player-slot { position: sticky; top: 0; }
+.detail-player .player-slot { position: sticky; top: 0; z-index: 1; }
+/* With the ride's summary under it, a stuck player would slide that summary
+   up behind the video on any screen shorter than both — so it scrolls. */
+.detail-player:has(.player-under:not(:empty)) .player-slot { position: static; }
 
 /* Below this the two would each be too narrow to read, so they stack: the
    video first, because it is what was asked for. */
@@ -1521,6 +1714,47 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .ride-check { font-size: 10.5px; line-height: 1.35; color: var(--color-neutral-700); }
 .ride-check[data-tone="failed"] { color: var(--color-accent-2); font-weight: 700; }
 .ride-check[data-tone="confirmed"] { color: var(--color-neutral-800); }
+
+/* ── A competition day as event → rides → moments ──────────────────────
+   The moments card, grouped. The event names what the groups belong to; each
+   ride is headed like a row of the ride table — order, rider and horse, the
+   result — with its tiles underneath. */
+.event-head {
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+}
+.event-head-text { min-width: 0; }
+
+.ride-group + .ride-group { margin-top: var(--space-3); }
+
+.ride-group-head {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content;
+  column-gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-2) 0;
+  margin-bottom: var(--space-3);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+  font-size: 12px;
+}
+.ride-group-head .ride-who { min-width: 0; }
+
+/* Readings — the test, the total, the placing — in the mono, as in the table. */
+.ride-group-result {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--color-neutral-700);
+  text-align: right;
+}
+.ride-group-result .ride-check { display: block; }
+
+.ride-group-empty {
+  font-size: 12px;
+  color: var(--color-neutral-600);
+  padding-bottom: var(--space-3);
+}
 
 .not-confirmed { line-height: 1.45; }
 .not-confirmed + .not-confirmed { margin-top: var(--space-2); }

@@ -17,7 +17,7 @@ from typing import Any
 from google.adk.tools import ToolContext
 
 from sprtz_agents.config import get_settings
-from sprtz_agents.schemas import GameDetails, Moment
+from sprtz_agents.schemas import GameDetails, Moment, format_timecode
 from sprtz_agents.sports import get_profile, list_sports
 from sprtz_agents.tools import game_summary, grounding, mcp_client
 from sprtz_agents.tools import rides as rides_tool
@@ -936,14 +936,23 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
     }
 
 
-async def _patch_moment_identities(job_id: str, moments: list[Moment], rides: list[dict]) -> int:
+async def _patch_moment_identities(
+    job_id: str, moments: list[Moment], rides: list[dict], *,
+    announce: str = "{n} moments named from the published start list.",
+    stage: str = "analysis",
+) -> int:
     """Re-join stored moments to rides the schedule has just named.
 
     Only moments whose identity actually changed are written: a round the
     graphic already named is unchanged by grounding, and rewriting every moment
     of a day to change forty of them is the kind of write that gets throttled.
-    Never allowed to fail the stage — a moment without a rider is still a
-    moment.
+    The ride order counts as identity too — the event tree groups by it, so a
+    moment whose ride was renumbered and not re-joined would sit under the
+    wrong rider. Never allowed to fail the stage — a moment without a rider is
+    still a moment.
+
+    ``announce`` is the activity-feed line, with ``{n}`` for the count; a live
+    event joining moments to rides the graphics named says so differently.
     """
     try:
         joined = rides_tool.attach_moments([m.model_dump() for m in moments], rides)
@@ -952,8 +961,8 @@ async def _patch_moment_identities(job_id: str, moments: list[Moment], rides: li
              "start_number": j.get("start_number", ""), "ride_order": j.get("ride_order"),
              "identity_source": j.get("identity_source", "")}
             for m, j in zip(moments, joined, strict=True)
-            if (j.get("rider", ""), j.get("horse", ""), j.get("start_number", ""))
-               != (m.rider, m.horse, m.start_number)
+            if (j.get("rider", ""), j.get("horse", ""), j.get("start_number", ""), j.get("ride_order"))
+               != (m.rider, m.horse, m.start_number, m.ride_order)
         ]
         if not changed:
             return 0
@@ -961,8 +970,7 @@ async def _patch_moment_identities(job_id: str, moments: list[Moment], rides: li
             "catalog", "update_moment_identity", {"job_id": job_id, "identities": changed})
         n = int(res.get("updated") or 0) if res.get("status") == "success" else 0
         if n:
-            await _emit(job_id, "analysis",
-                        f"{n} moments named from the published start list.", patched=n)
+            await _emit(job_id, stage, announce.format(n=n), patched=n)
         return n
     except Exception:
         logger.exception("could not patch moment identities for %s", job_id)
@@ -1876,17 +1884,21 @@ async def list_rides(
             lifts a freestyle total and the two are not the same achievement.
 
     Returns:
-        dict with `rides`, each carrying order, rider, horse, startSec, endSec,
-        testType, judgeMarks, totalPct, rank, scoreCheck and scoreSource. A ride
-        whose `scoreCheck` reports a mismatch has a total that does not equal the
-        mean of its own displayed judge marks: something was misread, and the
-        number should not be acted on without someone looking.
+        dict with `rides`, each carrying order, rider, horse, start_sec,
+        end_sec, test_type, judge_marks, total_pct, rank, score_check and
+        score_source. A ride whose `score_check` reports a mismatch has a total
+        that does not equal the mean of its own displayed judge marks: something
+        was misread, and the number should not be acted on without someone
+        looking.
     """
-    result = await mcp_client.call_tool("catalog", "get_game", {"job_id": job_id})
+    # Not get_game: that is the game's shape for the agents' context, and it
+    # leaves the rides out — this tool answered "no rides recorded" for every
+    # event that had them. list_game_rides reads just the rides, one document.
+    result = await mcp_client.call_tool("catalog", "list_game_rides", {"job_id": job_id})
     if result.get("status") == "error":
         return result
 
-    found = (result.get("game") or {}).get("rides") or []
+    found = result.get("rides") or []
     if not found:
         return {"status": "success", "job_id": job_id, "rides": [], "count": 0,
                 "note": "No rides recorded for this job. Only equestrian "
@@ -1911,6 +1923,86 @@ async def list_rides(
         "count": len(narrowed),
         "total_rides": len(found),
     }
+
+
+def _brief_moments(moments: list[dict], limit: int) -> list[dict]:
+    """A ride's moments, best first, cut to what an answer needs.
+
+    The tree carries every field of every moment; a day of forty rides would
+    put all of it in the model's context. The id is kept so a follow-up can
+    fetch or clip the moment itself.
+    """
+    ranked = sorted(moments, key=lambda m: float(m.get("highlightScore") or 0.0), reverse=True)
+    out = []
+    for m in ranked[:max(0, limit)]:
+        brief = {
+            "momentId": m.get("momentId"),
+            "label": m.get("label") or m.get("momentType"),
+            "at": format_timecode(float(m.get("startSec") or 0.0)),
+            "summary": m.get("summary") or m.get("description") or "",
+            "highlightScore": m.get("highlightScore"),
+        }
+        if m.get("requiresHumanReview"):
+            brief["requiresHumanReview"] = True
+        out.append(brief)
+    return out
+
+
+async def get_event(job_id: str, riders: str = "", max_moments_per_ride: int = 5) -> dict:
+    """Return an event as event → rides → moments: every ride (a rider on one
+    horse) in running order, with the moments that happened while they were in
+    the arena.
+
+    Use it for "what did Keller do in the freestyle?", "each rider's best
+    moments", or "which rounds had nothing worth clipping". For the running
+    order and scores alone, `list_rides` is lighter; for every moment in match
+    order, `list_action_plays`.
+
+    Args:
+        job_id: Identifier of the job.
+        riders: Comma-separated riders, horses or combinations to narrow to.
+            Empty for every ride.
+        max_moments_per_ride: The most moments listed under each ride, best
+            first. `momentCount` still says how many there were.
+
+    Returns:
+        dict with `event`: title, discipline, competition, venue, date,
+        outcome, `riders` and `unassignedMoments`. Each ride carries order,
+        startNumber, rider, horse, identitySource, start and end as MM:SS,
+        testType, result (totalPct, place, scoreCheck), momentCount and its
+        `moments`. identitySource "schedule" means the name came from the
+        published start list rather than a graphic — say so. Moments outside
+        every ride are in `unassignedMoments`, not dropped. A job with no rides
+        has an empty `riders`.
+    """
+    result = await mcp_client.call_tool("catalog", "get_event_tree", {"job_id": job_id})
+    if result.get("status") == "error":
+        return result
+    event = dict(result.get("event") or {})
+    found = event.get("riders") or []
+
+    wanted = [w.strip() for w in riders.split(",") if w.strip()]
+    chosen = rides_tool.match_watchlist(found, wanted) if wanted else found
+
+    event["riders"] = [
+        {
+            **{k: v for k, v in ride.items() if k not in ("moments", "startSec", "endSec")},
+            "start": format_timecode(float(ride.get("startSec") or 0.0)),
+            "end": format_timecode(float(ride.get("endSec") or 0.0)),
+            "moments": _brief_moments(ride.get("moments") or [], max_moments_per_ride),
+        }
+        for ride in chosen
+    ]
+    unassigned = event.get("unassignedMoments") or []
+    event["unassignedMomentCount"] = len(unassigned)
+    event["unassignedMoments"] = [] if wanted else _brief_moments(unassigned, max_moments_per_ride)
+    out: dict[str, Any] = {"status": "success", "job_id": job_id, "event": event}
+    if not found:
+        out["note"] = ("No rides recorded for this job. Only equestrian recordings are "
+                       "split into rounds; every moment is under unassignedMoments.")
+    elif wanted and not chosen:
+        out["note"] = f"No ride matched {', '.join(wanted)}."
+    return out
 
 
 async def list_top_moments(limit: int = 20, sport: str = "", job_ids: str = "") -> dict:

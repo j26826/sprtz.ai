@@ -263,6 +263,8 @@ Two consequences are baked into the configuration:
 | `upsert_moments` / `list_moments` | Moments. Embeddings are generated here so the vector width can never drift from the index. |
 | `upsert_clips` / `list_clips` / `update_clip` | Clip suggestions. `update_clip` rejects derived fields rather than writing them. |
 | `knn_search_moments` | Vector retrieval plus Gemini reranking. |
+| `list_game_rides` | A competition day's rides as stored — one document read. `get_game` returns the game in the agents' summary shape, which leaves the rides out. |
+| `get_event_tree` | One event as event → rides (rider + horse) → moments, built from the game record's rides and each moment's ride; served at `GET /api/jobs/{id}/event`. |
 
 ### Search: retrieve, then rerank
 

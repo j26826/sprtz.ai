@@ -142,7 +142,9 @@ def catalog():
                     c.update({k: v for k, v in args.items() if k in ("summary", "competition", "venue")})
             return {"status": "success"}
         if tool == "list_moments":
-            return {"status": "success", "moments": []}
+            return {"status": "success", "moments": [dict(m) for m in state.get("stored", [])]}
+        if tool == "update_moment_identity":
+            return {"status": "success", "updated": len(args.get("identities") or [])}
         if tool == "upsert_moments":
             return {"saved": len(args.get("moments", []))}
         if tool == "cancel_requested":
@@ -410,3 +412,156 @@ class TestLive:
             out = await live.live_tick("j1")
         assert out["status"] == "live"
         assert "last chunk" in out["message"]
+
+
+# --- A day of rounds, live -----------------------------------------------------
+#
+# An equestrian stream reports who was in the arena and what it looked for and
+# did not find. Live mode used to keep neither: the rides were thrown away with
+# the model's answer, so no live moment knew whose round it was and the record
+# had no rides. These pin that both now survive, across chunks.
+
+from sprtz_agents.schemas import EquestrianSegmentAnalysis, NotConfirmed, ObservedRide  # noqa: E402
+from sprtz_agents.tools.analysis import merge_not_confirmed  # noqa: E402
+
+
+def _dressage(*rides, not_confirmed=()) -> EquestrianSegmentAnalysis:
+    return EquestrianSegmentAnalysis(
+        segment_summary="Two tests.", discipline="dressage", discipline_confidence=0.9,
+        rides=[ObservedRide(rider=r, horse=h, start_tc=s, end_tc=e) for r, h, s, e in rides],
+        not_confirmed=[NotConfirmed(moment_type=c, note=n) for c, n in not_confirmed],
+    )
+
+
+def _stored(moment_id: str, peak: float, **over) -> dict:
+    base = {"moment_id": moment_id, "moment_type": "piaffe", "category": "flatwork",
+            "label": "Piaffe", "start_sec": peak - 3, "end_sec": peak + 5, "peak_sec": peak,
+            "confidence": 0.8, "excitement": 0.6, "highlight_score": 0.7, "description": "d",
+            "evidence": [], "rider": "", "horse": "", "start_number": "", "ride_order": None,
+            "identity_source": ""}
+    base.update(over)
+    return base
+
+
+class TestLiveRides:
+    @pytest.mark.asyncio
+    async def test_a_chunks_rides_and_negatives_are_kept_on_it_in_absolute_time(self, catalog):
+        _live(catalog)
+        catalog["job"]["sport"] = "equestrian"
+        catalog["chunks"] = [_chunk(0, 1, 50, status="analysed"), _chunk(1, 51, 100)]
+        analysis = _dressage(("Anna Berger", "Lumière", "00:40", "04:55"),
+                             not_confirmed=[("pirouette", "candidate near 03:12 was a corner")])
+
+        async def fake_analyse(uri, plan, total, sport, sem, language, segment_uri=""):
+            return plan, analysis, None
+
+        with patch.object(live, "_analyse_one", fake_analyse), \
+             patch.object(live, "merge_segment_results", lambda a, sport, job_id: []):
+            out = await live.live_tick("j1")
+
+        finished = _calls(catalog, "finish_live_chunk")[0]
+        (fragment,) = finished["ride_fragments"]
+        # Chunk 1 starts 300s into the recording.
+        assert fragment["start_sec"] == 340.0 and fragment["end_sec"] == 595.0
+        assert (fragment["rider"], fragment["horse"]) == ("Anna Berger", "Lumière")
+        assert finished["not_confirmed"][0]["momentType"] == "pirouette"
+        assert finished["not_confirmed"][0]["notes"][0].startswith("[segment 1]")
+        # The agent's own result stays the short summary it was.
+        assert "record" not in out["results"][0]
+
+    @pytest.mark.asyncio
+    async def test_moments_are_joined_to_rides_and_the_record_carries_them(self, catalog):
+        _live(catalog)
+        catalog["job"]["sport"] = "equestrian"
+        # Chunk 0 was analysed last tick and saw the first half of a ride.
+        catalog["chunks"] = [
+            _chunk(0, 1, 50, status="analysed", discipline="dressage", disciplineConfidence=0.9,
+                   rideFragments=[{"segment": 0, "start_sec": 200.0, "end_sec": 300.0,
+                                   "rider": "Anna Berger", "horse": "Lumière"}]),
+            _chunk(1, 51, 100),
+        ]
+        catalog["stored"] = [_stored("early", 250.0), _stored("late", 380.0),
+                             _stored("between", 590.0)]
+        analysis = _dressage(("Anna Berger", "Lumière", "00:00", "01:40"))
+
+        async def fake_analyse(uri, plan, total, sport, sem, language, segment_uri=""):
+            return plan, analysis, None
+
+        facts = AsyncMock()
+        with patch.object(live, "_analyse_one", fake_analyse), \
+             patch.object(live, "merge_segment_results", lambda a, sport, job_id: []), \
+             patch.object(live, "record_game_facts", facts):
+            await live.live_tick("j1")
+
+        # One ride, stitched across the chunk boundary.
+        rides = facts.await_args.kwargs["rides"]
+        assert len(rides) == 1
+        assert (rides[0]["start_sec"], rides[0]["end_sec"]) == (200.0, 400.0)
+        # The record holds the discipline's label, as an uploaded match's does.
+        assert facts.await_args.kwargs["discipline"] == "Dressage"
+        # Both moments inside the ride are named; the one after it is not.
+        (patched,) = _calls(catalog, "update_moment_identity")
+        named = {i["moment_id"]: i for i in patched["identities"]}
+        assert set(named) == {"early", "late"}
+        assert named["late"]["rider"] == "Anna Berger"
+        assert named["late"]["ride_order"] == 1
+
+    @pytest.mark.asyncio
+    async def test_the_finish_hands_the_whole_days_rides_and_negatives_to_the_record(self, catalog):
+        _live(catalog)
+        catalog["job"]["sport"] = "equestrian"
+        catalog["capture_status"] = "succeeded"
+        catalog["chunks"] = [
+            _chunk(0, 1, 50, status="analysed", discipline="dressage", disciplineConfidence=0.8,
+                   rideFragments=[{"segment": 0, "start_sec": 10.0, "end_sec": 280.0,
+                                   "rider": "Anna Berger", "horse": "Lumière"}],
+                   notConfirmed=[{"momentType": "pirouette", "notes": ["[segment 0] a"]}]),
+            _chunk(1, 51, 100, status="analysed",
+                   rideFragments=[{"segment": 1, "start_sec": 320.0, "end_sec": 590.0,
+                                   "rider": "Jonas Keller", "horse": "Falkenstein"}],
+                   notConfirmed=[{"momentType": "pirouette", "notes": ["[segment 1] b"]},
+                                 {"momentType": "passage", "notes": []}]),
+        ]
+        with patch.object(live, "_record_game_details", AsyncMock(return_value=None)) as game:
+            out = await live.live_tick("j1")
+
+        assert out["status"] == "complete"
+        kwargs = game.await_args.kwargs
+        assert [r["rider"] for r in kwargs["rides"]] == ["Anna Berger", "Jonas Keller"]
+        assert kwargs["not_confirmed"] == [
+            {"momentType": "passage", "notes": []},
+            {"momentType": "pirouette", "notes": ["[segment 0] a", "[segment 1] b"]},
+        ]
+        assert kwargs["discipline"] == "Dressage"
+
+    @pytest.mark.asyncio
+    async def test_a_handball_event_has_no_rides_and_joins_nothing(self, catalog):
+        _live(catalog)
+        catalog["chunks"] = [_chunk(0, 1, 50)]
+        catalog["stored"] = [_stored("m1", 30.0)]
+        analysis = SimpleNamespace(segment_summary="", competition="", venue="", discipline="",
+                                   discipline_confidence=0.0)
+
+        async def fake_analyse(uri, plan, total, sport, sem, language, segment_uri=""):
+            return plan, analysis, None
+
+        facts = AsyncMock()
+        with patch.object(live, "_analyse_one", fake_analyse), \
+             patch.object(live, "merge_segment_results", lambda a, sport, job_id: []), \
+             patch.object(live, "record_game_facts", facts):
+            await live.live_tick("j1")
+
+        assert _calls(catalog, "finish_live_chunk")[0]["ride_fragments"] == []
+        assert facts.await_args.kwargs["rides"] == []
+        assert not _calls(catalog, "update_moment_identity")
+
+
+class TestMergeNotConfirmed:
+    def test_one_entry_per_type_with_every_note_once(self):
+        out = merge_not_confirmed([
+            [{"momentType": "piaffe", "notes": ["x"]}],
+            [{"momentType": "piaffe", "notes": ["x", "y"]}, {"momentType": "passage", "notes": []}],
+            None,
+        ])
+        assert out == [{"momentType": "passage", "notes": []},
+                       {"momentType": "piaffe", "notes": ["x", "y"]}]

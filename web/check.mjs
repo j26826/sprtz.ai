@@ -207,6 +207,24 @@ for (const [, src] of settings.matchAll(/logo(?:Signin)?: '([^']+)'/g)) {
   }
 }
 
+/* ── every url() in a stylesheet is a file that is actually there ─────────── */
+
+// src/ is served as the web root, so a stylesheet's relative url() resolves
+// against where the stylesheet sits under src/. ds/styles.css named its fonts
+// "assets/fonts/…" — /ds/assets/fonts/ once served — and every Geist face
+// 404'd in production while the page quietly fell back to system fonts, which
+// looks like a design choice rather than a broken link.
+for (const sheet of ['src/app.css', 'src/ds/styles.css']) {
+  const css = read(sheet).replace(/\/\*[\s\S]*?\*\//g, ' ');
+  for (const [, raw] of css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)) {
+    if (/^(data:|https?:|#)/.test(raw)) continue;
+    const file = raw.startsWith('/') ? new URL(`src${raw}`, ROOT) : new URL(raw, new URL(sheet, ROOT));
+    if (!existsSync(file)) {
+      fail(`${sheet} loads url(${raw}), which does not exist where it would be served`);
+    }
+  }
+}
+
 if (failures.length) {
   console.error(`web/check.mjs found ${failures.length} problem(s):`);
   for (const message of failures) console.error(`  - ${message}`);

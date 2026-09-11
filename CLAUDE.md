@@ -1713,6 +1713,81 @@ label nor the summary. **The vector index itself is unchanged**: the width is
 the same and nothing new is filtered or ordered on, so there is no new Firestore
 index to declare.
 
+### An event reads as event → rides → moments
+
+A competition day is read by who rode and what happened while they were in the
+arena, so the moments card for a match with rides groups its tiles under each
+ride rather than printing a rider on every tile of one flat grid. **A group is
+a ride — a rider on one horse**, because that is how the class is judged; a
+rider on two horses is two groups.
+
+The grouping is built once, in the catalog (`catalog_server/event_tree.py`,
+tool `get_event_tree`, route `GET /api/jobs/{id}/event`), from records that
+already exist: the game record's `rides` and each moment's `rideOrder`, falling
+back to the peak-in-window rule `rides.attach_moments` uses. Not asked of the
+model: no analysis window sees a whole ride, so a nested answer would be one
+about fragments. `store.event_tree` reads the raw game document because
+`_game_out` drops the rides. A moment outside every ride goes to
+`unassignedMoments` — rendered as "Outside any ride" — and is never dropped.
+
+The browser fetches the tree only when the open game has rides, again only
+when the rides or a moment's `rideOrder` change, and applies it to the live
+moments in `web/src/ridegroups.js` (tested) so the filter, sort, reel star and
+thumbnails keep working. Without a tree — another sport, a failed fetch — the
+flat grid stands.
+
+**A question about rides gets the rides card**, not a moments list filtered
+by the words "ride" and "scoring" — which is what the composer's own example
+"rides scoring more than 70%" used to produce, with the agent's correct answer
+hidden behind it. `cards.js` routes ride/rider words to `rides` (unless the
+question is cutting, posting or ingesting one); `ridegroups.js` reads the
+question against the names the desk holds (whole rider, whole horse, or the
+rider's surname — never half a horse's name) and for a score bar ("more than"
+is strict, "at least" and "or more" are not). `rideJobFor` opens the event
+that ran the named rider, preferring the open one. A total whose check failed
+is left out of a score question and counted on the card, the same rule
+`list_rides` applies for the agent. "events" and "competitions" are the games
+list, as "games" is.
+
+**The player is a ride player.** Opening a moment (or Watch on a ride's
+heading) plays a *range* held in `state.playing` — the moment padded 3s, or
+the whole ride — and every control re-aims that one video rather than building
+another: −5s/+5s, Loop, speed (1× → 0.5× → 0.25× → 2×, slower first because
+judging a movement means watching it slowly), Widen (+5s each side), Full
+ride, and a scrubber and clock relative to the range. Under the player: the
+ride, its score tiles (one per judge — the analysis does not split technical
+and artistic marks, so they are not shown), where the score came from, the
+moments as chips that re-aim the player, and the `ffmpeg` cut of what is
+playing. Beside it: what was looked for and not found *in this ride's own
+analysis windows* (the tree's `segments` against the notes' `[segment N]`
+stamps), the incident scan, and the moment's record. The pure parts —
+speeds, widen, the source reference, the notes filter — are in `player.js` and
+`ridegroups.js`, tested. A player with a summary under it scrolls rather than
+sticks, or the summary would slide behind the video on a short screen.
+
+**`get_game` does not carry the rides.** `_game_out` is the game's shape for
+an agent's context and leaves out `rides`, `notConfirmed`, `judges` and the
+start list. `list_rides` read its rides from it and so told the agent "no
+rides recorded" for every event that had them, while the editor's rides card —
+reading the raw document through the tree — showed them. It reads
+`list_game_rides` now (one document, no moments). Anything else that needs a
+field `_game_out` drops wants its own read, not a wider summary.
+
+The producer reads it through `pipeline.get_event`, not the MCP tool: like
+`list_rides` it is a wrapper that cuts the tree down (best few moments per
+ride, as briefs) so a day of forty rounds fits in the model's context.
+
+**A live event keeps its rides too.** Each chunk stores the rides it saw as
+absolute, unstitched `rideFragments` and its `notConfirmed` notes; every tick
+fuses the whole day from all chunks' fragments (`live.event_rides`), joins the
+stored moments to them through `_patch_moment_identities`, and hands the rides
+to the interim record and, with the merged notes, to the final one. Fused
+again rather than extended, because a ride crossing a chunk boundary is two
+fragments until the second chunk is in. The patch counts `ride_order` as
+identity: the tree groups by it, so a renumbered ride left un-rejoined would
+put its moments under the wrong rider. The chunks store the discipline code;
+the record stores the label, as an upload's does.
+
 ## Known gaps
 
 - **No analytics backend.** The design's post-performance card is deliberately

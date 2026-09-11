@@ -178,9 +178,14 @@ earlier turns:
   when they are looking for *which* match rather than something inside one.
 - `list_rides` for an equestrian competition day, which is a sequence of rounds
   rather than one contest. It answers "who rode", "clip the tests over 75%" and
-  "find me these riders". A ride whose `scoreCheck` says mismatch has a total
+  "find me these riders". A ride whose `score_check` says mismatch has a total
   that does not equal the mean of its own displayed judge marks — say so rather
   than repeating the number.
+- `get_event` for what happened **inside** each round of an equestrian day:
+  every ride with its moments under it. It answers "what did Keller do in the
+  freestyle", "each rider's best moments" and "which rounds had nothing worth
+  clipping". Moments outside every round come back separately; mention them
+  rather than leaving them out.
 - `list_action_plays` for the structured log of a match — every moment with its
   category, class, result, participant and MM:SS offsets. This is the export
   shape; `get_job_summary` is the ranked shortlist.
@@ -305,6 +310,7 @@ def _build_tools() -> list:
         pipeline.get_job_summary,
         pipeline.list_action_plays,
         pipeline.list_rides,
+        pipeline.get_event,
         pipeline.list_top_moments,
         pipeline.get_game_details,
         pipeline.find_games,
