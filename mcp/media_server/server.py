@@ -1057,12 +1057,13 @@ def make_analysis_proxy(gcs_uri: str, job_id: str) -> dict:
 
 
 @mcp.tool
-def start_live_capture(job_id: str, hls_url: str, event_end: str, chunk_sec: int = 0) -> dict:
+def start_live_capture(job_id: str, hls_url: str, event_end: str, chunk_sec: int = 0,
+                       stall_minutes: float = 0, resume: bool = False) -> dict:
     """Start recording a live HLS stream into fixed-length chunks.
 
     One Cloud Run Job execution follows the playlist until `event_end` (or the
-    stream's own end) and records each closed chunk under the job in Firestore
-    for the live tick to analyse. Returns at once; poll with
+    stream's own end, or a stall) and records each closed chunk under the job
+    in Firestore for the live tick to analyse. Returns at once; poll with
     `live_capture_status`.
 
     Args:
@@ -1070,16 +1071,25 @@ def start_live_capture(job_id: str, hls_url: str, event_end: str, chunk_sec: int
         hls_url: https:// URL of the live playlist.
         event_end: ISO 8601 time the recording stops.
         chunk_sec: Chunk length in seconds; the deployment default when 0.
+        stall_minutes: End the event once a stream that was flowing has
+            produced nothing for this long. 0 waits for `event_end`.
+        resume: A restart mid-event. Keeps what was recorded: without it the
+            first start clears the job's live prefix, which on a restart would
+            delete every chunk recorded so far — the analysis already has their
+            moments, but the recording the event is played back from is
+            composed out of those files.
     """
     if not LIVE_CAPTURE_JOB:
         return {"status": "error", "error": "LIVE_CAPTURE_JOB is not configured."}
     try:
-        gcs.delete_prefix(MEDIA_BUCKET, f"jobs/{job_id}/live/")
+        if not resume:
+            gcs.delete_prefix(MEDIA_BUCKET, f"jobs/{job_id}/live/")
         execution = runjobs.run(LIVE_CAPTURE_JOB, {
             "JOB_ID": job_id,
             "HLS_URL": hls_url,
             "EVENT_END": event_end,
             "CHUNK_SEC": str(int(chunk_sec) or LIVE_CHUNK_SECONDS),
+            "STALL_MINUTES": str(max(0.0, float(stall_minutes or 0))),
         })
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not start the live capture for %s", job_id)

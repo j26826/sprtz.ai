@@ -285,6 +285,32 @@ broadcast watchable before it ends, and again when the event finishes so
 clips and source-quality stills have a file to read. The muxed chunk wins
 over the silent one where there is both.
 
+**A stream that stops ends the event.** Stalling is ordinary on a live stream
+— a class ends, the broadcaster stops the encoder, the origin starts answering
+404 — and the recorder used to wait on it until the scheduled end. Castr went
+404 at 17:01 on the LeMieux day and the recorder polled it every three seconds
+for four and a half hours, holding the event open with its bar at 44% and
+logging a full traceback on every poll. Now a stream that has produced nothing
+new for `stallMinutes` ends the way `EXT-X-ENDLIST` does: the partial chunk is
+closed and analysed, the capture is marked `finished` with `endedBy: stalled`,
+and the tick finishes the event normally and says why it ended early. **The
+stall clock starts at the first segment, not at the start of the recording** —
+the recorder begins five minutes early, and a broadcaster who goes live on the
+minute has produced nothing for exactly that long; waiting on a stream that has
+not begun is the lead-in. The limit is an editor setting (default 5 minutes,
+1-240), copied onto the event when it is booked like the metadata language, so
+it reaches the recorder as `STALL_MINUTES` on its execution. An event booked
+before it existed carries none and waits for its end time as before. The cost
+of a short limit is real and worth knowing: a lunch break the broadcaster cuts
+the feed for is, to the recorder, a stream that stopped.
+
+**A restart resumes; it does not start again.** `start_live_capture` clears the
+job's live prefix on a first start, and the restart path went through the same
+call — so restarting a dead recorder mid-event deleted every chunk recorded
+before it. The moments survived in Firestore, but the recording the event is
+played back from is composed out of those files. The restart passes `resume`,
+which keeps them.
+
 **Continuity is checked two-sided.** The recorder notes what it saw; the tick
 checks each chunk against the previous one *as stored* — sequence numbers that
 do not follow on, wall clock that does not agree — because a gap between two

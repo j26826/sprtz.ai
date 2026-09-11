@@ -162,6 +162,17 @@
     </div>
 
     <div class="setting">
+      <label class="field-label" for="set-live-stall" data-i18n="settings.liveStall">
+        End a live event when the stream stops
+      </label>
+      <div class="setting-hint" data-i18n="settings.liveStallHint">
+        Minutes a live stream may stop producing video before the event is
+        finished and analysed. Applies to events scheduled from now on.
+      </div>
+      <input class="input" id="set-live-stall" type="number" min="1" max="240" step="1" />
+    </div>
+
+    <div class="setting">
       <label class="field-label" for="set-theme" data-i18n="settings.theme">Theme</label>
       <div class="setting-hint" data-i18n="settings.themeHint">
         How the editor looks.

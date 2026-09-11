@@ -131,7 +131,20 @@ const DEFAULTS = {
   locale: '',            // empty means "follow the browser"
   metadataLanguage: 'en',
   theme: 'arenos-dark',
+  // Minutes a live stream may stop before the event is finished. Copied onto
+  // the event when it is scheduled, like the metadata language — so this is
+  // a preference about events booked from now on, not about one already
+  // recording. Five, because a stream that has been gone that long has almost
+  // always ended rather than hiccupped.
+  liveStallMinutes: 5,
 };
+
+/** The stall limit the API accepts: at least a minute, at most four hours. */
+export function clampStallMinutes(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return DEFAULTS.liveStallMinutes;
+  return Math.min(240, Math.max(1, n));
+}
 
 let current = { ...DEFAULTS };
 
@@ -149,6 +162,7 @@ export function loadSettings() {
     current.metadataLanguage = DEFAULTS.metadataLanguage;
   }
   if (current.locale && !LOCALES.includes(current.locale)) current.locale = '';
+  current.liveStallMinutes = clampStallMinutes(current.liveStallMinutes);
   return current;
 }
 

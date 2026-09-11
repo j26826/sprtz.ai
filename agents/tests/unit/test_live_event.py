@@ -178,6 +178,9 @@ class TestScheduled:
         started = _calls(catalog, "start_live_capture")[0]
         assert started["hls_url"] == "https://x.test/live.m3u8"
         assert started["event_end"] == catalog["job"]["live"]["eventEnd"]
+        # A first start is not a resume: it clears whatever a previous booking
+        # of this job left under its live prefix.
+        assert "resume" not in started
         assert catalog["job"]["live"]["state"] == "live"
         assert catalog["job"]["live"]["capture"]["execution"] == "exec-1"
 
@@ -362,6 +365,27 @@ class TestLive:
         assert len(_calls(catalog, "start_live_capture")) == 1
         assert catalog["job"]["live"]["captureRestarts"] == 1
         assert catalog["job"]["live"]["state"] == "live"
+
+    @pytest.mark.asyncio
+    async def test_a_restart_keeps_what_was_already_recorded(self, catalog):
+        """A first start clears the job's live prefix; a restart must not.
+
+        It used to go through the same call, and so deleted every chunk
+        recorded before it — the moments survived in Firestore, but the
+        recording the event is played back from is composed out of those files.
+        """
+        _live(catalog)
+        catalog["capture_status"] = "failed"
+        await live.live_tick("j1")
+        assert _calls(catalog, "start_live_capture")[0]["resume"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_restart_carries_the_stall_limit_the_event_was_booked_with(self, catalog):
+        _live(catalog)
+        catalog["job"]["live"]["stallMinutes"] = 12
+        catalog["capture_status"] = "failed"
+        await live.live_tick("j1")
+        assert _calls(catalog, "start_live_capture")[0]["stall_minutes"] == 12
 
     @pytest.mark.asyncio
     async def test_a_hung_recorder_is_cancelled_and_restarted(self, catalog):
@@ -565,3 +589,37 @@ class TestMergeNotConfirmed:
         ])
         assert out == [{"momentType": "passage", "notes": []},
                        {"momentType": "piaffe", "notes": ["x", "y"]}]
+
+
+
+class TestAStreamThatStopped:
+    """A stall is a normal ending, and the event says so."""
+
+    @pytest.mark.asyncio
+    async def test_the_first_start_carries_the_stall_limit(self, catalog):
+        catalog["job"]["live"]["eventStart"] = _iso(5)
+        catalog["job"]["live"]["stallMinutes"] = 5
+        await live.live_tick("j1")
+        assert _calls(catalog, "start_live_capture")[0]["stall_minutes"] == 5
+
+    @pytest.mark.asyncio
+    async def test_an_event_booked_before_the_setting_waits_for_its_end(self, catalog):
+        catalog["job"]["live"]["eventStart"] = _iso(5)
+        catalog["job"]["live"].pop("stallMinutes", None)
+        await live.live_tick("j1")
+        assert _calls(catalog, "start_live_capture")[0]["stall_minutes"] == 0
+
+    @pytest.mark.asyncio
+    async def test_an_event_the_stream_ended_early_says_so_and_is_not_a_warning(self, catalog):
+        """Scheduled until 21:30 and complete at 17:06 reads as a fault unless
+        the event says what happened — which is that the broadcast stopped."""
+        _live(catalog)
+        catalog["capture_status"] = "succeeded"
+        catalog["job"]["live"]["capture"].update({"endedBy": "stalled", "stallMinutes": 5})
+        catalog["chunks"] = [_chunk(0, 1, 50, status="analysed", summary="s", competition="EHF")]
+        with patch.object(live, "_record_game_details", AsyncMock(return_value=None)):
+            out = await live.live_tick("j1")
+        assert out["status"] == "complete"
+        done = [a for a in _calls(catalog, "emit_event") if "complete" in a.get("message", "")][-1]
+        assert "stream stopped" in done["message"] and "5 minutes" in done["message"]
+        assert done["level"] == "info"

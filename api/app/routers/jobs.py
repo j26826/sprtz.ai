@@ -446,6 +446,13 @@ class LiveEventRequest(BaseModel):
     # filename. Defaulting to "derived" keeps an older caller's match named by
     # whatever the analysis reads off the screen, which is what it got before.
     title_source: Literal["editor", "derived"] = "derived"
+    # Minutes a stream that was flowing may produce nothing before the event is
+    # finished. Stalling is ordinary on a live stream — a class ends, the
+    # broadcaster stops the encoder — and without an end to it the recorder
+    # polled a 404 until the scheduled finish. Bounded both ways: under a
+    # minute would end an event on one slow segment, and past four hours the
+    # scheduled end is the closer limit anyway.
+    stall_minutes: float = Field(default=5, ge=1, le=240)
     context_urls: list[str] = Field(default_factory=list)
 
     @field_validator("hls_url")
@@ -500,6 +507,7 @@ async def create_live_event(
             "owner_uid": user.uid,
             "title": body.title,
             "title_source": body.title_source,
+            "stall_minutes": body.stall_minutes,
             "sport": body.sport,
             "gcs_uri": "",
             "original_name": "",
