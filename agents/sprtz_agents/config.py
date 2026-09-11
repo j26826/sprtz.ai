@@ -80,6 +80,10 @@ class Settings:
     # segment, so the chunk length is also the live analysis window.
     live_lead_seconds: int = field(default_factory=lambda: _int_env("SPRTZ_LIVE_LEAD_SECONDS", 300))
     live_chunk_seconds: int = field(default_factory=lambda: _int_env("SPRTZ_LIVE_CHUNK_SECONDS", 300))
+    # Minutes a live stream may stop before the event is finished, for an
+    # event booked before events carried their own. The editor's setting and
+    # the API default are the same five; change all three together.
+    live_stall_minutes: int = field(default_factory=lambda: _int_env("SPRTZ_LIVE_STALL_MINUTES", 5))
     # How long the ingest stage waits for an HLS download before giving up on
     # it. The download is minutes; the 1 fps proxy decodes the whole recording.
     hls_download_timeout_seconds: int = field(

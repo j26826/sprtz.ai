@@ -529,6 +529,10 @@ class Recorder:
         # Why the recording stopped, for the tick to say: "end", "endlist" or
         # "stalled". Empty while it is still going.
         self.ended_by = ""
+        # A restart mid-event. Set by main() from the resume point: this
+        # recording has already seen the stream, so the stall clock is running
+        # from the moment it starts rather than waiting for a first segment.
+        self.resumed = False
         # The event as a playable stream, written beside the recording. A
         # restarted execution is handed the one its predecessor left.
         self.stream = LiveStream()
@@ -584,7 +588,17 @@ class Recorder:
 
     def resolve(self) -> hls.MediaPlaylist | None:
         """Find the media playlist, waiting for a stream that is not up yet."""
-        deadline = time.monotonic() + _PLAYLIST_GRACE_SEC
+        # A stream that is not up yet gets the grace period: producers are late.
+        # A resumed recording's stream is not late, it was flowing and has gone,
+        # so it gets the stall limit instead — and running out of that is the
+        # event ending, not the recorder failing. Without this a recorder
+        # restarted onto a dead stream gave up after ten minutes as "failed",
+        # was restarted three times, and the tick then failed the whole event
+        # over hours of good chunks.
+        grace = _PLAYLIST_GRACE_SEC
+        if self.resumed and self.stall_sec:
+            grace = min(grace, self.stall_sec)
+        deadline = time.monotonic() + grace
         while True:
             try:
                 text = _fetch(self.hls_url).decode("utf-8", "replace")
@@ -605,6 +619,11 @@ class Recorder:
                 return playlist
             except Exception as exc:  # noqa: BLE001
                 if time.monotonic() > deadline or now() >= self.event_end:
+                    if self.resumed and self.stall_sec:
+                        logger.info("the stream is gone (%s) and has been for the stall limit; "
+                                    "ending the capture", exc)
+                        self.ended_by = "stalled"
+                        return None
                     self.error = f"the stream never answered: {type(exc).__name__}: {exc}"
                     return None
                 logger.info("stream not ready (%s); retrying", exc)
@@ -802,6 +821,15 @@ class Recorder:
     def run(self) -> int:
         playlist = self.resolve()
         if playlist is None:
+            if self.ended_by == "stalled":
+                # Nothing new to close — the predecessor closed its chunks and
+                # the stream has nothing more. The event is over, cleanly.
+                if self.store.stream_bucket is not None and self.stream.entries:
+                    self.stream.ended = True
+                    self._write_stream()
+                self.state = "finished"
+                self.report()
+                return 0
             self.state = "failed"
             self.report()
             logger.error("%s", self.error)
@@ -815,7 +843,10 @@ class Recorder:
         # produced nothing for exactly that long. Waiting on a stream that has
         # not begun is the lead-in; a stream that was flowing and stopped is
         # the thing being measured.
-        last_new: float | None = None
+        # A resumed recording has seen the stream already, hours of it, so its
+        # clock runs from this restart rather than waiting for a first segment
+        # that a stream which has gone will never send.
+        last_new: float | None = time.monotonic() if self.resumed else None
         fetch_failures = 0
         while True:
             if now() >= self.event_end:
@@ -930,6 +961,7 @@ def main() -> int:
     try:
         point = store.resume_point()
         if point["next_index"]:
+            recorder.resumed = True
             recorder.assembler.next_index = point["next_index"]
             recorder.cumulative_sec = point["cumulative_sec"]
             recorder.chunks_captured = point["next_index"]

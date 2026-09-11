@@ -603,11 +603,23 @@ class TestAStreamThatStopped:
         assert _calls(catalog, "start_live_capture")[0]["stall_minutes"] == 5
 
     @pytest.mark.asyncio
-    async def test_an_event_booked_before_the_setting_waits_for_its_end(self, catalog):
+    async def test_an_event_booked_before_the_setting_gets_the_default(self, catalog):
+        """It used to wait for its end time. The LeMieux day was booked an hour
+        before the setting existed and polled a stream gone since 17:01 all the
+        way to 21:30 — the rule is that a stream which stops ends the event,
+        not that it does for events booked after the rule was written."""
         catalog["job"]["live"]["eventStart"] = _iso(5)
         catalog["job"]["live"].pop("stallMinutes", None)
         await live.live_tick("j1")
-        assert _calls(catalog, "start_live_capture")[0]["stall_minutes"] == 0
+        assert _calls(catalog, "start_live_capture")[0]["stall_minutes"] == 5
+
+    @pytest.mark.asyncio
+    async def test_a_restart_of_an_old_booking_gets_the_default_too(self, catalog):
+        _live(catalog)
+        catalog["job"]["live"].pop("stallMinutes", None)
+        catalog["capture_status"] = "failed"
+        await live.live_tick("j1")
+        assert _calls(catalog, "start_live_capture")[0]["stall_minutes"] == 5
 
     @pytest.mark.asyncio
     async def test_an_event_the_stream_ended_early_says_so_and_is_not_a_warning(self, catalog):

@@ -266,7 +266,7 @@ async def _start_if_due(job_id: str, job: dict, live: dict, at: datetime, settin
         "hls_url": job.get("hlsUrl", ""),
         "event_end": end.isoformat(),
         "chunk_sec": chunk_sec,
-        "stall_minutes": float(live.get("stallMinutes") or 0),
+        "stall_minutes": _stall_minutes(live),
     })
     if started.get("status") != "started":
         return await _fail(
@@ -396,6 +396,19 @@ async def _advance(job_id: str, job: dict, live: dict, at: datetime, settings) -
     }
 
 
+def _stall_minutes(live: dict) -> float:
+    """How long this event's stream may stop before the event is finished.
+
+    The event's own limit, copied from the editor's settings when it was
+    booked; the deployment's default for one booked before events carried one.
+    That fallback is the point: the LeMieux day was booked an hour before the
+    setting existed, so it had no limit, and its recorder polled a stream that
+    had been gone since 17:01 all the way to the scheduled 21:30.
+    """
+    own = live.get("stallMinutes")
+    return float(own) if own else float(get_settings().live_stall_minutes)
+
+
 async def _keep_recorder_alive(job_id: str, job: dict, live: dict, capture: dict,
                                exec_state: str, at: datetime, end: datetime) -> dict | None:
     """Restart a recorder that has died or hung while the event is still on.
@@ -441,7 +454,7 @@ async def _keep_recorder_alive(job_id: str, job: dict, live: dict, capture: dict
     started = await mcp_client.call_tool("media", "start_live_capture", {
         "job_id": job_id, "hls_url": job.get("hlsUrl", ""), "event_end": end.isoformat(),
         "chunk_sec": int(live.get("chunkSec") or 0),
-        "stall_minutes": float(live.get("stallMinutes") or 0),
+        "stall_minutes": _stall_minutes(live),
         "resume": True,
     })
     if started.get("status") != "started":
