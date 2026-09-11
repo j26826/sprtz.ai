@@ -211,6 +211,142 @@ class AudioParts:
         return names, missing, stale
 
 
+# --- The event as a playable stream ---------------------------------------------
+
+# Where the stream lives in the HLS bucket, beside the package rather than
+# inside it: an encode clears `jobs/{job}/hls/` before it writes, and the stream
+# is what an editor is watching while that encode runs.
+STREAM_DIR = "live"
+STREAM_PLAYLIST = "index.m3u8"
+# The playlist changes every few seconds, so the CDN must never answer from a
+# copy. It caches purely by origin headers, so this header is the whole
+# arrangement. Segments never change once written.
+STREAM_PLAYLIST_CACHE = "no-cache, no-store, max-age=0"
+STREAM_SEGMENT_CACHE = "public, max-age=86400"
+
+
+class LiveStream:
+    """The event so far as an HLS playlist, grown one segment at a time.
+
+    A live event had nothing to play until someone packaged it, and packaging
+    is an encode of the whole recording — so every moment the analysis found
+    while the event was on opened on "not packaged for playback yet". The
+    recorder already holds each segment as it arrives; writing them where the
+    CDN serves from, with a playlist beside them, is a stream of the event
+    that can be watched from its first analysed chunk, with no encode at all.
+
+    **Time on this playlist is time on the event.** The moments carry offsets
+    from the first segment the recorder took, so the playlist starts at that
+    segment and a segment that could not be fetched keeps its place as an
+    `EXT-X-GAP` rather than being left out — leaving it out would pull every
+    later segment earlier by its length, and every moment after it would open
+    on the wrong few seconds without anything saying so. A gap before the first
+    segment is not written, because the event's clock starts at the first
+    segment that was recorded.
+
+    `EVENT` rather than a sliding window, so the whole day stays seekable;
+    `EXT-X-ENDLIST` once the recording has finished, which makes it a plain VOD.
+    Pure: the recorder uploads what `render` returns.
+    """
+
+    def __init__(self, container: str = "ts", target_duration: float = 6.0):
+        self.container = container
+        self.target_duration = float(target_duration)
+        self.entries: list[tuple[int, float, bool]] = []   # (seq, duration, is_gap)
+        self.init_name = ""
+        self.ended = False
+
+    def segment_name(self, seq: int) -> str:
+        return f"{int(seq):09d}.{'m4s' if self.container == 'mp4' else 'ts'}"
+
+    @property
+    def last_seq(self) -> int | None:
+        return self.entries[-1][0] if self.entries else None
+
+    def add(self, seq: int, duration: float) -> bool:
+        """List a segment. Returns False for one already listed."""
+        return self._append(seq, duration, gap=False)
+
+    def add_gap(self, seq: int, duration: float) -> bool:
+        """Hold a missing segment's place, so the time after it stays true."""
+        if not self.entries:
+            return False
+        return self._append(seq, duration, gap=True)
+
+    def _append(self, seq: int, duration: float, *, gap: bool) -> bool:
+        last = self.last_seq
+        # A restarted recorder takes the whole window it first sees, which can
+        # overlap what the last one listed; the playlist only moves forward.
+        if last is not None and seq <= last:
+            return False
+        if last is not None:
+            # Segments that slid past before anyone fetched them: their exact
+            # length is unknown, the target duration is what they almost were.
+            for missing in range(last + 1, seq):
+                self.entries.append((missing, self.target_duration, True))
+        self.entries.append((int(seq), float(duration), gap))
+        return True
+
+    def duration(self) -> float:
+        return sum(d for _, d, _ in self.entries)
+
+    def render(self) -> str:
+        if not self.entries:
+            return ""
+        longest = max(d for _, d, _ in self.entries)
+        lines = [
+            "#EXTM3U",
+            # Fractional EXTINF needs 3; an initialisation map needs 6.
+            f"#EXT-X-VERSION:{6 if self.init_name else 3}",
+            # RFC 8216: every EXTINF rounded to the nearest integer must not
+            # exceed it. Half-up, not ceiling — a ceiling turns 6.006 into 7 and
+            # the player then reloads the playlist a second later than it could.
+            f"#EXT-X-TARGETDURATION:{max(1, int(longest + 0.5))}",
+            f"#EXT-X-MEDIA-SEQUENCE:{self.entries[0][0]}",
+            "#EXT-X-PLAYLIST-TYPE:EVENT",
+        ]
+        if self.init_name:
+            lines.append(f'#EXT-X-MAP:URI="{self.init_name}"')
+        for seq, duration, gap in self.entries:
+            if gap:
+                lines.append("#EXT-X-GAP")
+            lines.append(f"#EXTINF:{duration:.3f},")
+            lines.append(self.segment_name(seq))
+        if self.ended:
+            lines.append("#EXT-X-ENDLIST")
+        return "\n".join(lines) + "\n"
+
+    @classmethod
+    def parse(cls, text: str, container: str = "ts") -> LiveStream:
+        """Read back a playlist this class wrote, for a restarted recorder.
+
+        Never ended: a recording being resumed is still going, and an
+        EXT-X-ENDLIST left from the execution that died would tell every
+        player the event was over.
+        """
+        stream = cls(container)
+        duration: float | None = None
+        gap = False
+        for raw in (text or "").splitlines():
+            line = raw.strip()
+            if line.startswith("#EXT-X-MAP:") and 'URI="' in line:
+                stream.init_name = line.split('URI="', 1)[1].split('"', 1)[0]
+            elif line == "#EXT-X-GAP":
+                gap = True
+            elif line.startswith("#EXTINF:"):
+                try:
+                    duration = float(line[len("#EXTINF:"):].split(",", 1)[0])
+                except ValueError:
+                    duration = None
+            elif line and not line.startswith("#"):
+                stem, _, ext = line.rpartition(".")
+                if duration is not None and stem.isdigit():
+                    stream.container = "mp4" if ext == "m4s" else "ts"
+                    stream.entries.append((int(stem), duration, gap))
+                duration, gap = None, False
+        return stream
+
+
 def chunk_record(chunk: Chunk, gcs_uri: str, container: str,
                  capture_start: datetime | None, cumulative_sec: float,
                  audio: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -258,19 +394,42 @@ def chunk_record(chunk: Chunk, gcs_uri: str, container: str,
 class Store:
     """What the recorder writes: parts and chunks to GCS, records to Firestore."""
 
-    def __init__(self, job_id: str, bucket: str):
+    def __init__(self, job_id: str, bucket: str, stream_bucket: str = ""):
         from google.cloud import firestore, storage
 
         self.job_id = job_id
-        self.bucket = storage.Client().bucket(bucket)
+        client = storage.Client()
+        self.bucket = client.bucket(bucket)
         self.bucket_name = bucket
+        # The HLS bucket, which the CDN serves. Empty means no stream is written
+        # — an execution started from a template that does not name it.
+        self.stream_bucket = client.bucket(stream_bucket) if stream_bucket else None
         self.db = firestore.Client(project=os.environ.get("GOOGLE_CLOUD_PROJECT") or None)
         self.prefix = f"jobs/{job_id}/live"
+        self.stream_prefix = f"jobs/{job_id}/{STREAM_DIR}"
 
     def put(self, name: str, data: bytes, content_type: str) -> str:
         blob = self.bucket.blob(name)
         blob.upload_from_string(data, content_type=content_type)
         return f"gs://{self.bucket_name}/{name}"
+
+    def put_stream(self, name: str, data: bytes, content_type: str, cache_control: str) -> None:
+        """Write one object of the playable stream, under the stream prefix."""
+        if self.stream_bucket is None:
+            return
+        blob = self.stream_bucket.blob(f"{self.stream_prefix}/{name}")
+        blob.cache_control = cache_control
+        blob.upload_from_string(data, content_type=content_type)
+
+    def read_stream(self) -> str:
+        """The playlist a previous execution left, or empty."""
+        if self.stream_bucket is None:
+            return ""
+        blob = self.stream_bucket.blob(f"{self.stream_prefix}/{STREAM_PLAYLIST}")
+        try:
+            return blob.download_as_bytes().decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001  — NotFound on a first start
+            return ""
 
     def compose(self, names: list[str], dest: str, content_type: str) -> str:
         """Join objects server-side, in order, however many there are.
@@ -370,6 +529,10 @@ class Recorder:
         # Why the recording stopped, for the tick to say: "end", "endlist" or
         # "stalled". Empty while it is still going.
         self.ended_by = ""
+        # The event as a playable stream, written beside the recording. A
+        # restarted execution is handed the one its predecessor left.
+        self.stream = LiveStream()
+        self.stream_failures = 0
         self.assembler = ChunkAssembler(chunk_sec)
         self.variant: hls.Variant | None = None
         self.media_url = hls_url
@@ -405,6 +568,10 @@ class Recorder:
             "error": self.error,
             "endedBy": self.ended_by,
             "stallMinutes": round(self.stall_sec / 60, 2),
+            # What /playback serves for this event. Only once something is in
+            # it — a playlist with no segments is a player that spins forever.
+            "stream": (f"{self.store.stream_prefix}/{STREAM_PLAYLIST}"
+                       if self.store.stream_bucket is not None and self.stream.entries else ""),
         }
 
     def report(self) -> None:
@@ -490,6 +657,39 @@ class Recorder:
             taken += 1
         return taken
 
+    # -- the playable stream --
+
+    def _stream_write(self, what: str, action) -> None:
+        """Run one write of the stream, never letting it stop the recording.
+
+        The stream is how an editor watches; the recording is what the analysis
+        reads and what the event is. A playback copy that fails is a warning —
+        a recorder that dropped segments because it could not write one would
+        be the worst possible trade. One traceback, then a line every twenty.
+        """
+        try:
+            action()
+            self.stream_failures = 0
+        except Exception as exc:  # noqa: BLE001
+            self.stream_failures += 1
+            if self.stream_failures == 1:
+                logger.warning("could not write the playable stream (%s)", what, exc_info=True)
+            elif self.stream_failures % 20 == 0:
+                logger.warning("the playable stream is still failing (%d): %s",
+                               self.stream_failures, exc)
+
+    def _stream_segment(self, segment: hls.Segment, data: bytes, mime: str) -> None:
+        name = self.stream.segment_name(segment.seq)
+        self._stream_write(name, lambda: self.store.put_stream(
+            name, data, mime, STREAM_SEGMENT_CACHE))
+
+    def _write_stream(self) -> None:
+        text = self.stream.render()
+        if text:
+            self._stream_write(STREAM_PLAYLIST, lambda: self.store.put_stream(
+                STREAM_PLAYLIST, text.encode("utf-8"), "application/vnd.apple.mpegurl",
+                STREAM_PLAYLIST_CACHE))
+
     # -- segments and chunks --
 
     def _ensure_init(self, playlist: hls.MediaPlaylist) -> None:
@@ -498,6 +698,9 @@ class Recorder:
         data = _fetch(playlist.init_url)
         self.init_name = f"{self.store.prefix}/init.mp4"
         self.store.put(self.init_name, data, "video/mp4")
+        self.stream.init_name = "init.mp4"
+        self._stream_write("init.mp4", lambda: self.store.put_stream(
+            "init.mp4", data, "video/mp4", STREAM_SEGMENT_CACHE))
 
     def take(self, playlist: hls.MediaPlaylist) -> int:
         """Download every segment not yet seen; returns how many."""
@@ -507,7 +710,10 @@ class Recorder:
             self.assembler.note_gap(missed, missed * playlist.target_duration)
             logger.warning("playlist slid past %d segment(s) before they were fetched", missed)
         self._ensure_init(playlist)
+        self.stream.container = self.container
+        self.stream.target_duration = playlist.target_duration or self.stream.target_duration
         taken = 0
+        listed = False
         ext = "m4s" if self.container == "mp4" else "ts"
         mime = "video/iso.segment" if ext == "m4s" else "video/mp2t"
         for segment in fresh:
@@ -517,13 +723,21 @@ class Recorder:
             self.next_seq = segment.seq + 1
             if data is None:
                 self.assembler.note_gap(1, segment.duration)
+                listed = self.stream.add_gap(segment.seq, segment.duration) or listed
                 continue
             if self.capture_start is None:
                 self.capture_start = segment.pdt or now()
             name = f"{self.store.prefix}/parts/{segment.seq:09d}.{ext}"
             self.store.put(name, data, mime)
             self.assembler.add(segment, name)
+            # The segment first and the playlist after, so a player is never
+            # told about an object that is not there yet.
+            if self.store.stream_bucket is not None:
+                self._stream_segment(segment, data, mime)
+                listed = self.stream.add(segment.seq, segment.duration) or listed
             taken += 1
+        if listed:
+            self._write_stream()
         return taken
 
     def _download(self, segment: hls.Segment) -> bytes | None:
@@ -660,6 +874,13 @@ class Recorder:
                 except Exception:  # noqa: BLE001
                     logger.warning("audio poll failed; will retry", exc_info=True)
         self.close_chunk()
+        # Finished cleanly, so the stream is complete: ENDLIST makes it an
+        # ordinary VOD, and a player stops asking for a newer playlist.
+        # Not on the failure path — a recorder that died is restarted, and
+        # its successor carries the same stream on.
+        if self.store.stream_bucket is not None and self.stream.entries:
+            self.stream.ended = True
+            self._write_stream()
         self.state = "finished"
         self.report()
         return 0
@@ -692,9 +913,20 @@ def main() -> int:
         stall_min = float(os.environ.get("STALL_MINUTES") or 0)
     except ValueError:
         stall_min = 0.0
-    store = Store(job_id, MEDIA_BUCKET)
+    # The HLS bucket, which the CDN serves: where the playable stream goes.
+    # Handed over per execution by start_live_capture.
+    store = Store(job_id, MEDIA_BUCKET, os.environ.get("HLS_BUCKET", ""))
     recorder = Recorder(job_id, hls_url, event_end, chunk_sec, store, execution,
                         stall_sec=stall_min * 60)
+    # A restart carries on the stream its predecessor was writing. A first
+    # start finds nothing — start_live_capture clears the prefix — and that is
+    # the same code path.
+    try:
+        recorder.stream = LiveStream.parse(store.read_stream())
+        if recorder.stream.entries:
+            logger.info("continuing the playable stream after segment %d", recorder.stream.last_seq)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not read the previous stream; starting a new one", exc_info=True)
     try:
         point = store.resume_point()
         if point["next_index"]:

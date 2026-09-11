@@ -1084,12 +1084,19 @@ def start_live_capture(job_id: str, hls_url: str, event_end: str, chunk_sec: int
     try:
         if not resume:
             gcs.delete_prefix(MEDIA_BUCKET, f"jobs/{job_id}/live/")
+            # And the playable stream a previous booking of this job left in
+            # the HLS bucket, or a player would open on the last event's video.
+            if HLS_BUCKET:
+                gcs.delete_prefix(HLS_BUCKET, f"jobs/{job_id}/live/")
         execution = runjobs.run(LIVE_CAPTURE_JOB, {
             "JOB_ID": job_id,
             "HLS_URL": hls_url,
             "EVENT_END": event_end,
             "CHUNK_SEC": str(int(chunk_sec) or LIVE_CHUNK_SECONDS),
             "STALL_MINUTES": str(max(0.0, float(stall_minutes or 0))),
+            # Where the recorder writes the event as a stream the CDN can serve,
+            # so a moment can be watched while the event is still on.
+            "HLS_BUCKET": HLS_BUCKET,
         })
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not start the live capture for %s", job_id)

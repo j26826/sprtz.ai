@@ -115,8 +115,14 @@ def playback(
     key_value: str,
     ttl_seconds: int,
     playlist: str = "master.m3u8",
+    folder: str = "hls",
 ) -> dict:
-    """Build the playback URLs and the cookie that authorises them."""
+    """Build the playback URLs and the cookie that authorises them.
+
+    ``folder`` is which of the job's streams: ``hls`` for the encoded package,
+    ``live`` for the stream a live event's recorder writes as it goes. Both sit
+    under the same signed prefix, so one cookie authorises either.
+    """
     if not (key_name and key_value and cdn_base_url):
         # Unsigned delivery is not viable: the bucket is private, so handing back
         # a bare URL would surface as an opaque 403 inside the player.
@@ -127,7 +133,7 @@ def playback(
     expires_at = int(time.time()) + ttl_seconds
 
     return {
-        "hls_url": f"{prefix}hls/{playlist}",
+        "hls_url": f"{prefix}{folder}/{playlist}",
         "poster_url": f"{prefix}poster.jpg",
         "cookie_name": COOKIE_NAME,
         "cookie_value": sign_cookie(
