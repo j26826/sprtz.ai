@@ -1835,6 +1835,20 @@ moments in `web/src/ridegroups.js` (tested) so the filter, sort, reel star and
 thumbnails keep working. Without a tree — another sport, a failed fetch — the
 flat grid stands.
 
+**Two sorts, because two questions are being asked of one screen.** Best
+first / match order in the board's head orders the **rides** — best first puts
+the round holding the day's strongest moment at the top of the rail, so the
+highlight is the first tab rather than somewhere down a running order of forty
+— and the same pair inside the pane orders **that ride's moments**. They were
+one control, so asking for one rider's best moment re-sorted every rider and
+the day's best could not be asked for at all. A ride is ranked by its best
+moment rather than by its score: this control sits above the moments, and a
+round that scored 68 can still hold the thing worth cutting. The rail sort is
+stable, so rounds that found nothing keep their running order among themselves;
+a score bar in the question still ranks by total, because that is the order a
+question about scores is asking to see. The pane follows the board until
+somebody sets it, and follows it again whenever the board changes.
+
 **A question about rides gets the rides card**, not a moments list filtered
 by the words "ride" and "scoring" — which is what the composer's own example
 "rides scoring more than 70%" used to produce, with the agent's correct answer
