@@ -266,6 +266,7 @@ async def _start_if_due(job_id: str, job: dict, live: dict, at: datetime, settin
         "hls_url": job.get("hlsUrl", ""),
         "event_end": end.isoformat(),
         "chunk_sec": chunk_sec,
+        "stall_minutes": float(live.get("stallMinutes") or 0),
     })
     if started.get("status") != "started":
         return await _fail(
@@ -433,9 +434,15 @@ async def _keep_recorder_alive(job_id: str, job: dict, live: dict, capture: dict
                 "media", "cancel_live_capture", {"execution": capture["execution"]})
         except Exception:
             logger.warning("could not cancel the hung recorder for %s", job_id, exc_info=True)
+    # resume: this is the same event carrying on. A first start clears the
+    # job's live prefix, and doing that here deleted every chunk recorded
+    # before the restart — the moments survived in Firestore, but the
+    # recording the event is played back from is composed out of those files.
     started = await mcp_client.call_tool("media", "start_live_capture", {
         "job_id": job_id, "hls_url": job.get("hlsUrl", ""), "event_end": end.isoformat(),
         "chunk_sec": int(live.get("chunkSec") or 0),
+        "stall_minutes": float(live.get("stallMinutes") or 0),
+        "resume": True,
     })
     if started.get("status") != "started":
         return await _fail(job_id, f"{why[0].upper()}{why[1:]}, and it could not be restarted: "
@@ -713,9 +720,17 @@ async def _finish(job_id: str, job: dict, sport: str, profile, chunks: list[dict
         note = f" {len(failed)} chunk(s) failed and are missing from the timeline."
     if exec_state == "failed":
         note += " The recorder stopped early; the event may be incomplete."
+    # A stall is a normal ending, and it says so — otherwise an event
+    # scheduled until 21:30 that completes at 17:06 reads as something having
+    # gone wrong, when what happened is that the broadcast stopped.
+    capture = (job.get("live") or {}).get("capture") or {}
+    ended = ""
+    if capture.get("endedBy") == "stalled":
+        ended = (f" The stream stopped producing video, and the event was finished after "
+                 f"{float(capture.get('stallMinutes') or 0):g} minutes without it.")
     await _emit(
         job_id, "live",
-        f"Live event complete: {len(analysed)} chunks analysed, {len(moments)} key moments.{note}",
+        f"Live event complete: {len(analysed)} chunks analysed, {len(moments)} key moments.{ended}{note}",
         level="warning" if note else "info",
         chunks=len(analysed), moments=len(moments), failed_chunks=failed,
     )

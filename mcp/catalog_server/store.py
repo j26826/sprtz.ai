@@ -700,7 +700,8 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                kind: str = "upload", hls_url: str = "",
                event_start: str = "", event_end: str = "",
                chunk_sec: int = 0, make_clips: bool = True,
-               title_source: str = "derived") -> dict[str, Any]:
+               title_source: str = "derived",
+               stall_minutes: float = 0) -> dict[str, Any]:
     """Open a job. Three kinds, told apart by where the video comes from.
 
     ``upload`` has its source in the bucket already. ``hls`` has only a URL and
@@ -762,6 +763,11 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
             "eventStart": event_start,
             "eventEnd": event_end,
             "chunkSec": int(chunk_sec or 0),
+            # Minutes a stream that was flowing may stop before the event is
+            # finished. Copied from the editor's settings when it was booked,
+            # like the metadata language: what an event was recorded under
+            # does not change because someone's preference did afterwards.
+            "stallMinutes": max(0.0, float(stall_minutes or 0)),
             "state": "scheduled",
             "chunksCaptured": 0,
             "chunksAnalysed": 0,

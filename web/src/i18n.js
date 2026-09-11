@@ -369,6 +369,8 @@ const STRINGS = {
     'rename.failed': 'That name could not be saved',
     'rides.sortEvent': 'Order the rides',
     'rides.sortRide': 'Order this ride’s moments',
+    'settings.liveStall': 'End a live event when the stream stops',
+    'settings.liveStallHint': 'Minutes a live stream may stop producing video before the event is finished and analysed. Applies to events scheduled from now on.',
   },
 
   'en-US': {
@@ -748,6 +750,8 @@ const STRINGS = {
     'rename.failed': 'Dieser Name konnte nicht gespeichert werden',
     'rides.sortEvent': 'Ritte sortieren',
     'rides.sortRide': 'Szenen dieses Ritts sortieren',
+    'settings.liveStall': 'Live-Event beenden, wenn der Stream stoppt',
+    'settings.liveStallHint': 'Minuten, die ein Live-Stream ohne neues Video bleiben darf, bevor das Event abgeschlossen und analysiert wird. Gilt für ab jetzt geplante Events.',
   },
 
   it: {
@@ -1105,6 +1109,8 @@ const STRINGS = {
     'rename.failed': 'Non è stato possibile salvare questo nome',
     'rides.sortEvent': 'Ordina le riprese',
     'rides.sortRide': 'Ordina i momenti di questa ripresa',
+    'settings.liveStall': 'Termina un evento live quando lo stream si ferma',
+    'settings.liveStallHint': 'Minuti in cui uno stream live può smettere di produrre video prima che l’evento venga chiuso e analizzato. Vale per gli eventi programmati da ora in poi.',
   },
 
   fr: {
@@ -1465,6 +1471,8 @@ const STRINGS = {
     'rename.failed': 'Ce nom n a pas pu être enregistré',
     'rides.sortEvent': 'Trier les reprises',
     'rides.sortRide': 'Trier les moments de cette reprise',
+    'settings.liveStall': 'Terminer un événement live quand le flux s’arrête',
+    'settings.liveStallHint': 'Minutes pendant lesquelles un flux live peut cesser de produire de la vidéo avant que l’événement soit clos et analysé. S’applique aux événements programmés à partir de maintenant.',
   },
 
   es: {
@@ -1822,6 +1830,8 @@ const STRINGS = {
     'rename.failed': 'No se pudo guardar ese nombre',
     'rides.sortEvent': 'Ordenar los recorridos',
     'rides.sortRide': 'Ordenar los momentos de este recorrido',
+    'settings.liveStall': 'Terminar un evento en directo cuando la emisión se detiene',
+    'settings.liveStallHint': 'Minutos que una emisión en directo puede dejar de producir vídeo antes de que el evento se cierre y se analice. Se aplica a los eventos programados a partir de ahora.',
   },
 };
 

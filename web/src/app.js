@@ -45,7 +45,8 @@ import {
   rideNamedIn, ridesAsked, sortRideGroups,
 } from './ridegroups.js';
 import {
-  METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
+  METADATA_LANGUAGES, applyTheme, clampStallMinutes, getSettings, loadSettings, saveSettings,
+  themeOptions,
 } from './settings.js';
 import {
   createSession, listSessions, loadSessions, removeSession, updateSession,
@@ -215,6 +216,8 @@ function renderSettings() {
   fillSelect('set-metadata-language',
     METADATA_LANGUAGES.map((l) => ({ id: l.code, name: l.name })), s.metadataLanguage);
   fillSelect('set-theme', themeOptions(), s.theme);
+  const stall = $('set-live-stall');
+  if (stall) stall.value = String(s.liveStallMinutes);
 }
 
 function openSettings() {
@@ -240,6 +243,15 @@ function mountSettings() {
 
   $('set-metadata-language')?.addEventListener('change', (e) => {
     saveSettings({ metadataLanguage: e.target.value });
+  });
+
+  // Clamped on the way in rather than refused: the API holds the same bounds,
+  // and a value it would reject is better corrected where it was typed than
+  // discovered as a failed booking an hour before the event.
+  $('set-live-stall')?.addEventListener('change', (e) => {
+    const minutes = clampStallMinutes(e.target.value);
+    saveSettings({ liveStallMinutes: minutes });
+    e.target.value = String(minutes);
   });
 
   $('set-theme')?.addEventListener('change', (e) => {
@@ -4123,6 +4135,7 @@ async function scheduleLiveEvent() {
         metadata_language: getSettings().metadataLanguage,
         make_clips: state.upload.makeClips,
         title_source: l.title.trim() ? 'editor' : 'derived',
+        stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
       }),
     });

@@ -33,7 +33,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                metadata_language: str = "en", context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "", event_start: str = "",
                event_end: str = "", chunk_sec: int = 0, make_clips: bool = True,
-               title_source: str = "derived") -> dict:
+               title_source: str = "derived", stall_minutes: float = 0) -> dict:
     """Open a new analysis job for an uploaded video, an HLS URL, or a live event.
 
     Args:
@@ -58,13 +58,15 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         title_source: "editor" when a person typed the title, "derived" when it
             was taken off a filename or a URL. The editor's own name wins over
             the title the game record would compose for itself.
+        stall_minutes: For a live event, how long a stream that was flowing may
+            produce nothing before the event is finished. 0 waits for event_end.
     """
     try:
         return {"status": "success", **store.create_job(
             job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
             content_type, metadata_language, context_urls or [],
             kind, hls_url, event_start, event_end, chunk_sec, make_clips=make_clips,
-            title_source=title_source)}
+            title_source=title_source, stall_minutes=stall_minutes)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 

@@ -357,12 +357,19 @@ def _fetch(url: str, timeout: float = 20.0) -> bytes:
 
 class Recorder:
     def __init__(self, job_id: str, hls_url: str, event_end: datetime,
-                 chunk_sec: float, store: Store, execution: str = ""):
+                 chunk_sec: float, store: Store, execution: str = "",
+                 stall_sec: float = 0.0):
         self.job_id = job_id
         self.hls_url = hls_url
         self.event_end = event_end
         self.store = store
         self.execution = execution
+        # How long a stream that was flowing may produce nothing before the
+        # event is over. 0 means never — wait for the end time, as before.
+        self.stall_sec = max(0.0, float(stall_sec))
+        # Why the recording stopped, for the tick to say: "end", "endlist" or
+        # "stalled". Empty while it is still going.
+        self.ended_by = ""
         self.assembler = ChunkAssembler(chunk_sec)
         self.variant: hls.Variant | None = None
         self.media_url = hls_url
@@ -396,6 +403,8 @@ class Recorder:
             "lastSeq": self.assembler.last_seq,
             "lastPollAt": now().isoformat(),
             "error": self.error,
+            "endedBy": self.ended_by,
+            "stallMinutes": round(self.stall_sec / 60, 2),
         }
 
     def report(self) -> None:
@@ -586,17 +595,42 @@ class Recorder:
         self.state = "recording"
         self.report()
         last_report = time.monotonic()
+        # The stall clock. It starts at the first segment rather than at the
+        # start of the recording: the recorder begins five minutes before the
+        # event, and a broadcaster who goes live at the scheduled minute has
+        # produced nothing for exactly that long. Waiting on a stream that has
+        # not begun is the lead-in; a stream that was flowing and stopped is
+        # the thing being measured.
+        last_new: float | None = None
+        fetch_failures = 0
         while True:
             if now() >= self.event_end:
                 logger.info("event end reached")
+                self.ended_by = "end"
                 break
             try:
                 taken = self.take(playlist)
             except Exception:  # noqa: BLE001
                 logger.warning("poll failed; will retry", exc_info=True)
                 taken = 0
+            if taken:
+                last_new = time.monotonic()
             if playlist.endlist:
                 logger.info("stream ended (EXT-X-ENDLIST)")
+                self.ended_by = "endlist"
+                break
+            # A live stream that stops is expected, not a failure: a class ends,
+            # the broadcaster stops the encoder, the origin starts answering 404.
+            # Castr did exactly that at 17:01 on the LeMieux day and the recorder
+            # polled a 404 every three seconds for four and a half hours, holding
+            # the event open and its bar at 44%, until the scheduled end. After
+            # this long with nothing new, the event is over and it is finished
+            # like any other — the partial chunk is closed and analysed.
+            if (self.stall_sec and last_new is not None
+                    and time.monotonic() - last_new >= self.stall_sec):
+                logger.info("no new segment for %.0f min; the stream has stopped, ending the capture",
+                            self.stall_sec / 60)
+                self.ended_by = "stalled"
                 break
             if time.monotonic() - last_report > 60:
                 self.report()
@@ -605,8 +639,18 @@ class Recorder:
             time.sleep(wait)
             try:
                 playlist = self.poll()
-            except Exception:  # noqa: BLE001
-                logger.warning("playlist fetch failed; keeping the last one", exc_info=True)
+                if fetch_failures:
+                    logger.info("playlist answering again after %d failed fetches", fetch_failures)
+                fetch_failures = 0
+            except Exception as exc:  # noqa: BLE001
+                # The traceback once, then a line a minute: a stream that has
+                # gone is the same failure every poll, and the full stack every
+                # three seconds was 2,700 of them in one afternoon.
+                fetch_failures += 1
+                if fetch_failures == 1:
+                    logger.warning("playlist fetch failed; keeping the last one", exc_info=True)
+                elif fetch_failures % 20 == 0:
+                    logger.warning("playlist still failing (%d fetches): %s", fetch_failures, exc)
                 playlist.segments = []
             if self.audio_url:
                 # Audio after video, so the chunk a poll closes always has
@@ -641,8 +685,16 @@ def main() -> int:
     job_resource = os.environ.get("LIVE_CAPTURE_JOB", "")
     if execution and "/" not in execution and job_resource:
         execution = f"{job_resource.rstrip('/')}/executions/{execution}"
+    # Minutes a stream that was flowing may produce nothing before the event is
+    # finished. Set per event from the editor's settings; absent — an execution
+    # started before this existed — means wait for the end time, as before.
+    try:
+        stall_min = float(os.environ.get("STALL_MINUTES") or 0)
+    except ValueError:
+        stall_min = 0.0
     store = Store(job_id, MEDIA_BUCKET)
-    recorder = Recorder(job_id, hls_url, event_end, chunk_sec, store, execution)
+    recorder = Recorder(job_id, hls_url, event_end, chunk_sec, store, execution,
+                        stall_sec=stall_min * 60)
     try:
         point = store.resume_point()
         if point["next_index"]:
