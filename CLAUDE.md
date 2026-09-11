@@ -885,6 +885,15 @@ panel; the other two carry four ways of saying *which* matches: all of the
 catalogue, the recent event, one or more events, or across a sport and its
 disciplines.
 
+Adding a video carries a third: **Check status**, which swaps the stage strip
+in. It is local — the strip renders from the jobs listener, so asking the agent
+what is running would be a round trip for something the client already holds,
+and on a desk mid-analysis the answer would arrive after the bar had moved. All
+three swap a card into the message that offered them and carry one Back, which
+is offered only when the opener put the card there: a strip the editor asked
+for in words has no opener behind it, and a Back that restored a card nobody
+had seen would be a trapdoor rather than a way out.
+
 **The scope is the second half of that answer, not a separate interrogation.**
 It used to be its own card, asking which games before anything had said why —
 a step nobody could connect to what they had come to do. Now "Find moments ·
