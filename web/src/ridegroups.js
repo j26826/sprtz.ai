@@ -231,10 +231,13 @@ export function momentTypesIn(groups) {
  * The ride groups narrowed to the chosen moment types.
  *
  * Choosing nothing is the whole ride, not an empty one — the filter's resting
- * state has to be the answer the card was asked for. Choosing a type drops the
- * rides that have none of it, which is the point of crossing the two axes:
- * asking for half-passes should leave the riders who rode one, not forty
- * riders of whom thirty-six show nothing.
+ * state has to be the answer the card was asked for.
+ *
+ * Every ride stays, including the ones left with nothing. The rail is
+ * navigation, and navigation that shortens as you filter moves the rider you
+ * were about to click; the count against each name falling to zero says the
+ * same thing without the list jumping, and it says it for the riders who did
+ * *not* do the movement, which is half of what the question was asking.
  *
  * @param {{ ride: object|null, moments: object[] }[]} groups
  * @param {string[]} types  Type keys, as `momentTypesIn` reports them.
@@ -242,10 +245,29 @@ export function momentTypesIn(groups) {
 export function filterByTypes(groups, types) {
   const want = new Set((types || []).filter(Boolean));
   if (!want.size) return [...(groups || [])];
-  return (groups || [])
-    .map((group) => ({
-      ...group,
-      moments: (group?.moments || []).filter((m) => want.has(typeKey(m))),
-    }))
-    .filter((group) => group.moments.length);
+  return (groups || []).map((group) => ({
+    ...group,
+    moments: (group?.moments || []).filter((m) => want.has(typeKey(m))),
+  }));
+}
+
+
+/**
+ * How many of each type one ride holds, keyed as `momentTypesIn` keys them.
+ *
+ * The filter's list is the whole event's — stable, so it does not reshuffle
+ * under the pointer when another rider is opened — but the number beside each
+ * entry is this ride's, because the question the count answers is "how much of
+ * this is in what I am looking at".
+ *
+ * @param {object[]} moments
+ * @returns {Record<string, number>}
+ */
+export function countTypesIn(moments) {
+  const counts = {};
+  for (const moment of moments || []) {
+    const key = typeKey(moment);
+    if (key) counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
 }

@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  filterByTypes, groupByRide, momentTypesIn, notesForRide, rideNamedIn,
-  rideScoreAsked, ridesAsked,
+  countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
+  rideNamedIn, rideScoreAsked, ridesAsked,
 } from '../src/ridegroups.js';
 
 const event = {
@@ -194,15 +194,32 @@ test('choosing nothing is the whole ride, not an empty one', () => {
   assert.deepEqual(filterByTypes(board, null), board);
 });
 
-test('choosing a type leaves the rides that have one, narrowed to it', () => {
+test('choosing a type narrows each ride to it', () => {
   const shown = filterByTypes(board, ['half_pass']);
-  assert.deepEqual(shown.map((g) => g.ride.rider), ['Loretta Joynson', 'Jonas Keller']);
-  assert.deepEqual(shown.map((g) => g.moments.map((m) => m.momentId)), [['a'], ['c']]);
+  assert.deepEqual(shown.map((g) => g.moments.map((m) => m.momentId)), [['a'], ['c'], []]);
+});
+
+test('every ride stays in the rail, so the list cannot move under the pointer', () => {
+  const shown = filterByTypes(board, ['piaffe']);
+  assert.deepEqual(shown.map((g) => g.ride.rider),
+    ['Loretta Joynson', 'Jonas Keller', 'Marie Duval']);
+  // And the ones left with nothing say nothing rather than vanishing.
+  assert.deepEqual(shown.slice(1).map((g) => g.moments.length), [0, 0]);
 });
 
 test('several types are one question, and the ride keeps both', () => {
   const shown = filterByTypes(board, ['half_pass', 'piaffe']);
-  assert.deepEqual(shown.map((g) => g.moments.map((m) => m.momentId)), [['a', 'b'], ['c']]);
+  assert.deepEqual(shown.map((g) => g.moments.map((m) => m.momentId)), [['a', 'b'], ['c'], []]);
+});
+
+test('the count beside a type is the open ride\'s, not the event\'s', () => {
+  assert.deepEqual(countTypesIn(board[0].moments), { half_pass: 1, piaffe: 1 });
+  assert.deepEqual(countTypesIn(board[1].moments), { half_pass: 1 });
+  assert.deepEqual(countTypesIn(board[2].moments), {});
+});
+
+test('a moment with neither a code nor a label is counted as no type', () => {
+  assert.deepEqual(countTypesIn([{ momentId: 'x' }, { label: 'Piaffe' }]), { Piaffe: 1 });
 });
 
 test('filtering never writes back to the groups it was given', () => {
