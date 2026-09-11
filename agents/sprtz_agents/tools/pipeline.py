@@ -1884,17 +1884,21 @@ async def list_rides(
             lifts a freestyle total and the two are not the same achievement.
 
     Returns:
-        dict with `rides`, each carrying order, rider, horse, startSec, endSec,
-        testType, judgeMarks, totalPct, rank, scoreCheck and scoreSource. A ride
-        whose `scoreCheck` reports a mismatch has a total that does not equal the
-        mean of its own displayed judge marks: something was misread, and the
-        number should not be acted on without someone looking.
+        dict with `rides`, each carrying order, rider, horse, start_sec,
+        end_sec, test_type, judge_marks, total_pct, rank, score_check and
+        score_source. A ride whose `score_check` reports a mismatch has a total
+        that does not equal the mean of its own displayed judge marks: something
+        was misread, and the number should not be acted on without someone
+        looking.
     """
-    result = await mcp_client.call_tool("catalog", "get_game", {"job_id": job_id})
+    # Not get_game: that is the game's shape for the agents' context, and it
+    # leaves the rides out — this tool answered "no rides recorded" for every
+    # event that had them. list_game_rides reads just the rides, one document.
+    result = await mcp_client.call_tool("catalog", "list_game_rides", {"job_id": job_id})
     if result.get("status") == "error":
         return result
 
-    found = (result.get("game") or {}).get("rides") or []
+    found = result.get("rides") or []
     if not found:
         return {"status": "success", "job_id": job_id, "rides": [], "count": 0,
                 "note": "No rides recorded for this job. Only equestrian "

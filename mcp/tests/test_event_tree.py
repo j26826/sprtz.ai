@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from catalog_server import store  # noqa: E402
@@ -176,6 +178,36 @@ class TestTheStoreRead:
 
         assert tree["event"]["title"] == "Upload"
         assert tree["event"]["riders"] == []
+
+
+class TestTheRidesRead:
+    """list_game_rides reads the rides the game summary shape leaves out."""
+
+    def _read(self, snapshot):
+        with patch.object(store, "game_ref") as game_ref:
+            game_ref.return_value.get.return_value = snapshot
+            return store.get_rides("j1")
+
+    def test_the_rides_come_back_as_stored(self):
+        snap = MagicMock(exists=True)
+        snap.to_dict.return_value = GAME
+        rides = self._read(snap)
+        assert [r["rider"] for r in rides] == ["Jonas Keller", "Anna Berger"]
+        assert rides[0]["total_pct"] == 76.02
+
+    def test_the_game_summary_really_does_leave_them_out(self):
+        # Why the separate read exists. If _game_out ever carries rides, this
+        # tool can go and list_rides can read get_game again.
+        assert "rides" not in store._game_out(GAME)
+
+    def test_junk_in_the_list_is_dropped(self):
+        snap = MagicMock(exists=True)
+        snap.to_dict.return_value = {"rides": [None, "x", {"order": 1, "rider": "A"}]}
+        assert self._read(snap) == [{"order": 1, "rider": "A"}]
+
+    def test_no_game_record_is_an_error_not_an_empty_day(self):
+        with pytest.raises(KeyError):
+            self._read(MagicMock(exists=False))
 
 
 class TestTheChunkKeepsItsRides:

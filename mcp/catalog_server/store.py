@@ -438,6 +438,21 @@ def get_game(job_id: str) -> dict[str, Any]:
     return _game_out(snapshot.to_dict())
 
 
+def get_rides(job_id: str) -> list[dict[str, Any]]:
+    """The competition day's rides, exactly as the game record stores them.
+
+    Read from the raw document because _game_out, the shape the agents'
+    context wants for a game, leaves the rides behind — which is how
+    list_rides answered "no rides recorded" for every event that had them.
+    One document read; the moments are not touched.
+    """
+    snapshot = game_ref(job_id).get()
+    if not snapshot.exists:
+        raise KeyError(f"No game record for job {job_id!r}.")
+    rides = (snapshot.to_dict() or {}).get("rides") or []
+    return [dict(r) for r in rides if isinstance(r, dict)]
+
+
 def event_tree(job_id: str, moment_limit: int = 2000) -> dict[str, Any]:
     """The event, its rides, and the moments in each — see event_tree.py.
 

@@ -385,6 +385,23 @@ def get_game(job_id: str) -> dict:
 
 
 @mcp.tool
+def list_game_rides(job_id: str) -> dict:
+    """A competition day's rides in running order, as the game record holds
+    them: rider, horse, start and end, test type, judges' marks, total, rank,
+    score check and where the score came from. One document read.
+
+    Args:
+        job_id: Job whose rides to read.
+    """
+    try:
+        return {"status": "success", "job_id": job_id, "rides": store.get_rides(job_id)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "job_id": job_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def get_event_tree(job_id: str) -> dict:
     """One event as a tree: the event, each ride in running order (a rider on
     one horse), and the moments that happened during each ride.

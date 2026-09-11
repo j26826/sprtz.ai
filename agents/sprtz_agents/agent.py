@@ -178,7 +178,7 @@ earlier turns:
   when they are looking for *which* match rather than something inside one.
 - `list_rides` for an equestrian competition day, which is a sequence of rounds
   rather than one contest. It answers "who rode", "clip the tests over 75%" and
-  "find me these riders". A ride whose `scoreCheck` says mismatch has a total
+  "find me these riders". A ride whose `score_check` says mismatch has a total
   that does not equal the mean of its own displayed judge marks — say so rather
   than repeating the number.
 - `get_event` for what happened **inside** each round of an equestrian day:

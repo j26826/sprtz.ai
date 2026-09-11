@@ -1765,6 +1765,14 @@ speeds, widen, the source reference, the notes filter — are in `player.js` and
 `ridegroups.js`, tested. A player with a summary under it scrolls rather than
 sticks, or the summary would slide behind the video on a short screen.
 
+**`get_game` does not carry the rides.** `_game_out` is the game's shape for
+an agent's context and leaves out `rides`, `notConfirmed`, `judges` and the
+start list. `list_rides` read its rides from it and so told the agent "no
+rides recorded" for every event that had them, while the editor's rides card —
+reading the raw document through the tree — showed them. It reads
+`list_game_rides` now (one document, no moments). Anything else that needs a
+field `_game_out` drops wants its own read, not a wider summary.
+
 The producer reads it through `pipeline.get_event`, not the MCP tool: like
 `list_rides` it is a wrapper that cuts the tree down (best few moments per
 ride, as briefs) so a day of forty rounds fits in the model's context.
