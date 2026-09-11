@@ -734,6 +734,22 @@ async def list_moments(
     )
 
 
+@router.get("/{job_id}/event")
+async def event_tree(job_id: str, user: CallerIdentity = Depends(current_user)) -> dict:
+    """The event as a tree: the event, each ride in running order, the moments in each.
+
+    A ride is a rider on one horse. Moments outside every ride come back under
+    ``unassignedMoments``; a sport without rides has no riders and every moment
+    there. Built by the catalog from the stored records — see
+    mcp/catalog_server/event_tree.py.
+    """
+    await _load_job(job_id, user)
+    result = await clients.call_mcp("catalog", "get_event_tree", {"job_id": job_id})
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+    return {"event": result.get("event") or {}}
+
+
 class ThumbnailRequest(BaseModel):
     # One page of the editor's moments list at a time. Every URL is its own
     # signBlob round trip, so an unbounded request would be a page load waiting

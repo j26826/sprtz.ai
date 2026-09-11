@@ -1,0 +1,185 @@
+/**
+ * A competition day's moments, grouped under the ride they happened in.
+ *
+ * The grouping itself is the catalog's (GET /api/jobs/{id}/event, built by
+ * mcp/catalog_server/event_tree.py): which ride each moment belongs to is
+ * decided there, once, for every reader. What is left here is applying that to
+ * the list the editor is actually looking at — the live moments, already
+ * filtered and sorted — so the tiles keep their live state (thumbnail, reel
+ * star) and the order the editor chose.
+ *
+ * A group is one ride: a rider on one horse.
+ *
+ * Its own module, with no imports, for the same reason as cards.js: app.js
+ * cannot be loaded outside a browser, and this is worth testing.
+ */
+
+/**
+ * @param {object|null} event   The tree's event: { riders: [{ order, moments: [{ momentId }] }] }.
+ * @param {object[]} moments    The moments to place, in the order to show them.
+ * @param {{ filtered?: boolean }} opts
+ *   filtered: the list is narrowed by a search, so a ride with nothing matching
+ *   is left out. Unfiltered, every ride is shown — a ride with no key moments
+ *   is still a ride somebody may be looking for.
+ * @returns {{ ride: object|null, moments: object[] }[]}
+ *   One group per ride in running order, then a group with ride null for
+ *   moments outside every ride, only when there are any.
+ */
+export function groupByRide(event, moments, { filtered = false } = {}) {
+  const riders = Array.isArray(event?.riders) ? event.riders : [];
+  const where = new Map();
+  const byOrder = new Map();
+  riders.forEach((ride, i) => {
+    (ride.moments || []).forEach((m) => where.set(m.momentId, i));
+    if (ride.order != null) byOrder.set(ride.order, i);
+  });
+
+  const groups = riders.map((ride) => ({ ride, moments: [] }));
+  const outside = { ride: null, moments: [] };
+  for (const m of moments || []) {
+    // A moment newer than the tree — the listener answered before the tree
+    // was fetched again — is placed by the ride order stored on it, which is
+    // the same field the tree would have used.
+    let i = where.get(m.momentId);
+    if (i === undefined && m.rideOrder != null) i = byOrder.get(m.rideOrder);
+    (i === undefined ? outside : groups[i]).moments.push(m);
+  }
+
+  const shown = filtered ? groups.filter((g) => g.moments.length) : groups;
+  return outside.moments.length ? [...shown, outside] : shown;
+}
+
+
+/**
+ * Letters and digits only, accents folded, so "Lumière" typed as "lumiere"
+ * still finds the horse and an apostrophe cannot split a name from itself.
+ */
+function nameKey(text) {
+  return ` ${String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+}
+
+
+/**
+ * Whether a question names this ride — its rider or its horse.
+ *
+ * Matched against the names the desk already holds rather than parsed out of
+ * the sentence: "show me the ride for Gareth Hughes" names somebody, and the
+ * rides say who. The whole name of either half matches, and so does the
+ * rider's surname on its own ("Hughes' ride"), because that is how people are
+ * talked about on a competition day. A horse needs its whole name — horses are
+ * called Star and Dancer, and those are words.
+ *
+ * Works on a ride from the tree or from the game record; both say rider and
+ * horse.
+ */
+export function rideNamedIn(question, ride) {
+  const q = nameKey(question);
+  const rider = nameKey(ride?.rider).trim();
+  const horse = nameKey(ride?.horse).trim();
+  if (rider && q.includes(` ${rider} `)) return true;
+  if (horse && q.includes(` ${horse} `)) return true;
+  const words = rider.split(' ');
+  const surname = words.length > 1 ? words[words.length - 1] : '';
+  return surname.length >= 4 && q.includes(` ${surname} `);
+}
+
+
+const NUMBER = String.raw`(\d{1,3}(?:[.,]\d+)?)\s*(?:%|percent|per cent)?`;
+const AT_LEAST = new RegExp(String.raw`(?:at least|no less than|>=|≥)\s*${NUMBER}`);
+const MORE_THAN = new RegExp(String.raw`(?:more than|greater than|higher than|better than|over|above|>)\s*${NUMBER}`);
+const OR_MORE = /(\d{1,3}(?:[.,]\d+)?)\s*(?:%|percent|per cent)\s*(?:or (?:more|above|higher|better)|and (?:above|up|over)|\+|plus)/;
+
+
+/**
+ * The score bar a question sets for rides, if it sets one.
+ *
+ * "rides scoring more than 70%" is strictly over; "at least 70%" and "70% or
+ * more" include it. The per cent sign is optional — a ride's total is a
+ * percentage, so "rides over 72" can only mean one thing.
+ *
+ * @returns {{ min: number, inclusive: boolean } | null}
+ */
+export function rideScoreAsked(question) {
+  const q = String(question ?? '').toLowerCase();
+  const read = (m) => Number(m[1].replace(',', '.'));
+  let m = q.match(AT_LEAST);
+  if (m) return { min: read(m), inclusive: true };
+  m = q.match(OR_MORE);
+  if (m) return { min: read(m), inclusive: true };
+  m = q.match(MORE_THAN);
+  if (m) return { min: read(m), inclusive: false };
+  return null;
+}
+
+
+// A total the pipeline could not reconcile with its own judges' marks, or one
+// the published results disagree with. Not acted on: the same rule list_rides
+// applies for the agent, so the card and the agent's answer agree.
+const UNTRUSTED = /^mismatch|disagrees/;
+
+
+/**
+ * The ride groups a question asks for.
+ *
+ * A name narrows to that rider's or that horse's rides; a score bar narrows to
+ * the rides over it and ranks them by total, best first, because that is the
+ * order a question about scores is asking to see. A ride whose total failed
+ * its check is left out of a score question and counted, so the card can say
+ * so — a wrong number that is invisible is worse than one that is marked.
+ *
+ * @param {{ ride: object|null, moments: object[] }[]} groups  From groupByRide.
+ * @param {string} question
+ * @returns {{ groups: object[], names: string[], score: object|null,
+ *             unchecked: number, narrowed: boolean }}
+ */
+export function ridesAsked(groups, question) {
+  const rides = (groups || []).filter((g) => g.ride);
+  const named = rides.filter((g) => rideNamedIn(question, g.ride));
+  const score = rideScoreAsked(question);
+
+  let shown = named.length ? named : rides;
+  let unchecked = 0;
+  if (score) {
+    const over = (pct) => (score.inclusive ? pct >= score.min : pct > score.min);
+    shown = shown.filter((g) => {
+      const result = g.ride.result || {};
+      const pct = result.totalPct;
+      if (pct == null || !over(Number(pct))) return false;
+      if (UNTRUSTED.test(String(result.scoreCheck || ''))) { unchecked += 1; return false; }
+      return true;
+    }).sort((a, b) => Number(b.ride.result.totalPct) - Number(a.ride.result.totalPct));
+  }
+
+  const names = [...new Set(named.map((g) => g.ride.rider || g.ride.horse).filter(Boolean))];
+  return { groups: shown, names, score, unchecked, narrowed: Boolean(named.length || score) };
+}
+
+
+/**
+ * What was looked for and not found, as far as it concerns one ride.
+ *
+ * The record keeps these per moment type, each note stamped with the analysis
+ * window it came from ("[segment 3] …"), and a ride knows which windows it was
+ * seen in. A note from one of those windows is about the footage this ride is
+ * in; a note from anywhere else is about somebody else's round. A type with
+ * no note says nothing about any particular ride, so it is left out here.
+ *
+ * @param {{momentType:string, notes:string[]}[]} notConfirmed  From the game record.
+ * @param {number[]} segments  The windows the ride was seen in.
+ * @returns {{momentType:string, notes:string[]}[]}  Notes with the stamp removed.
+ */
+export function notesForRide(notConfirmed, segments) {
+  const windows = new Set((segments || []).map(Number));
+  if (!windows.size) return [];
+  const out = [];
+  for (const item of notConfirmed || []) {
+    const notes = [];
+    for (const note of item?.notes || []) {
+      const m = /^\[segment (\d+)\]\s*/.exec(String(note));
+      if (m && windows.has(Number(m[1]))) notes.push(String(note).slice(m[0].length));
+    }
+    if (notes.length) out.push({ momentType: item.momentType, notes });
+  }
+  return out;
+}

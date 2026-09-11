@@ -377,11 +377,18 @@ async def analyse_segments(
 
 
 def _rides_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> list[dict]:
-    """Per-segment ride sightings, stitched into whole rides.
+    """Per-segment ride sightings, stitched into whole rides."""
+    return rides.fuse(ride_fragments_of(analyses))
+
+
+def ride_fragments_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> list[dict]:
+    """Per-segment ride sightings, made absolute but not yet stitched.
 
     Timecodes are relative to the segment file, which is deleted once the
     analysis has read it, so they are made absolute here — while the plan that
-    knows the offset is still in scope.
+    knows the offset is still in scope. Kept apart from the stitching for a
+    live event, whose chunks arrive over hours: each chunk's fragments are
+    stored with it, and the whole day is fused again from all of them.
     """
     fragments: list[dict] = []
     for plan, analysis in analyses:
@@ -409,7 +416,7 @@ def _rides_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> list[dict]
                 "total_pct": getattr(seen, "total_pct", None),
                 "rank": getattr(seen, "rank", None),
             })
-    return rides.fuse(fragments)
+    return fragments
 
 
 def _not_confirmed_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> list[dict]:
@@ -439,6 +446,24 @@ def _not_confirmed_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> li
         {"momentType": code, "notes": found}
         for code, found in sorted(notes.items())
     ]
+
+
+def merge_not_confirmed(groups: list[list[dict]]) -> list[dict]:
+    """Several already-grouped not-confirmed lists as one, one entry per type.
+
+    A live event's chunks are grouped one at a time as they are analysed;
+    this puts the day back together the same way ``_not_confirmed_of`` groups
+    the windows of an upload — the notes kept, each type said once.
+    """
+    notes: dict[str, list[str]] = {}
+    for group in groups:
+        for item in group or []:
+            code = str((item or {}).get("momentType") or "").strip()
+            if not code:
+                continue
+            bucket = notes.setdefault(code, [])
+            bucket.extend(n for n in ((item or {}).get("notes") or []) if n not in bucket)
+    return [{"momentType": code, "notes": found} for code, found in sorted(notes.items())]
 
 
 def _discipline_of(analyses: list[tuple[SegmentPlan, SegmentAnalysis]]) -> dict:

@@ -438,6 +438,27 @@ def get_game(job_id: str) -> dict[str, Any]:
     return _game_out(snapshot.to_dict())
 
 
+def event_tree(job_id: str, moment_limit: int = 2000) -> dict[str, Any]:
+    """The event, its rides, and the moments in each — see event_tree.py.
+
+    Reads the raw game document rather than get_game, because _game_out is the
+    shape the agents' context wants and leaves the rides behind. A job with no
+    game record yet still answers, with every moment unassigned.
+    """
+    from catalog_server.event_tree import build_event_tree
+
+    job = get_job(job_id)
+    snapshot = game_ref(job_id).get()
+    game = (snapshot.to_dict() or {}) if snapshot.exists else {}
+    docs = (
+        job_ref(job_id).collection("moments")
+        .order_by("startSec")
+        .limit(moment_limit)
+        .stream()
+    )
+    return build_event_tree(job_id, job, game, [d.to_dict() or {} for d in docs])
+
+
 def _title_key(text: str) -> str:
     """Letters and digits only, for comparing a title with a sentence.
 
@@ -784,11 +805,18 @@ def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = ""
                       continuity: dict[str, Any] | None = None,
                       summary: str = "", competition: str = "", venue: str = "",
                       discipline: str = "", discipline_confidence: float = 0.0,
-                      muxed_uri: str = "") -> dict[str, Any]:
+                      muxed_uri: str = "",
+                      ride_fragments: list[dict[str, Any]] | None = None,
+                      not_confirmed: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Record the analysis of one chunk, and count it on the job.
 
     ``muxed_uri`` is the chunk with its audio muxed in, when the tick made
     one; it is kept so a retried chunk is not muxed twice.
+
+    ``ride_fragments`` are the rides this chunk saw, in absolute time and not
+    yet stitched — a ride crosses chunks, so the tick fuses the whole day from
+    every chunk's fragments. ``not_confirmed`` is what the chunk looked for and
+    did not find. Both empty for a sport that is not judged in rounds.
     """
     patch: dict[str, Any] = {
         "status": "failed" if error else "analysed",
@@ -800,6 +828,8 @@ def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = ""
         "venue": venue,
         "discipline": discipline,
         "disciplineConfidence": float(discipline_confidence or 0.0),
+        "rideFragments": list(ride_fragments or []),
+        "notConfirmed": list(not_confirmed or []),
         "analysedAt": now(),
     }
     if muxed_uri:

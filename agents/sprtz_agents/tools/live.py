@@ -44,11 +44,19 @@ from sprtz_agents.config import get_settings
 from sprtz_agents.schemas import Moment, SegmentPlan
 from sprtz_agents.sports import get_profile
 from sprtz_agents.tools import mcp_client
-from sprtz_agents.tools.analysis import _analyse_one, merge_segment_results
+from sprtz_agents.tools import rides as rides_tool
+from sprtz_agents.tools.analysis import (
+    _analyse_one,
+    _not_confirmed_of,
+    merge_not_confirmed,
+    merge_segment_results,
+    ride_fragments_of,
+)
 from sprtz_agents.tools.pipeline import (
     _cancelled,
     _compose_live_source,
     _emit,
+    _patch_moment_identities,
     _persist_moments,
     _record_game_details,
     record_game_facts,
@@ -342,9 +350,14 @@ async def _advance(job_id: str, job: dict, live: dict, at: datetime, settings) -
             "catalog", "claim_live_chunk", {"job_id": job_id, "index": index})
         if not claim.get("claimed"):
             continue
-        results.append(await _analyse_chunk(
-            job_id, sport, chunk, by_index.get(index - 1), expected, language))
-        by_index[index] = {**chunk, "status": "analysed"}
+        result = await _analyse_chunk(
+            job_id, sport, chunk, by_index.get(index - 1), expected, language)
+        # What the chunk record now says, so the game record below is built
+        # from this tick's analysis rather than from the listing taken before
+        # it — and the agent's result stays the short summary it was.
+        record = result.pop("record", {})
+        results.append(result)
+        by_index[index] = {**chunk, **record, "status": result.get("status", "analysed")}
 
     done = sum(1 for c in by_index.values() if c.get("status") in ("analysed", "failed"))
     await _status(job_id, "", progress=live_progress(done, expected))
@@ -499,13 +512,24 @@ async def _analyse_chunk(job_id: str, sport: str, chunk: dict, previous: dict | 
     moments = merge_segment_results([(plan, analysis)], sport=sport, job_id=job_id)
     saved = await _persist_moments(job_id, moments)
     await _thumbnails_for_chunk(job_id, uri, start_sec, moments)
+    # A sport judged in rounds reports who was in the arena and what it looked
+    # for and did not find. Both are kept on the chunk: a ride crosses chunks,
+    # so it can only be stitched once the chunks either side of it are in, and
+    # the tick does that from every chunk's fragments together.
+    record = {
+        "summary": getattr(analysis, "segment_summary", "") or "",
+        "competition": getattr(analysis, "competition", "") or "",
+        "venue": getattr(analysis, "venue", "") or "",
+        "discipline": getattr(analysis, "discipline", "") or "",
+        "disciplineConfidence": float(getattr(analysis, "discipline_confidence", 0.0) or 0.0),
+        "rideFragments": ride_fragments_of([(plan, analysis)]),
+        "notConfirmed": _not_confirmed_of([(plan, analysis)]),
+    }
     await _finish_chunk(
         job_id, index, moments=saved, continuity=continuity,
-        summary=getattr(analysis, "segment_summary", "") or "",
-        competition=getattr(analysis, "competition", "") or "",
-        venue=getattr(analysis, "venue", "") or "",
-        discipline=getattr(analysis, "discipline", "") or "",
-        discipline_confidence=float(getattr(analysis, "discipline_confidence", 0.0) or 0.0),
+        summary=record["summary"], competition=record["competition"], venue=record["venue"],
+        discipline=record["discipline"], discipline_confidence=record["disciplineConfidence"],
+        ride_fragments=record["rideFragments"], not_confirmed=record["notConfirmed"],
         muxed_uri=muxed_uri,
     )
     await _emit(
@@ -514,7 +538,7 @@ async def _analyse_chunk(job_id: str, sport: str, chunk: dict, previous: dict | 
         chunk=index, moments=saved, continuity=continuity["status"],
     )
     return {"index": index, "status": "analysed", "moments": saved,
-            "continuity": continuity["status"]}
+            "continuity": continuity["status"], "record": record}
 
 
 async def _finish_chunk(job_id: str, index: int, **fields: Any) -> None:
@@ -552,11 +576,35 @@ async def _thumbnails_for_chunk(job_id: str, uri: str, start_sec: float,
         logger.warning("thumbnails for a live chunk of %s failed", job_id, exc_info=True)
 
 
-async def _record_facts_so_far(job_id: str, job: dict, sport: str, profile, chunks) -> None:
-    """Refresh the match's record from the chunks analysed so far."""
-    analysed = [c for c in chunks if c.get("status") == "analysed"]
-    if not analysed:
-        return
+def event_rides(chunks) -> list[dict]:
+    """The day's rides so far, stitched from every analysed chunk's sightings.
+
+    Fused again from all of them each time rather than extended, because a
+    ride that crosses a chunk boundary is two fragments until the second
+    chunk is in, and the stitching is by identity across the whole day.
+    """
+    fragments = [
+        f for c in chunks if c.get("status") == "analysed"
+        for f in (c.get("rideFragments") or [])
+    ]
+    return rides_tool.fuse(fragments) if fragments else []
+
+
+def _discipline_of(profile, chunks: list[dict]) -> tuple[str, float]:
+    """The most confident chunk's discipline, as the label the record stores.
+
+    The chunks hold the code the model answered with; the game record holds
+    the label, as an uploaded match's does, because that is what is displayed
+    and searched by (SportProfile.discipline_by_code).
+    """
+    best = max(chunks, key=lambda c: float(c.get("disciplineConfidence") or 0.0), default=None)
+    code = (best or {}).get("discipline", "") or ""
+    lookup = getattr(profile, "discipline_by_code", None)
+    found = lookup(code) if code and callable(lookup) else None
+    return (found.label if found else code), float((best or {}).get("disciplineConfidence") or 0.0)
+
+
+async def _stored_moments(job_id: str) -> list[Moment]:
     listing = await mcp_client.call_tool(
         "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
     moments: list[Moment] = []
@@ -565,9 +613,41 @@ async def _record_facts_so_far(job_id: str, job: dict, sport: str, profile, chun
             moments.append(Moment.model_validate({**raw, "job_id": job_id}))
         except Exception:  # noqa: BLE001
             continue
+    return moments
+
+
+async def _join_rides(job_id: str, moments: list[Moment], rides: list[dict]) -> None:
+    """Give the stored moments the ride they happened in, as the pipeline does.
+
+    Only what changed is written, so a tick that adds one chunk patches that
+    chunk's moments and any a newly stitched ride now covers.
+    """
+    if not (rides and moments):
+        return
+    await _patch_moment_identities(
+        job_id, moments, rides,
+        announce="{n} moments joined to the ride they happened in.", stage="live")
+    # The same join in memory, so what is built from these moments next — and
+    # grounding's own re-join at the finish — starts from what is now stored.
+    joined = rides_tool.attach_moments([m.model_dump() for m in moments], rides)
+    for m, j in zip(moments, joined, strict=True):
+        m.rider, m.horse = j.get("rider", ""), j.get("horse", "")
+        m.start_number = j.get("start_number", "")
+        m.ride_order = j.get("ride_order")
+        m.identity_source = j.get("identity_source", "")
+
+
+async def _record_facts_so_far(job_id: str, job: dict, sport: str, profile, chunks) -> None:
+    """Refresh the match's record from the chunks analysed so far."""
+    analysed = [c for c in chunks if c.get("status") == "analysed"]
+    if not analysed:
+        return
+    moments = await _stored_moments(job_id)
     if not moments:
         return
-    best = max(analysed, key=lambda c: float(c.get("disciplineConfidence") or 0.0), default=None)
+    rides = event_rides(analysed)
+    await _join_rides(job_id, moments, rides)
+    discipline, confidence = _discipline_of(profile, analysed)
     await record_game_facts(
         job_id=job_id, sport=sport, moments=moments,
         segment_summaries=[{"index": int(c.get("index", 0)), "summary": c.get("summary", "")}
@@ -575,8 +655,9 @@ async def _record_facts_so_far(job_id: str, job: dict, sport: str, profile, chun
         competitions=[c["competition"] for c in analysed if c.get("competition")],
         venues=[c["venue"] for c in analysed if c.get("venue")],
         fallback_title=job.get("title", ""),
-        discipline=(best or {}).get("discipline", "") or "",
-        discipline_confidence=float((best or {}).get("disciplineConfidence") or 0.0),
+        discipline=discipline,
+        discipline_confidence=confidence,
+        rides=rides,
         teams_are_constant=getattr(profile, "teams_are_constant", True),
     )
 
@@ -588,14 +669,12 @@ async def _finish(job_id: str, job: dict, sport: str, profile, chunks: list[dict
     if exec_state == "failed" and not analysed:
         return await _fail(job_id, "The live capture failed before any chunk was recorded.")
 
-    listing = await mcp_client.call_tool(
-        "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
-    moments: list[Moment] = []
-    for raw in listing.get("moments") or []:
-        try:
-            moments.append(Moment.model_validate({**raw, "job_id": job_id}))
-        except Exception:  # noqa: BLE001
-            continue
+    moments = await _stored_moments(job_id)
+    # The whole day's rides, from every chunk. Joined before the record is
+    # built so the moments it digests know whose round they were in; grounding
+    # inside _record_game_details then re-joins any round the start list names.
+    rides = event_rides(analysed)
+    await _join_rides(job_id, moments, rides)
 
     # One recording out of the row of chunks, so everything after the event —
     # packaging, a clip, a still from the source — has a file to read. Never
@@ -608,7 +687,7 @@ async def _finish(job_id: str, job: dict, sport: str, profile, chunks: list[dict
             logger.warning("could not join the chunks of %s into one recording",
                            job_id, exc_info=True)
 
-    best = max(analysed, key=lambda c: float(c.get("disciplineConfidence") or 0.0), default=None)
+    discipline, confidence = _discipline_of(profile, analysed)
     await _record_game_details(
         job_id=job_id, sport=sport, moments=moments,
         segment_summaries=[{"index": int(c.get("index", 0)), "summary": c.get("summary", "")}
@@ -616,8 +695,10 @@ async def _finish(job_id: str, job: dict, sport: str, profile, chunks: list[dict
         competitions=[c["competition"] for c in analysed if c.get("competition")],
         venues=[c["venue"] for c in analysed if c.get("venue")],
         fallback_title=job.get("title", ""),
-        discipline=(best or {}).get("discipline", "") or "",
-        discipline_confidence=float((best or {}).get("disciplineConfidence") or 0.0),
+        discipline=discipline,
+        discipline_confidence=confidence,
+        not_confirmed=merge_not_confirmed([c.get("notConfirmed") or [] for c in analysed]),
+        rides=rides,
         context_urls=list(job.get("contextUrls") or []),
         teams_are_constant=getattr(profile, "teams_are_constant", True),
     )

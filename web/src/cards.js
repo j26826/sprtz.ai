@@ -23,8 +23,16 @@ function key(text) {
 // where one extra word was enough.
 const EVERY = /\b(all|every|each|list|browse|both|which)\b/;
 
-const GAMES = /\b(games|matches|fixtures)\b/;
-const GAME = /\b(game|match|fixture)\b/;
+// An equestrian day is an event, not a game, and the desk calls both games:
+// "show me all events" is the same list as "show me all games".
+const GAMES = /\b(games|matches|fixtures|events|competitions)\b/;
+const GAME = /\b(game|match|fixture|event|competition)\b/;
+
+// A competition day's rounds: who rode, how they scored. "show me the ride for
+// Gareth Hughes", "rides scoring more than 70%". Answered by the rides card —
+// the event's rides with their moments under them — never by a moments list
+// filtered by the words "ride" and "scoring".
+const RIDES = /\b(ride|rides|rider|riders)\b/;
 
 // A question naming the plays inside a match is about the plays, whatever else
 // it mentions: "show all moments of the FAG v TVB match" says match, and means
@@ -98,6 +106,13 @@ export function chooseCard(question) {
   const q = key(question);
 
   if (RULES[0][1].test(q)) return 'activity';
+
+  // Rides before the games list and the desk search: "rides in every event"
+  // is about rides. Getting one in, cutting one or posting one is still that
+  // action, whatever it is a ride of.
+  const acting = RULES.filter(([card]) => ['ingest', 'publish', 'reel'].includes(card))
+    .some(([, pattern]) => pattern.test(q));
+  if (RIDES.test(q) && !acting) return 'rides';
 
   // A search across the desk, before the games route sees "games" or "which
   // match" in it and answers with a list of matches instead.
