@@ -66,30 +66,3 @@ export function shortClock(sec) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
 
-
-const SAFE = /^[\w.\/-]+$/;
-const quote = (text) => (SAFE.test(text) ? text : `'${text.replace(/'/g, "'\\''")}'`);
-
-/**
- * Where a range sits in the source file, and the command that cuts it out.
- *
- * For an editor who takes the footage elsewhere: the file, the offset and the
- * length, then the ffmpeg line that copies exactly that span without
- * re-encoding. Names with spaces are quoted so the line pastes as it is.
- *
- * @param {string} file     The source's own file name.
- * @param {{start:number,end:number}} range
- * @param {string} suffix   What the cut is, for its file name: "ride-4", "piaffe-482".
- */
-export function sourceReference(file, range, suffix) {
-  const name = file || 'source.mp4';
-  const start = Number(range.start).toFixed(1);
-  const length = Math.max(0, Number(range.end) - Number(range.start)).toFixed(1);
-  const stem = name.replace(/\.[^./]+$/, '');
-  const slug = String(suffix || 'cut').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const out = `${stem}-${slug}.mp4`;
-  return {
-    at: `${name} @ ${start}s + ${length}s`,
-    command: `ffmpeg -ss ${start} -t ${length} -i ${quote(name)} -c copy ${quote(out)}`,
-  };
-}

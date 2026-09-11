@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  groupByRide, notesForRide, rideNamedIn, rideScoreAsked, ridesAsked,
+  filterByTypes, groupByRide, momentTypesIn, notesForRide, rideNamedIn,
+  rideScoreAsked, ridesAsked,
 } from '../src/ridegroups.js';
 
 const event = {
@@ -143,4 +144,68 @@ test('only the not-confirmed notes from a ride\'s own windows are about that rid
     [{ momentType: 'pirouette', notes: ['two candidates near 07:40'] }]);
   assert.deepEqual(notesForRide(record, []), []);
   assert.deepEqual(notesForRide(null, [0]), []);
+});
+
+
+/* ── the second axis: moment type ─────────────────────────────────────────── */
+
+const board = [
+  {
+    ride: { order: 1, rider: 'Loretta Joynson' },
+    moments: [
+      { momentId: 'a', momentType: 'half_pass', label: 'Half-pass' },
+      { momentId: 'b', momentType: 'piaffe', label: 'Piaffe' },
+    ],
+  },
+  {
+    ride: { order: 2, rider: 'Jonas Keller' },
+    moments: [{ momentId: 'c', momentType: 'half_pass', label: 'Half-pass' }],
+  },
+  { ride: { order: 3, rider: 'Marie Duval' }, moments: [] },
+];
+
+test('the types offered are the ones the moments carry, commonest first', () => {
+  assert.deepEqual(momentTypesIn(board), [
+    { key: 'half_pass', label: 'Half-pass', count: 2 },
+    { key: 'piaffe', label: 'Piaffe', count: 1 },
+  ]);
+});
+
+test('two types seen equally often are in a stable alphabetical order', () => {
+  const groups = [{ moments: [{ momentType: 'z', label: 'Zig' }, { momentType: 'a', label: 'Alpha' }] }];
+  assert.deepEqual(momentTypesIn(groups).map((ty) => ty.label), ['Alpha', 'Zig']);
+});
+
+test('a moment with no code is keyed by its label rather than dropped', () => {
+  assert.deepEqual(momentTypesIn([{ moments: [{ label: 'Halt and salute' }] }]),
+    [{ key: 'Halt and salute', label: 'Halt and salute', count: 1 }]);
+});
+
+test('a moment with neither a code nor a label is not a type', () => {
+  assert.deepEqual(momentTypesIn([{ moments: [{ momentId: 'x' }] }]), []);
+});
+
+test('no types offered for no rides', () => {
+  assert.deepEqual(momentTypesIn(null), []);
+});
+
+test('choosing nothing is the whole ride, not an empty one', () => {
+  assert.deepEqual(filterByTypes(board, []), board);
+  assert.deepEqual(filterByTypes(board, null), board);
+});
+
+test('choosing a type leaves the rides that have one, narrowed to it', () => {
+  const shown = filterByTypes(board, ['half_pass']);
+  assert.deepEqual(shown.map((g) => g.ride.rider), ['Loretta Joynson', 'Jonas Keller']);
+  assert.deepEqual(shown.map((g) => g.moments.map((m) => m.momentId)), [['a'], ['c']]);
+});
+
+test('several types are one question, and the ride keeps both', () => {
+  const shown = filterByTypes(board, ['half_pass', 'piaffe']);
+  assert.deepEqual(shown.map((g) => g.moments.map((m) => m.momentId)), [['a', 'b'], ['c']]);
+});
+
+test('filtering never writes back to the groups it was given', () => {
+  filterByTypes(board, ['piaffe']);
+  assert.equal(board[0].moments.length, 2);
 });

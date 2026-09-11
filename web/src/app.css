@@ -1395,6 +1395,15 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   background: var(--color-neutral-100);
 }
 .player-under:not(:empty) { border-top: var(--rule-hair) solid var(--color-neutral-300); }
+/* What drives the player, above the player. The rule is on the underside, so
+   the chips read as belonging to the video rather than to the title above.
+   The padding is its own: the section is a bare panel here rather than one of
+   .ride-panel's children, and its 16px sides are that panel's, so the chips
+   line up with the ride's summary underneath. */
+.player-over:not(:empty) {
+  padding: 12px 16px;
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+}
 
 /* A game record has nothing to play, so it gets the whole width rather than a
    black column where a video would be. */
@@ -1406,8 +1415,11 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
    which is what gives this somewhere to stick. */
 .detail-player .player-slot { position: sticky; top: 0; z-index: 1; }
 /* With the ride's summary under it, a stuck player would slide that summary
-   up behind the video on any screen shorter than both — so it scrolls. */
-.detail-player:has(.player-under:not(:empty)) .player-slot { position: static; }
+   up behind the video on any screen shorter than both — so it scrolls. The
+   chips above it are the same argument from the other side: a sticky element
+   with content above it sticks to the top of the card, not under them. */
+.detail-player:has(.player-under:not(:empty)) .player-slot,
+.detail-player:has(.player-over:not(:empty)) .player-slot { position: static; }
 
 /* Below this the two would each be too narrow to read, so they stack: the
    video first, because it is what was asked for. */
@@ -1754,6 +1766,151 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-size: 12px;
   color: var(--color-neutral-600);
   padding-bottom: var(--space-3);
+}
+
+/* ── The rides board: who down the left, what across the top ───────────────
+   Two axes rather than one column, because a competition day is read both
+   ways — which round, and which movement. The rail holds the running order
+   and does not move while the pane changes; the filter above crosses every
+   ride at once. */
+.ride-board {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+/* Forty rides is a scroller, not a taller card: the rail is navigation, and a
+   card that grows with the class buries the conversation it sits in. The
+   overflow is written as two axes — the shorthand `hidden` that a rounded
+   container needs to clip its corners would otherwise reset the scrolling. */
+.ride-rail {
+  display: flex;
+  flex-direction: column;
+  max-height: 26rem;
+  /* A container that rounds also clips, or the first tab's own background
+     draws over the corner it is meant to sit inside. */
+  overflow: hidden;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  background: var(--color-neutral-100);
+}
+
+.ride-tabs {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ride-tabs-head {
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-neutral-100);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+
+.ride-tab {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  column-gap: var(--space-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--space-3);
+  background: transparent;
+  border: 0;
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+  /* The selected marker is a bar rather than a border on all four sides: a box
+     that appears on selection shifts every row below it by its own width. */
+  border-left: 2px solid transparent;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.ride-tab:last-child { border-bottom: 0; }
+.ride-tab:hover { background: var(--color-neutral-200); }
+.ride-tab[aria-selected="true"] {
+  background: var(--color-neutral-200);
+  border-left-color: var(--color-accent);
+}
+.ride-tab .ride-who { min-width: 0; }
+
+.ride-pane { min-width: 0; }
+
+.ride-pane-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  column-gap: var(--space-4);
+  align-items: center;
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+  font-size: 12px;
+}
+.ride-pane-head .ride-who { min-width: 0; }
+
+.ride-filter { margin-bottom: var(--space-3); }
+
+/* A dropdown, so the second axis stays one control beside the rail rather than
+   a row of chips competing with it for the same glance. */
+.type-filter { position: relative; display: inline-block; }
+.type-filter-toggle::after { content: ' \25be'; }
+
+.type-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 14rem;
+  max-height: 18rem;
+  overflow: hidden auto;
+  background: var(--color-neutral-100);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.type-opt {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  column-gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  padding: 7px var(--space-3);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.type-opt:hover { background: var(--color-neutral-200); }
+.type-opt-box {
+  width: 12px;
+  height: 12px;
+  border: var(--rule-hair) solid var(--color-neutral-500);
+  border-radius: var(--radius-sm);
+}
+.type-opt[aria-pressed="true"] .type-opt-box {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.type-opt[aria-pressed="true"] .type-opt-name { font-weight: 700; }
+
+/* Narrow, the rail goes above the pane rather than beside it, and shortens:
+   a full-height list of rides with the moments below the fold is the single
+   column this replaced. */
+@media (max-width: 760px) {
+  .ride-board { grid-template-columns: minmax(0, 1fr); }
+  .ride-rail { max-height: 14rem; }
 }
 
 .not-confirmed { line-height: 1.45; }

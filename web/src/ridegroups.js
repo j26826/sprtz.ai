@@ -183,3 +183,69 @@ export function notesForRide(notConfirmed, segments) {
   }
   return out;
 }
+
+
+/**
+ * A moment's type as a key: the taxonomy's code, or its label when a record
+ * predates the code being stored. Blank for a moment that carries neither,
+ * which is a moment no type filter can be about.
+ */
+function typeKey(moment) {
+  return String(moment?.momentType || moment?.label || '').trim();
+}
+
+
+/**
+ * The moment types present across a set of ride groups, with how many there
+ * are of each.
+ *
+ * Read from the moments rather than from the sport's catalogue on purpose: a
+ * dressage day's catalogue is thirty movements and a class may contain six of
+ * them, and a filter offering twenty-four choices that match nothing is a
+ * filter nobody trusts. The label is the record's own, so the list is in the
+ * taxonomy's words without this module holding a copy of them.
+ *
+ * Commonest first — a filter is scanned for the thing there is a lot of — then
+ * alphabetically, so the order is stable between two types seen equally often.
+ *
+ * @param {{ moments: object[] }[]} groups
+ * @returns {{ key: string, label: string, count: number }[]}
+ */
+export function momentTypesIn(groups) {
+  const seen = new Map();
+  for (const group of groups || []) {
+    for (const moment of group?.moments || []) {
+      const key = typeKey(moment);
+      if (!key) continue;
+      const entry = seen.get(key) || { key, label: moment.label || key, count: 0 };
+      entry.count += 1;
+      seen.set(key, entry);
+    }
+  }
+  return [...seen.values()]
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+
+/**
+ * The ride groups narrowed to the chosen moment types.
+ *
+ * Choosing nothing is the whole ride, not an empty one — the filter's resting
+ * state has to be the answer the card was asked for. Choosing a type drops the
+ * rides that have none of it, which is the point of crossing the two axes:
+ * asking for half-passes should leave the riders who rode one, not forty
+ * riders of whom thirty-six show nothing.
+ *
+ * @param {{ ride: object|null, moments: object[] }[]} groups
+ * @param {string[]} types  Type keys, as `momentTypesIn` reports them.
+ */
+export function filterByTypes(groups, types) {
+  const want = new Set((types || []).filter(Boolean));
+  if (!want.size) return [...(groups || [])];
+  return (groups || [])
+    .map((group) => ({
+      ...group,
+      moments: (group?.moments || []).filter((m) => want.has(typeKey(m))),
+    }))
+    .filter((group) => group.moments.length);
+}
