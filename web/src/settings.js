@@ -58,6 +58,11 @@ export const THEMES = {
       '--color-accent': '#D4881A',
       '--color-accent-2': '#B23D38',
       '--color-divider': '#E3E1D8',
+      // Indigo takes its light-mode value; the dark lift would be too pale on
+      // a near-white ground, which is the whole reason the brand ships two.
+      '--color-info': '#2F55C8',
+      '--color-info-100': 'rgba(47, 85, 200, 0.08)',
+      '--color-info-300': 'rgba(47, 85, 200, 0.30)',
       // Amber as a fill still takes ink text (semantic.css: --on-accent is
       // #111111 in both themes) — this token is not overridden here on
       // purpose, ds/styles.css's value already applies to both.

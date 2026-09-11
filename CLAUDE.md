@@ -761,12 +761,26 @@ render, so switching language re-renders rather than reloads. Messages already
 on screen keep their text — rewriting something the editor has already read
 would be worse than leaving it in the previous language.
 
-**There is no greeting.** A new session used to open with an agent card
-("Upload a match and I will watch all of it…") and three action buttons; the
-scope card asks the only question a new session has, and the suggestion chips
-under the composer carry the same three prompts. The card was removed at the
-editor's request, and with it the locale switch's special case for rebuilding
-it.
+**There is no greeting, and there are no suggestion chips.** A new session
+used to open with an agent card ("Upload a match and I will watch all of it…")
+and three action buttons, with the same three prompts repeated as chips under
+the composer. Both are gone at the editor's request: the opener is the only
+thing a new session says, and it says it once.
+
+**A session always exists.** With nothing in localStorage the app used to
+paint an empty transcript and wait for someone to find the + in the rail — an
+empty screen is not a starting point, and the opener only exists inside a
+session. Signing in opens the most recent stored session, or starts one.
+
+**Only the current turn is on screen.** The transcript used to grow for the
+whole session, which on a competition day is a screenful of cards above the
+one being read — and every one of them re-renders on every Firestore write
+while an analysis runs. `currentTurn` (`web/src/transcript.js`, tested) takes
+the last question and everything answering it. **It carries each message's own
+index**, because every card and every click handler addresses `state.msgs[i]`:
+a slice that renumbered them would wire each button to the wrong message.
+Nothing is deleted — the session still stores the transcript, so switching away
+and back is still switching back.
 
 `STAGES` in `app.js` mirrors `STAGE_SPANS` in the agent's pipeline. Change one
 and change both.
@@ -862,12 +876,26 @@ The rule lives in the system instruction, so the cache is now per sport *and*
 per language — the correct granularity, since two jobs in different languages
 are not running the same instruction.
 
-### A session has a scope
+### A session has a scope, and the opener asks for it
 
-Every new session starts with a card asking what it is about — all the games,
-one sport and any of its disciplines, or games picked by name through a
-search box — and the answer is the session's `scope` (`web/src/scope.js`,
-tested). It does four things: **names the session** in the sidebar
+Every new session opens with the same question — *what would you like to work
+on in this session?* — answered by three things this desk does: **add a new
+video**, **find moments**, **generate clips**. The first two links open a
+panel; the other two carry four ways of saying *which* matches: all of the
+catalogue, the recent event, one or more events, or across a sport and its
+disciplines.
+
+**The scope is the second half of that answer, not a separate interrogation.**
+It used to be its own card, asking which games before anything had said why —
+a step nobody could connect to what they had come to do. Now "Find moments ·
+Across a sport" both names the session and narrows every card in it, and when
+the scope settles `applyScope` asks the agent for what the session was opened
+to get. The intent rides on the message (`msg.intent`) because a discipline
+picker takes two or three renders to answer. Adding a video is the exception
+and deliberately so: a video that is not on the desk yet has no scope to pick.
+
+The answer is the session's `scope` (`web/src/scope.js`, tested). It does four
+things: **names the session** in the sidebar
 (`All games`, `Equestrian · Dressage`, the game's headline, `3 games`);
 **narrows the cards** — the games list, the desk shortlist's `sport`/`job_ids`,
 and the search panel's presets; is **sent to the agent on every message** as a
@@ -893,6 +921,28 @@ the line that used to select the newest job, and took that context with it.
 
 `ensureJobContext` selects the most recent match when nothing else has, and
 never overrides a session that names its own.
+
+### Adding a video, and booking one
+
+**Two panels, not two tabs of one.** A file is here now and a live event is a
+reservation; they share a sport, the context links and the clips question, and
+nothing else. Tabbing between them put a datetime picker one click from a drop
+zone and made the panel read as a single form with half its fields hidden.
+Which panel is on the message (`ingestKind`), so an ingest panel scrolled back
+to is the panel that was opened, and Back returns it to the opener that
+offered it.
+
+**One source, chosen.** A file, a path into the bucket and a recorded playlist
+are three answers to one question, and the panel used to ask it three times —
+three inputs and three buttons where exactly one was ever going to be used.
+`state.upload.src` picks one and the footer carries the single button that
+acts on it, beside a line saying whether the form is answerable yet: a
+disabled button on its own says no and not why.
+
+**A match can be named.** Every registration route already took a `title` and
+the web derived one from the filename or the URL. The panel now has a box for
+it; empty still means "take it from the source", and it is cleared once the
+match is registered so the next one does not inherit it.
 
 ### The cards
 

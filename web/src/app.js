@@ -28,6 +28,7 @@ import {
 
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
 import { chooseCard, wantsDetail } from './cards.js';
+import { currentTurn } from './transcript.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
   disciplinesFor, findGames, gamesInScope, scopeContextLine, scopeFilters, scopeTitle,
@@ -86,10 +87,13 @@ const state = {
   playing: null,
   upload: {
     file: null, sport: 'handball', status: 'idle', pct: 0, name: '', size: '', gcsUri: '',
+    // What the match is called. Empty means "take it from the file or the
+    // URL", which is what this did before there was anywhere to type one.
+    title: '',
     // Whether this match is cut as well as read. Sent with the registration
     // and fixed on the job there, like the metadata language.
     makeClips: true,
-    tab: 'upload',            // 'upload' | 'live'
+    src: 'file',              // 'file' | 'path' | 'stream' — one source, not three stacked
     hlsUrl: '',               // a VOD playlist to download
     live: { title: '', hlsUrl: '', start: '', end: '' },
   },
@@ -383,6 +387,12 @@ onAuthStateChanged(auth, async (user) => {
   render();
   watchJobs();
   watchGames();
+  // An empty screen is not a starting point. With nothing stored this used to
+  // paint a blank transcript and wait for the editor to find the + in the
+  // rail; the opener is the thing that says what this desk can do, and it only
+  // exists inside a session.
+  if (state.sessions.length) openSession(state.sessions[0].id);
+  else startSession();
   try {
     const cfg = await api('/api/config');
     if (cfg.supported_sports?.length) {
@@ -1684,156 +1694,217 @@ function closeDetails() {
   }
 }
 
-function ingestCard() {
+/**
+ * Adding a video, or reserving the pipeline for one that has not been played.
+ *
+ * Two panels, not two tabs of one. A file and a live event share a sport, a
+ * set of context links and the clips question, and nothing else: one is here
+ * now and the other is a booking. Tabbing between them put a datetime picker
+ * one click from a drop zone and made the panel read as a single form with
+ * half its fields hidden, which is what "split them" was asking to undo.
+ *
+ * Which one is on the message rather than in `state.upload`, so an ingest
+ * panel scrolled back to is the panel that was opened.
+ */
+function ingestCard(m, index) {
   const u = state.upload;
   const busy = u.status !== 'idle';
-  const tabs = [['upload', t('ingest.tabUpload')], ['live', t('ingest.tabLive')]];
-  // Sport and context links are the same two questions for a file, a stream
-  // and a live event, so they are one block rendered under whichever tab.
-  const sportRow = `
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center">
-          <div class="field-label" style="margin-right:4px">${esc(t('ingest.sport'))}</div>
+  const live = m?.ingestKind === 'live';
+  // Only when the opener put this here: an ingest panel the editor asked for
+  // in words has no opener behind it to go back to.
+  const back = m?.showScope === false && m?.scopeStep === 'choose'
+    ? `<button class="link-btn" data-opener-back="${index}">${esc(t('scope.back'))}</button>` : '';
+  return `
+    <div class="panel ingest">
+      <div class="ingest-head">
+        <div class="ingest-head-text">
+          <div class="ingest-eyebrow">${esc(t(live ? 'ingest.liveHeading' : 'ingest.addHeading'))}</div>
+          <div class="ingest-lede">${esc(t(live ? 'ingest.liveLede' : 'ingest.addLede'))}</div>
+        </div>
+        ${back}
+      </div>
+      ${live ? liveForm(u, busy) : uploadForm(u, busy)}
+    </div>`;
+}
+
+
+/** Sport and the clips question: the two things asked of every match. */
+function sportRow(u) {
+  return `
+      <div class="ingest-field">
+        <div class="field-label">${esc(t('ingest.sport'))}</div>
+        <div class="ingest-sports">
           ${state.sports.map((s) => `
             <button class="chip" data-sport="${esc(s)}" aria-pressed="${u.sport === s}"
                     style="text-transform:capitalize">${esc(s)}</button>`).join('')}
         </div>
+      </div>`;
+}
+
+
+function clipsField(u) {
+  return `
+      <div class="ingest-field">
+        <div class="field-label">${esc(t('ingest.clips'))}</div>
         <label class="ingest-clips">
           <input type="checkbox" data-make-clips ${u.makeClips ? 'checked' : ''} />
           <span>
-            <span class="field-label">${esc(t('ingest.makeClips'))}</span>
-            <span class="setting-hint">${esc(t('ingest.makeClipsHint'))}</span>
+            <span class="ingest-clips-title">${esc(t('ingest.makeClips'))}</span>
+            <span class="setting-hint">${esc(t(
+    u.makeClips ? 'ingest.makeClipsOn' : 'ingest.makeClipsOff'))}</span>
           </span>
-        </label>`;
-  const contextBlock = `
-        <div class="ingest-context">
-          <label class="field-label" for="context-urls">${esc(t('ingest.contextUrls'))}</label>
-          <div class="setting-hint">${esc(t('ingest.contextUrlsHint'))}</div>
-          <textarea class="input ctx-textarea" id="context-urls" rows="3"
-                    data-context-urls placeholder="${esc(t('reanalyse.placeholder'))}">${esc(u.contextUrls || '')}</textarea>
-        </div>`;
-  return `
-    <div class="panel">
-      <div class="source-tabs">
-        ${tabs.map(([key, label]) => `
-          <button class="source-tab" data-ingest-tab="${key}" aria-selected="${u.tab === key}">${esc(label)}</button>`).join('')}
-      </div>
-      ${u.tab === 'live' ? liveForm(u, busy, sportRow, contextBlock) : uploadForm(u, busy, sportRow, contextBlock)}
-    </div>`;
+        </label>
+      </div>`;
 }
 
-function uploadForm(u, busy, sportRow, contextBlock) {
-  // Offer the most recent one only. A list of near-identical filenames is a
-  // worse prompt than "the one you left behind", and the rest stay reachable.
-  const pending = state.pendingUploads[0];
+
+function contextField(u) {
   return `
-      <div style="padding:16px;border-bottom:1px solid var(--color-neutral-300)">
+      <div class="ingest-field">
+        <label class="field-label" for="context-urls">${esc(t('ingest.contextUrls'))}</label>
+        <textarea class="input ctx-textarea" id="context-urls" rows="2"
+                  data-context-urls placeholder="${esc(t('reanalyse.placeholder'))}">${esc(u.contextUrls || '')}</textarea>
+        <div class="setting-hint">${esc(t('ingest.contextUrlsHint'))}</div>
+      </div>`;
+}
+
+
+/**
+ * One source, chosen — not three stacked blocks each with its own button.
+ *
+ * A file, a path into the bucket and a recorded playlist are three answers to
+ * one question, and showing all three at once asked it three times: the panel
+ * carried three inputs and three buttons where exactly one of them was ever
+ * going to be used.
+ */
+function uploadForm(u, busy) {
+  // Offer the most recent stranded upload only. A list of near-identical
+  // filenames is a worse prompt than "the one you left behind".
+  const pending = state.pendingUploads[0];
+  const sources = [['file', t('ingest.srcFile')], ['path', t('ingest.srcPath')],
+    ['stream', t('ingest.srcStream')]];
+  const ready = u.src === 'file' ? Boolean(u.file)
+    : u.src === 'path' ? Boolean(u.gcsUri.trim()) : Boolean(u.hlsUrl.trim());
+
+  let source = `
         <div class="dropzone" id="dropzone">
           <div class="dz-thumb"><span class="thumb-stripes"></span></div>
           <div style="flex:1;min-width:0">
             <div class="dz-name">${esc(u.name || t('ingest.noFile'))}</div>
-            <div class="dz-meta">${esc(u.name
-              ? `${u.size} · ${u.sport} · via Upload`
-              : t('ingest.dropHere'))}</div>
+            <div class="dz-meta">${esc(u.name ? `${u.size} · ${u.sport}` : t('ingest.dropHere'))}</div>
           </div>
           <label class="file-label">${esc(t('ingest.chooseFile'))}
             <input type="file" id="file-input" accept="video/*" style="display:none" />
           </label>
+        </div>`;
+  if (u.src === 'path') {
+    source = `
+        <input class="composer-input mono-input" data-gcs-input
+               placeholder="gs://bucket/path/to/video.mp4" value="${esc(u.gcsUri || '')}" />
+        <div class="setting-hint">${esc(t('ingest.fromStorageHint'))}</div>`;
+  } else if (u.src === 'stream') {
+    source = `
+        <input class="composer-input mono-input" data-hls-input
+               placeholder="https://…/master.m3u8" value="${esc(u.hlsUrl || '')}" />
+        <div class="setting-hint">${esc(t('ingest.hlsHint'))}</div>`;
+  }
+
+  return `
+      <div class="ingest-grid">
+        <div class="ingest-field ingest-title">
+          <div class="field-label">${esc(t('ingest.title'))}</div>
+          <input class="composer-input" data-ingest-title
+                 placeholder="${esc(t('ingest.titlePlaceholder'))}" value="${esc(u.title || '')}" />
         </div>
-        <div class="gcs-row">
-          <div class="field-label">${esc(t('ingest.fromStorage'))}</div>
-          <div class="gcs-input-row">
-            <input class="composer-input" data-gcs-input
-                   placeholder="gs://bucket/path/to/video.mp4"
-                   value="${esc(u.gcsUri || '')}" />
-            <button class="btn-outline" data-register-gcs="1"
-                    ${u.gcsUri && !busy ? '' : 'disabled'}>${esc(t('ingest.useLocation'))}</button>
+        ${sportRow(u)}
+        <div class="ingest-field ingest-wide">
+          <div class="field-label">${esc(t('ingest.source'))}</div>
+          <div class="ingest-sources">
+            ${sources.map(([key, label]) => `
+              <button class="src-btn" data-ingest-src="${key}"
+                      aria-pressed="${u.src === key}">${esc(label)}</button>`).join('')}
           </div>
-          <div class="setting-hint">${esc(t('ingest.fromStorageHint'))}</div>
+          ${source}
         </div>
-        <div class="gcs-row">
-          <div class="field-label">${esc(t('ingest.fromHls'))}</div>
-          <div class="gcs-input-row">
-            <input class="composer-input" data-hls-input
-                   placeholder="https://…/master.m3u8"
-                   value="${esc(u.hlsUrl || '')}" />
-            <button class="btn-outline" data-register-hls="1"
-                    ${(u.hlsUrl || '').trim() && !busy ? '' : 'disabled'}>${esc(t('ingest.useStream'))}</button>
-          </div>
-          <div class="setting-hint">${esc(t('ingest.hlsHint'))}</div>
-        </div>
-        ${sportRow}
-        ${contextBlock}
+        ${contextField(u)}
+        ${clipsField(u)}
       </div>
-      <div style="padding:14px 16px">
-        ${u.status === 'uploading' || u.status === 'analyzing' ? `
-          <div>
-            <div style="font-size:11.5px;color:var(--color-neutral-800);line-height:1.4">
-              ${esc(u.stage || 'Uploading')}
-            </div>
-            <div class="meter-row">
-              <div class="meter"><i style="width:${u.pct}%"></i></div>
-              <div class="meter-pct">${Math.round(u.pct)}%</div>
-            </div>
-          </div>` : ''}
-        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-          <button class="btn-solid" id="start-analysis" ${u.file && u.status === 'idle' ? '' : 'disabled'}>
-            ${u.status === 'uploading' ? t('ingest.uploading')
-               : u.status === 'analyzing' ? t('ingest.analysing') : t('ingest.start')}
-          </button>
-          ${pending ? `
-            <button class="btn-outline" data-resume="${esc(pending.job_id)}"
-                    ${u.status === 'idle' ? '' : 'disabled'}
-                    title="${esc(pending.filename)} — ${bytes(pending.size_bytes)}">
-              ${esc(t('ingest.useLastUpload'))}
-            </button>` : ''}
-        </div>
-        ${pending ? `
-          <div class="dz-meta" style="margin-top:8px">
-            ${esc(pending.filename)} · ${bytes(pending.size_bytes)}
-            ${esc(t('ingest.strandedNote'))}
-          </div>` : ''}
+      ${u.status === 'uploading' || u.status === 'analyzing' ? `
+        <div class="ingest-progress">
+          <div class="dz-meta">${esc(u.stage || t('ingest.uploading'))}</div>
+          <div class="meter-row">
+            <div class="meter"><i style="width:${u.pct}%"></i></div>
+            <div class="meter-pct">${Math.round(u.pct)}%</div>
+          </div>
+        </div>` : ''}
+      <div class="ingest-foot">
+        ${u.src === 'file' ? `
+          <button class="btn-accent btn-accent-lg" id="start-analysis"
+                  ${u.file && !busy ? '' : 'disabled'}>
+            ${esc(u.status === 'uploading' ? t('ingest.uploading')
+    : u.status === 'analyzing' ? t('ingest.analysing') : t('ingest.start'))}
+          </button>` : u.src === 'path' ? `
+          <button class="btn-accent btn-accent-lg" data-register-gcs="1"
+                  ${u.gcsUri.trim() && !busy ? '' : 'disabled'}>${esc(t('ingest.useLocation'))}</button>`
+    : `
+          <button class="btn-accent btn-accent-lg" data-register-hls="1"
+                  ${u.hlsUrl.trim() && !busy ? '' : 'disabled'}>${esc(t('ingest.useStream'))}</button>`}
+        <span class="ingest-ready">${esc(ready
+    ? `${t('ingest.ready')} — ${u.sport}${u.makeClips ? `, ${t('ingest.readyClips')}` : `, ${t('ingest.readyMoments')}`}`
+    : t('ingest.pickSource'))}</span>
+        ${pending && u.src === 'file' ? `
+          <button class="btn-outline" data-resume="${esc(pending.job_id)}" ${busy ? 'disabled' : ''}
+                  title="${esc(pending.filename)} — ${bytes(pending.size_bytes)}">
+            ${esc(t('ingest.useLastUpload'))}
+          </button>` : ''}
       </div>`;
 }
 
-function liveForm(u, busy, sportRow, contextBlock) {
+
+function liveForm(u, busy) {
   const l = u.live;
   // Only judge what has been typed: an empty form is not a wrong one.
   const err = (l.hlsUrl || l.start || l.end)
     ? validateLiveEvent({ hlsUrl: l.hlsUrl, start: l.start, end: l.end }) : null;
   const ready = !err && l.hlsUrl && l.start && l.end;
   return `
-      <div style="padding:16px;border-bottom:1px solid var(--color-neutral-300)">
-        <div class="field-label">${esc(t('ingest.liveTitle'))}</div>
-        <input class="composer-input" data-live-title style="margin-top:6px"
-               placeholder="${esc(t('ingest.liveTitlePlaceholder'))}" value="${esc(l.title || '')}" />
-        <div class="gcs-row">
+      <div class="ingest-grid live-grid">
+        <div class="ingest-field ingest-wide">
+          <div class="field-label">${esc(t('ingest.liveTitle'))}</div>
+          <input class="composer-input" data-live-title
+                 placeholder="${esc(t('ingest.liveTitlePlaceholder'))}" value="${esc(l.title || '')}" />
+        </div>
+        <div class="ingest-field">
+          <div class="field-label">${esc(t('ingest.liveStart'))}</div>
+          <input class="composer-input mono-input" type="datetime-local"
+                 data-live-start value="${esc(l.start || '')}" />
+        </div>
+        <div class="ingest-field">
+          <div class="field-label">${esc(t('ingest.liveEnd'))}</div>
+          <input class="composer-input mono-input" type="datetime-local"
+                 data-live-end value="${esc(l.end || '')}" />
+        </div>
+        ${sportRow(u)}
+        <div class="ingest-field ingest-wide">
           <div class="field-label">${esc(t('ingest.liveHls'))}</div>
-          <input class="composer-input" data-live-hls style="margin-top:6px"
+          <input class="composer-input mono-input" data-live-hls
                  placeholder="https://…/live.m3u8" value="${esc(l.hlsUrl || '')}" />
+          <div class="setting-hint">${esc(t('ingest.liveHint'))}</div>
         </div>
-        <div class="live-times">
-          <label>
-            <span class="field-label">${esc(t('ingest.liveStart'))}</span>
-            <input class="composer-input" type="datetime-local" data-live-start value="${esc(l.start || '')}" />
-          </label>
-          <label>
-            <span class="field-label">${esc(t('ingest.liveEnd'))}</span>
-            <input class="composer-input" type="datetime-local" data-live-end value="${esc(l.end || '')}" />
-          </label>
-        </div>
-        <div class="setting-hint">${esc(t('ingest.liveHint'))}</div>
-        ${sportRow}
-        ${contextBlock}
+        ${contextField(u)}
+        ${clipsField(u)}
       </div>
-      <div style="padding:14px 16px">
-        ${err ? `<div class="job-status live-error" data-tone="failed">${esc(t(err))}</div>` : ''}
-        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
-          <button class="btn-solid" data-schedule-live="1" ${ready && !busy ? '' : 'disabled'}>
-            ${u.status === 'scheduling' ? esc(t('ingest.scheduling')) : esc(t('ingest.schedule'))}
-          </button>
-        </div>
+      <div class="ingest-foot">
+        <button class="btn-accent btn-accent-lg" data-schedule-live="1"
+                ${ready && !busy ? '' : 'disabled'}>
+          ${esc(u.status === 'scheduling' ? t('ingest.scheduling') : t('ingest.schedule'))}
+        </button>
+        <span class="ingest-ready">${esc(err ? t(err)
+    : ready ? `${t('ingest.ready')} — ${u.sport}${u.makeClips ? `, ${t('ingest.readyClips')}` : `, ${t('ingest.readyMoments')}`}`
+      : t('ingest.liveNeeds'))}</span>
       </div>`;
 }
+
 
 function reelCard(msg, index) {
   if (!state.clips.length) return emptyCard(t('reel.none'));
@@ -2826,17 +2897,134 @@ function scopeCard(m, i) {
       </div>`;
   }
 
-  const option = (key, title, desc) => `
-    <button class="scope-option" data-scope-pick="${i}:${key}">
-      <span class="scope-option-title">${esc(title)}</span>
-      <span class="scope-option-desc">${esc(desc)}</span>
-    </button>`;
+  return openerCard(i);
+}
+
+
+/* ──────────────────────────────────────────────────────── the opener ── */
+
+/**
+ * The three icons the opener draws, as the design draws them: a recording
+ * arriving, a search, and a strip of film. Inline rather than fetched — three
+ * shapes are cheaper as markup than as a request, and a missing asset here
+ * would leave the option nameless.
+ */
+const OPENER_ICONS = {
+  upload: '<path d="M12 16V5"/><path d="m7.5 9.5 4.5-4.5 4.5 4.5"/>'
+    + '<path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+  film: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9.5h18"/>'
+    + '<path d="M8 5v4.5"/><path d="M16 5v4.5"/><path d="m11 12.5 3.5 2-3.5 2z"/>',
+};
+
+
+/**
+ * What a session can be about, and the ways in.
+ *
+ * Three things happen on this desk — a match arrives, a match is searched, a
+ * match is cut — and the second and third are the same four questions about
+ * *which* matches. So the scope is not a separate interrogation any more: it
+ * is the second half of the answer to what the session is for. "Find
+ * moments · Across a Sport" both names the session and narrows every card in
+ * it, which is what the scope card did on its own and in a step nobody could
+ * connect to what they had come to do.
+ *
+ * The first option is the exception, and deliberately: a video that is not on
+ * the desk yet has no scope to pick, so its two ways in open a panel instead.
+ */
+const OPENER_SCOPES = ['all', 'recent', 'games', 'category'];
+
+function openerOptions() {
+  return [
+    { key: 'add', icon: 'upload', links: ['upload', 'live'] },
+    { key: 'find', icon: 'search', links: OPENER_SCOPES },
+    { key: 'clips', icon: 'film', links: OPENER_SCOPES },
+  ];
+}
+
+
+function openerCard(i) {
   return `
-    <div class="scope-options">
-      ${option('all', t('scope.all'), t('scope.allDesc'))}
-      ${option('category', t('scope.category'), t('scope.categoryDesc'))}
-      ${option('games', t('scope.games'), t('scope.gamesDesc'))}
+    <div class="opener">
+      ${openerOptions().map((o) => `
+        <section class="opener-option">
+          <div class="opener-icon">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                 aria-hidden="true">${OPENER_ICONS[o.icon]}</svg>
+          </div>
+          <div class="opener-text">
+            <div class="opener-title">${esc(t(`opener.${o.key}`))}</div>
+            <div class="opener-desc">${esc(t(`opener.${o.key}Desc`))}</div>
+            <div class="opener-links">
+              ${o.links.map((key) => `
+                <button class="opener-link" data-opener="${i}:${o.key}:${key}"
+                        >${esc(t(`opener.link.${key}`))}</button>`).join('')}
+            </div>
+          </div>
+        </section>`).join('')}
     </div>`;
+}
+
+
+/**
+ * A way in, chosen.
+ *
+ * Adding a video opens the panel for it. Everything else is a scope question
+ * with an intent attached: the scope steps are the ones the scope card already
+ * had, and when one of them settles, `applyScope` asks the agent for what the
+ * session was opened to get. The intent rides on the message so it survives
+ * the two or three renders a discipline picker takes.
+ */
+/** Back out of an ingest panel to the opener that offered it. */
+function onOpenerBack(hit) {
+  const msg = state.msgs[Number(hit.dataset.openerBack)];
+  if (!msg) return;
+  msg.showIngest = false;
+  msg.ingestKind = null;
+  msg.showScope = true;
+  msg.scopeStep = 'choose';
+  msg.text = t('scope.prompt');
+  persistTranscript();
+  render();
+}
+
+
+function onOpenerClick(hit) {
+  const [rawIndex, group, key] = hit.dataset.opener.split(':');
+  const i = Number(rawIndex);
+  const msg = state.msgs[i];
+  if (!msg) return;
+
+  if (group === 'add') {
+    // The panel replaces the opener in the message that offered it, rather
+    // than arriving under it: they are two states of the same question, and
+    // stacked they read as a card that did not clear.
+    msg.showScope = false;
+    msg.showIngest = true;
+    msg.ingestKind = key === 'live' ? 'live' : 'upload';
+    msg.text = '';
+    persistTranscript();
+    render();
+    return;
+  }
+
+  msg.intent = group;                      // 'find' or 'clips'
+  if (key === 'all') { applyScope(i, { kind: 'all' }); return; }
+  if (key === 'recent') {
+    // The desk's newest analysed match. With none, there is nothing to scope
+    // to and the whole catalogue is the honest answer.
+    const recent = state.games[0];
+    applyScope(i, recent
+      ? { kind: 'games', jobIds: [recent.jobId || recent.id] } : { kind: 'all' });
+    return;
+  }
+  msg.scopeStep = key === 'games' ? 'games' : 'category';
+  msg.scopeSport = '';
+  msg.scopeDisciplines = [];
+  msg.scopeJobs = [];
+  msg.scopeQuery = '';
+  render();
 }
 
 function applyScope(i, scope) {
@@ -2859,6 +3047,17 @@ function applyScope(i, scope) {
   if (first && first !== state.jobId) selectJob(first);
   persistTranscript();
   render();
+
+  // The session was opened to do something, not to be scoped. Asking is the
+  // difference between the opener naming the session and the opener answering
+  // the question it asked.
+  const intent = msg?.intent;
+  if (intent) {
+    msg.intent = null;
+    // No cards passed, so the reply is routed through attachCards the way a
+    // typed question is — "the best moments" gets the moments card.
+    ask(t(intent === 'clips' ? 'opener.askClips' : 'opener.askMoments'));
+  }
 }
 
 function onScopeClick(hit) {
@@ -3032,7 +3231,7 @@ const animatedMsgs = new WeakSet();
 
 function render() {
   renderSessions();
-  $('transcript').innerHTML = state.msgs.map((m, i) => {
+  $('transcript').innerHTML = currentTurn(state.msgs).map(([m, i]) => {
     const agent = m.who === 'agent';
     const fresh = agent && !animatedMsgs.has(m);
     if (fresh) animatedMsgs.add(m);
@@ -3045,7 +3244,7 @@ function render() {
       ${m.showDeskMoments ? deskMomentsCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showRides ? ridesCard(m, i) : ''}
-      ${m.showIngest ? ingestCard() : ''}
+      ${m.showIngest ? ingestCard(m, i) : ''}
       ${m.showReel ? reelCard(m, i) : ''}
       ${m.showJobs ? jobsCard(m, i) : ''}
       ${m.showGame ? gameCard() : ''}
@@ -3062,12 +3261,6 @@ function render() {
         <div class="msg-label">${esc(t('agent.label'))}</div>
         <div class="thinking-text">${esc(t('composer.thinking'))}</div>
       </div>` : '');
-
-  $('suggestions').innerHTML = [
-    'Ingest a new game',
-    'Show me the best moments',
-    "What's still processing?",
-  ].map((s) => `<button class="chip" data-ask="${esc(s)}">${esc(s)}</button>`).join('');
 
   if (state.playing) mountPlayer();
   loadThumbs();
@@ -3566,7 +3759,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
     method: 'POST',
     body: JSON.stringify({
       job_id,
-      title: filename.replace(/\.[^.]+$/, ''),
+      title: state.upload.title.trim() || filename.replace(/\.[^.]+$/, ''),
       sport: u.sport,
       filename,
       size_bytes,
@@ -3593,7 +3786,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
     updateSession(state.sessionKey, {
       scope: { kind: 'games', jobIds: [job_id] },
       jobId: job_id,
-      title: filename.replace(/\.[^.]+$/, ''),
+      title: state.upload.title.trim() || filename.replace(/\.[^.]+$/, ''),
     });
     state.scope = { kind: 'games', jobIds: [job_id] };
     state.sessions = listSessions();
@@ -3609,6 +3802,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
   u.stage = 'Handed to the agent';
   u.file = null;
   u.name = '';
+  u.title = '';
   selectJob(job_id);
   playbackUrl = null;
   render();
@@ -3688,7 +3882,7 @@ async function registerFromStorage() {
       method: 'POST',
       body: JSON.stringify({
         gcs_uri: uri,
-        title: uri.split('/').pop().replace(/\.[^.]+$/, '') || uri,
+        title: u.title.trim() || uri.split('/').pop().replace(/\.[^.]+$/, '') || uri,
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
         make_clips: state.upload.makeClips,
@@ -3697,6 +3891,7 @@ async function registerFromStorage() {
     });
 
     u.gcsUri = '';
+    u.title = '';
     // Idle before the turn, for the same reason as the upload path.
     u.status = 'idle';
     u.stage = 'Handed to the agent';
@@ -3735,7 +3930,7 @@ async function registerFromHls() {
       method: 'POST',
       body: JSON.stringify({
         hls_url: url,
-        title: url.split('/').pop().split('?')[0].replace(/\.[^.]+$/, '') || url,
+        title: u.title.trim() || url.split('/').pop().split('?')[0].replace(/\.[^.]+$/, '') || url,
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
         make_clips: state.upload.makeClips,
@@ -3744,6 +3939,7 @@ async function registerFromHls() {
     });
 
     u.hlsUrl = '';
+    u.title = '';
     // Idle before the turn, for the same reason as the upload path.
     u.status = 'idle';
     u.stage = 'Handed to the agent';
@@ -3895,7 +4091,8 @@ document.addEventListener('click', (event) => {
     + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs],'
     + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel],'
     + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
-    + '[data-desk-add],[data-ingest-tab],[data-register-hls],[data-schedule-live],'
+    + '[data-desk-add],[data-register-hls],[data-schedule-live],'
+    + '[data-opener],[data-opener-back],[data-ingest-src],'
     + '[data-scope-pick],[data-scope-sport],[data-scope-disc],[data-scope-game],'
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
     + '[data-pc],[data-player-range],[data-watch-ride],'
@@ -3934,7 +4131,9 @@ document.addEventListener('click', (event) => {
       || 'scopeChange' in hit.dataset) { onScopeClick(hit); return; }
   if (hit.dataset.registerHls) { registerFromHls(); return; }
   if (hit.dataset.scheduleLive) { scheduleLiveEvent(); return; }
-  if (hit.dataset.ingestTab) { state.upload.tab = hit.dataset.ingestTab; render(); return; }
+  if (hit.dataset.ingestSrc) { state.upload.src = hit.dataset.ingestSrc; render(); return; }
+  if (hit.dataset.opener) { onOpenerClick(hit); return; }
+  if (hit.dataset.openerBack) { onOpenerBack(hit); return; }
   if (hit.dataset.showAll) {
     const msg = state.msgs[Number(hit.dataset.showAll)];
     if (msg) { msg.showAll = true; msg.page = 0; }
@@ -4156,6 +4355,8 @@ document.addEventListener('input', (event) => {
     if (again) { again.focus(); again.setSelectionRange(at, at); }
   } else if (el.matches('[data-make-clips]')) {
     u.makeClips = el.checked;
+  } else if (el.matches('[data-ingest-title]')) {
+    u.title = el.value;
   } else if (el.matches('[data-live-title]')) {
     u.live.title = el.value;
   } else if (el.matches('[data-live-hls],[data-live-start],[data-live-end]')) {

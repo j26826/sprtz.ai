@@ -761,25 +761,6 @@ button.tile:hover { border-color: var(--color-accent); }
 }
 .file-label:hover { background: var(--color-accent-100); }
 
-.source-tabs { display: flex; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
-
-.source-tab {
-  flex: 1;
-  border: 0;
-  border-right: var(--rule-hair) solid var(--color-neutral-300);
-  background: transparent;
-  color: var(--color-text);
-  padding: 9px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-.source-tab:last-child { border-right: 0; }
-.source-tab[aria-selected="true"] { background: var(--color-text); color: var(--color-bg); }
-.source-tab:disabled { opacity: 0.45; cursor: not-allowed; }
-
 .field-label {
   font-size: 9.5px;
   letter-spacing: 0.12em;
@@ -1460,24 +1441,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 .detail-value { overflow-wrap: anywhere; }
 
-/* Registering a source already in Cloud Storage. Its own block under the
-   dropzone rather than beside it: they are two ways to do the same thing, and
-   side by side they read as two halves of one. */
-.gcs-row { margin-top: 14px; }
-
-.gcs-input-row { display: flex; gap: 8px; margin-top: 6px; }
-.gcs-input-row .composer-input {
-  flex: 1;
-  min-width: 0;
-  border: var(--rule-hair) solid var(--color-neutral-400);
-  padding: 8px 10px;
-  font-size: 12px;
-  font-family: var(--font-body);
-  background: var(--color-bg);
-  color: var(--color-text);
-}
-.gcs-input-row .btn-outline { flex: none; }
-.gcs-row .setting-hint { margin-top: 6px; }
 
 /* A game's record opened inside the list rather than in the popup. Indented
    and quieter than a row of its own, so the headline above it stays the thing
@@ -1536,8 +1499,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .inline-player,
 .detail-player,
 .composer-box,
-.stage-strip,
-.source-tabs {
+.stage-strip {
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
@@ -1608,12 +1570,88 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 /* The one question in the ingest panel that is a choice rather than a value:
    a checkbox with its label and hint stacked beside it. */
-.ingest-clips { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; }
-.ingest-clips input { margin-top: 3px; flex: none; }
-.ingest-clips .field-label { display: block; }
-.ingest-clips .setting-hint { margin-top: 2px; }
+/* ── Adding a video, or booking one ───────────────────────────────────────
+   Two panels rather than two tabs of one: a file is here now and a live event
+   is a reservation, and they share only the sport, the links and the clips
+   question. Both are a grid of labelled fields with one footer that says
+   whether the form is answerable yet. */
+.ingest-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 0;
+}
+.ingest-head-text { min-width: 0; }
+.ingest-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+.ingest-lede {
+  font-size: 12.5px;
+  color: var(--color-neutral-700);
+  margin-top: 5px;
+}
 
-.ingest-context { margin-top: var(--space-4); }
+.ingest-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr);
+  gap: 12px 16px;
+  padding: 15px 18px 18px;
+}
+.live-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ingest-field { min-width: 0; }
+.ingest-wide { grid-column: 1 / -1; }
+.ingest-field .field-label { display: block; margin-bottom: 5px; }
+.ingest-field .composer-input { width: 100%; }
+.ingest-field .setting-hint { margin-top: 5px; line-height: 1.45; }
+/* A path and a timestamp are read character by character. */
+.mono-input { font-family: var(--font-mono); font-size: 12px; }
+
+.ingest-sports { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* One source, chosen — a file, a path, or a playlist. */
+.src-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: 7px;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-neutral-700);
+  cursor: pointer;
+}
+.src-btn:hover { border-color: var(--color-accent); }
+.src-btn[aria-pressed="true"] { border-color: var(--color-accent); color: var(--color-accent); }
+.ingest-field .ingest-sources { margin-bottom: 8px; }
+
+.ingest-clips { display: flex; gap: 9px; align-items: flex-start; cursor: pointer; }
+.ingest-clips input { margin-top: 3px; flex: none; }
+.ingest-clips-title { display: block; font-size: 12.5px; font-weight: 500; }
+.ingest-clips .setting-hint { display: block; margin-top: 2px; }
+
+.ingest-progress { padding: 0 18px 12px; }
+
+.ingest-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  border-top: var(--rule-hair) solid var(--color-rule);
+}
+/* Whether the form can be sent yet, in words beside the button that sends it.
+   A disabled button with nothing next to it says no and not why. */
+.ingest-ready { font-size: 11.5px; color: var(--color-neutral-700); }
+
+@media (max-width: 640px) {
+  .ingest-grid, .live-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 .ctx-textarea {
   width: 100%;
   margin-top: var(--space-2);
@@ -2136,17 +2174,79 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .composer-send { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
 
 
-/* Live events: the start/end pair in the ingest panel, and the game record a
-   finished event shows in its job row. */
-.live-times { display: flex; gap: 8px; margin-top: 14px; }
-.live-times label { flex: 1; min-width: 0; display: block; }
-.live-times .composer-input { margin-top: 6px; width: 100%; }
+/* The game record a finished live event shows in its job row. */
 .live-error { margin-bottom: 4px; }
 .live-game { margin-top: 10px; padding-top: 10px; border-top: var(--rule-hair) solid var(--color-rule); }
 
 
 /* The scope card: three doors at the start of a session, then a one-line
    summary of what was chosen. */
+/* ── The opener ───────────────────────────────────────────────────────────
+   What a session can be about. Three rows, each an icon against the card's
+   own ground, then what it is and the ways in. The amber edge is the design's
+   own: it marks these as the things this desk does rather than as one more
+   card in the transcript. */
+.opener { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+
+.opener-option {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  background: var(--color-neutral-200);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-left: 4px solid var(--color-accent);
+  border-radius: 10px;
+}
+
+.opener-icon {
+  flex: none;
+  width: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+}
+
+.opener-text { flex: 1; min-width: 0; padding: 15px 16px; }
+.opener-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.opener-desc {
+  font-size: 12.5px;
+  color: var(--color-neutral-700);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.opener-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+
+/* The ways in are the informational blue, not the accent: on a card already
+   edged in amber, amber buttons would be the third amber thing in one box and
+   none of them would read as the action. */
+.opener-link {
+  padding: 6px 13px;
+  background: transparent;
+  border: var(--rule-hair) solid var(--color-info-300);
+  border-radius: 7px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-info);
+  cursor: pointer;
+}
+.opener-link:hover {
+  border-color: var(--color-info);
+  background: var(--color-info-100);
+}
+
+/* Narrow, the icon column is a row's worth of width for one glyph. */
+@media (max-width: 560px) {
+  .opener-icon { width: 52px; }
+  .opener-text { padding: 13px 13px 15px; }
+}
+
 .scope-options { display: grid; gap: 8px; margin-top: 10px; }
 .scope-option {
   display: flex; flex-direction: column; gap: 3px; text-align: left;
