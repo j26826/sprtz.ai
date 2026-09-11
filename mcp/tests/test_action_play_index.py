@@ -223,3 +223,44 @@ class TestSummaryAndTitleAreIndexed:
 
     def test_a_game_written_before_titles_existed_still_reads(self):
         assert store._game_out({"jobId": "j1"})["title"] == ""
+
+
+class TestARideIsInItsMomentsVectors:
+    """An equestrian day is searched by who rode and by how it was ridden.
+
+    Neither reached the vector. `participant` is the handball question — a
+    shirt number read off a jersey — and an equestrian moment leaves it empty,
+    because the pair is joined from the ride windows in code rather than read
+    per moment. So "Loretta Joynson's half-pass" could only ever be answered by
+    the reranker, and only if the play had already surfaced on its own meaning.
+    """
+
+    def _ride_moment(self, **kwargs) -> dict:
+        return _moment(
+            moment_type="half_pass", label="Half-pass", category="movement",
+            action_result="", participant="", participant_role="",
+            team1="", team2="", action_team="", score_team1=None, score_team2=None,
+            summary="An expressive half-pass left with consistent bend.",
+            description="The pair cross with clear forward tendency.",
+            execution_details="Clean crossing, uphill balance, no loss of rhythm.",
+            harmony_index="Soft in the contact throughout.",
+            rider="Loretta Joynson", horse="Tresais Lancelot",
+            **kwargs,
+        )
+
+    def test_the_rider_and_the_horse_are_in_the_vector(self):
+        text = store.action_play_text(self._ride_moment())
+        assert "Loretta Joynson" in text
+        assert "Tresais Lancelot" in text
+
+    def test_how_it_was_ridden_is_in_the_vector(self):
+        """In a sport judged on form this is most of what anyone types."""
+        text = store.action_play_text(self._ride_moment())
+        assert "uphill balance" in text
+        assert "Soft in the contact" in text
+
+    def test_a_match_with_no_rides_reads_exactly_as_before(self):
+        """Handball leaves all four empty, so nothing is added and nothing joins."""
+        text = store.action_play_text(_moment())
+        assert ". ." not in text
+        assert text.endswith("turns the rebound over.")

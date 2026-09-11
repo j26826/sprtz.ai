@@ -148,6 +148,15 @@ def action_play_text(moment: dict[str, Any]) -> str:
         # "horse fighting the contact" live here and nowhere else.
         moment.get("execution_details") or "",
         moment.get("harmony_index") or "",
+        # Who was in the arena. `participant` is the handball question — a
+        # shirt number read off a jersey — and an equestrian moment leaves it
+        # empty, because the pair is joined from the ride windows in code
+        # rather than read per moment. Without these two the vector has no
+        # idea whose round it is, so "Loretta Joynson's half-pass" could only
+        # be answered by the reranker, and only if the play had already
+        # surfaced on its own meaning.
+        moment.get("rider") or "",
+        moment.get("horse") or "",
     ]
     return ". ".join(p.strip() for p in parts if p and p.strip())
 

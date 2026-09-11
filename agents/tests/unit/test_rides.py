@@ -13,6 +13,7 @@ from sprtz_agents.tools.rides import (
     high_scoring,
     match_watchlist,
     normalise_name,
+    untrusted,
 )
 
 
@@ -172,3 +173,54 @@ class TestItIsActuallyWired:
         assert body and '"rides"' in body.group(0), (
             "rides are dropped at the boundary — the payload is built key by key"
         )
+
+
+class TestATotalThatCannotBeActedOn:
+    """Two checks can fail, and only one of them was being read.
+
+    `check_total` writes "mismatch: …" when a total does not equal the mean of
+    its own judge marks; `apply_grounding` writes "<source> disagrees: …" when
+    the published result contradicts the screen. Every caller tested the first
+    string alone, so a ride the results page contradicts came back as one of
+    the day's best — while the editor's own card, which had its own copy of the
+    rule and did know about "disagrees", left it out.
+    """
+
+    def test_a_mismatch_is_not_to_be_acted_on(self):
+        assert untrusted("mismatch: 5 marks average 71.200, total shown as 77.000")
+
+    def test_a_published_result_that_disagrees_is_not_either(self):
+        assert untrusted("equipe disagrees: shown 77.000, published 71.000")
+
+    def test_a_confirmed_total_is_fine(self):
+        assert not untrusted("ok, confirmed by equipe")
+        assert not untrusted("ok")
+        assert not untrusted("")
+
+    def test_the_disagreeing_ride_is_not_one_of_the_day_s_best(self):
+        rides = [{"order": 1, "test_type": "straight", "total_pct": 77.0,
+                  "score_check": "equipe disagrees: shown 77.000, published 71.000"}]
+        assert high_scoring(rides) == []
+
+
+class TestAnUnrecognisedTestType:
+    """The bar is what an unknown test type loses, not its place in the answer.
+
+    The lookup returned None for anything but the two exact lowercase strings,
+    and the ride fell out of the list entirely — a "Freestyle" on 84% was
+    silently missing from the day's best with nothing to say it had been
+    excluded.
+    """
+
+    def test_the_case_the_model_wrote_it_in_does_not_decide(self):
+        rides = [{"order": 1, "test_type": "Freestyle", "total_pct": 84.0, "score_check": "ok"}]
+        assert [r["order"] for r in high_scoring(rides)] == [1]
+
+    def test_a_word_from_another_language_falls_back_to_the_standard_bar(self):
+        rides = [{"order": 1, "test_type": "kuer", "total_pct": 84.0, "score_check": "ok"},
+                 {"order": 2, "test_type": "kuer", "total_pct": 72.0, "score_check": "ok"}]
+        assert [r["order"] for r in high_scoring(rides)] == [1]
+
+    def test_an_empty_test_type_is_still_a_straight_test(self):
+        rides = [{"order": 1, "test_type": "", "total_pct": 76.0, "score_check": "ok"}]
+        assert [r["order"] for r in high_scoring(rides)] == [1]

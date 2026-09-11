@@ -97,6 +97,25 @@ def canonical_identity(readings: list[tuple[str, str]]) -> tuple[str, str]:
     return rider, horse
 
 
+def untrusted(score_check: str) -> bool:
+    """Whether a total's own check says it must not be acted on.
+
+    Two checks can fail, and they read differently: `check_total` writes
+    "mismatch: …" when a total does not equal the mean of its own displayed
+    judge marks, and `apply_grounding` writes "<source> disagrees: …" when the
+    published result contradicts what was on screen. Both mean the number is
+    not safe to publish from, and the second was being missed everywhere the
+    rule was written out by hand — `high_scoring` and `list_rides` both tested
+    `startswith("mismatch")`, so a ride the results page contradicts came back
+    as one of the day's best while the editor's own card excluded it.
+
+    One function, because this rule is applied in four places and the web
+    carries its own copy of it (`web/src/ridegroups.js`).
+    """
+    text = str(score_check or "")
+    return text.startswith("mismatch") or "disagrees" in text
+
+
 def check_total(judge_marks: list[float], total_pct: float | None) -> str:
     """Whether a displayed total is consistent with its displayed judge marks.
 
@@ -184,8 +203,12 @@ def fuse(fragments: list[dict]) -> list[dict]:
 
 # The thresholds the clip requirements name. Freestyle is held higher because
 # the marks run higher: an artistic score lifts the total, so 75 in a freestyle
-# is not the ride that 75 in a straight test is.
+# is not the ride that 75 in a straight test is. These are dressage's bars and
+# they are compiled in here rather than living on the sport profile, which is
+# where every other sport-specific fact belongs: a jumping round is scored in
+# faults and has no percentage to clear at all.
 _THRESHOLDS = {"freestyle": 80.0, "straight": 75.0}
+_DEFAULT_BAR = "straight"
 
 
 def high_scoring(rides: list[dict], thresholds: dict[str, float] | None = None) -> list[dict]:
@@ -194,14 +217,23 @@ def high_scoring(rides: list[dict], thresholds: dict[str, float] | None = None) 
     A ride whose total failed its own consistency check is not returned. The
     whole point of the check is that an unverified number should not be the
     reason something gets published.
+
+    **An unrecognised test type is measured against the standard bar, not
+    dropped.** The lookup used to return None for anything but the two exact
+    lowercase strings and the ride fell out of the answer entirely — so a
+    "Freestyle" on 84%, or a German "Kür", was silently missing from the day's
+    best rides with nothing to say it had been excluded. The model is asked for
+    one of two words and usually gives one; what it does when it does not
+    should be to lose the higher bar, not the ride.
     """
     bars = {**_THRESHOLDS, **(thresholds or {})}
     out = []
     for ride in rides:
         total = ride.get("total_pct")
-        if total is None or ride.get("score_check", "").startswith("mismatch"):
+        if total is None or untrusted(ride.get("score_check", "")):
             continue
-        bar = bars.get(ride.get("test_type") or "straight")
+        kind = str(ride.get("test_type") or "").strip().lower()
+        bar = bars.get(kind, bars.get(_DEFAULT_BAR))
         if bar is not None and float(total) >= bar:
             out.append(ride)
     return out

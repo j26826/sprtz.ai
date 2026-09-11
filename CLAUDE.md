@@ -1715,6 +1715,15 @@ shows all three phases, so segments legitimately disagree; counting alone lets
 four unsure glimpses of the dressage phase outvote two confident cross-country
 ones.
 
+**An unrecognised test type keeps its place, and loses only its bar.**
+`high_scoring` looked its threshold up by exact lowercase string and skipped
+any ride the lookup missed — so a "Freestyle" on 84%, or a German "Kür", was
+silently absent from the day's best with nothing to say it had been left out.
+An unknown type is measured against the straight-test bar instead. Those bars
+(75%, 80%) are dressage's and they are compiled into `rides.py` rather than
+living on the sport profile, which is where every other sport-specific fact
+belongs: a jumping round is scored in faults and has no percentage to clear.
+
 **An unidentified discipline keeps the whole catalogue.** `types_for` returns
 everything rather than nothing for a code it does not know, because answering an
 unplaced video with an empty catalogue reports no moments in a video that plainly
@@ -1757,9 +1766,21 @@ everywhere would have a handball analysis writing paragraphs about a jump shot's
 balance for nobody to read. `SportProfile.segment_schema` names it; `None` means
 the general shape.
 
-Both are embedded. In a sport judged on form they carry most of what anyone
-searches by — "clean take-off", "horse fighting the contact" are in neither the
-label nor the summary. **The vector index itself is unchanged**: the width is
+Both are embedded — and for a long time neither was. `_persist_moments`
+composed its own `embed_text` and sent it with the moment, and the catalog
+prefers a supplied text over its own (`embed_text or action_play_text`), so
+`store.action_play_text` was unreachable from the analysis and drifted two
+fields behind it with nothing failing. Execution details and the harmony index
+never reached a single equestrian vector, which in a sport judged on form is
+most of what anyone searches by — "clean take-off", "horse fighting the
+contact" are in neither the label nor the summary. Neither did the rider or
+the horse: `participant` is the handball question, a shirt number read off a
+jersey, and an equestrian moment leaves it empty because the pair is joined
+from the ride windows in code rather than read per moment. **What a vector
+carries is decided once, in `store.action_play_text`.** Nothing else composes
+one, and changing that list only affects moments written after it — the
+vectors already stored keep what they were built with until the match is
+analysed again. **The vector index itself is unchanged**: the width is
 the same and nothing new is filtered or ordered on, so there is no new Firestore
 index to declare.
 
@@ -1796,7 +1817,12 @@ rider's surname — never half a horse's name) and for a score bar ("more than"
 is strict, "at least" and "or more" are not). `rideJobFor` opens the event
 that ran the named rider, preferring the open one. A total whose check failed
 is left out of a score question and counted on the card, the same rule
-`list_rides` applies for the agent. "events" and "competitions" are the games
+`list_rides` applies for the agent — `rides.untrusted`, which both sides now
+read. They disagreed for as long as each wrote the rule out by hand: a total
+can fail two ways, `check_total` writing "mismatch: …" and `apply_grounding`
+writing "<source> disagrees: …", and every Python caller tested only
+`startswith("mismatch")`. So a ride the published results contradict came back
+as one of the day's best while the editor's own card excluded it. "events" and "competitions" are the games
 list, as "games" is.
 
 **The player is a ride player.** Opening a moment (or Watch on a ride's
