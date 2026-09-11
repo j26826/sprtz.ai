@@ -271,3 +271,35 @@ export function countTypesIn(moments) {
   }
   return counts;
 }
+
+
+/**
+ * The rides in the order the board's own sort asks for.
+ *
+ * Two questions are being asked of one screen, and they were sharing one
+ * control. The board's sort is about the event — best first means the round
+ * with the strongest moment in it comes first, so the day's highlight is the
+ * first tab rather than somewhere down a running order of forty. Match order
+ * is the running order, which is how the day was ridden and how the log reads.
+ *
+ * Ordering the rail by each ride's *best moment* rather than by its score is
+ * deliberate: this control sits above the moments and orders them, and a round
+ * that scored 68 can still hold the thing worth cutting.
+ *
+ * A ride with nothing found scores zero and sinks, but keeps its place among
+ * the others that found nothing — the sort is stable, so the rail never
+ * reshuffles rides the question cannot tell apart.
+ *
+ * @param {{ ride: object, moments: object[] }[]} groups
+ * @param {string} sort  'score' or 'time'.
+ */
+export function sortRideGroups(groups, sort) {
+  const all = [...(groups || [])];
+  if (sort !== 'score') return all;
+  const best = (group) => (group?.moments || [])
+    .reduce((top, m) => Math.max(top, Number(m.highlightScore) || 0), 0);
+  return all
+    .map((group, at) => ({ group, at, best: best(group) }))
+    .sort((a, b) => b.best - a.best || a.at - b.at)
+    .map(({ group }) => group);
+}

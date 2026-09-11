@@ -42,7 +42,7 @@ import {
 } from './player.js';
 import {
   countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
-  rideNamedIn, ridesAsked,
+  rideNamedIn, ridesAsked, sortRideGroups,
 } from './ridegroups.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
@@ -1059,7 +1059,12 @@ function ridesCard(msg, index) {
   // analysis still running changes what there is to choose from.
   const types = momentTypesIn(asked.groups);
   const picked = (msg.types || []).filter((key) => types.some((ty) => ty.key === key));
-  const shown = filterByTypes(asked.groups, picked);
+  const sort = msg.sort === 'time' ? 'time' : 'score';
+  // A score bar already ranked these by total, and that is the order a question
+  // about scores is asking to see — the board's sort does not overrule it.
+  const shown = asked.score
+    ? filterByTypes(asked.groups, picked)
+    : sortRideGroups(filterByTypes(asked.groups, picked), sort);
   const current = shown.find((g) => String(g.ride.order) === String(msg.ride)) || shown[0];
   if (!current) return emptyCard(t('rides.noMatch'));
   // The type counts are of this ride before the type filter — of the live
@@ -1070,7 +1075,6 @@ function ridesCard(msg, index) {
   const all = asked.groups.reduce((n, g) => n + g.moments.length, 0);
   const bar = asked.score ? `${asked.score.inclusive ? '≥' : '>'} ${asked.score.min}%` : '';
   const title = [t('rides.title'), ...asked.names, bar].filter(Boolean).join(' · ');
-  const sort = msg.sort === 'time' ? 'time' : 'score';
 
   return `
     <div class="list rides-board-card">
@@ -1078,11 +1082,7 @@ function ridesCard(msg, index) {
         <div class="panel-head-title">${esc(title)}</div>
         <div class="panel-head-meta">
           <span class="list-count">${current.moments.length} ${esc(t('pager.of'))} ${all}</span>
-          <div class="segmented">
-            ${['score', 'time'].map((key) => `
-              <button class="seg-btn" data-sort="${index}:${key}"
-                      aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
-          </div>
+          ${segmentedSort('sort', index, sort, t('rides.sortEvent'))}
         </div>
       </div>
       ${eventHead(event, { prominent: true })}
@@ -1096,7 +1096,7 @@ function ridesCard(msg, index) {
             ${shown.map((group) => rideTab(group, index, current)).join('')}
           </div>
         </div>
-        ${ridePane(current, index, msg, types, picked, unfiltered.moments)}
+        ${ridePane(current, index, msg, types, picked, unfiltered.moments, sort)}
       </div>
     </div>`;
 }
@@ -1162,6 +1162,26 @@ function typeFilter(types, picked, index, open, moments) {
 }
 
 
+/**
+ * Best first or match order, as one choice with two states.
+ *
+ * Two of them are on the board and they answer different questions: the one in
+ * the head orders the rides — best first puts the round holding the day's
+ * strongest moment at the top of the rail — and the one in the pane orders the
+ * moments of the round that is open. They used to be a single control, so
+ * asking for the best moment of one rider re-sorted every rider, and asking
+ * for the day's best could not be asked at all.
+ */
+function segmentedSort(attr, index, current, label) {
+  return `
+    <div class="segmented" role="group" aria-label="${esc(label)}">
+      ${['score', 'time'].map((key) => `
+        <button class="seg-btn" data-${attr}="${index}:${key}"
+                aria-pressed="${key === current}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
+    </div>`;
+}
+
+
 const rideTabId = (index, ride) => `ride-tab-${index}-${ride.order ?? 'x'}`;
 
 
@@ -1210,7 +1230,11 @@ function rideTab({ ride, moments }, index, current) {
  * A ride with nothing of the chosen types says so and says how to get back,
  * because an empty pane beside a rail full of names reads as a broken card.
  */
-function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide) {
+function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boardSort) {
+  // Unset, the pane follows the board: one sort is still one answer until
+  // somebody asks a different question of this rider.
+  const sort = msg.rideSort === 'score' || msg.rideSort === 'time' ? msg.rideSort : boardSort;
+  moments = selectMoments(moments, { sort }).list;
   const result = ride.result || {};
   const check = rideCheck({ score_check: result.scoreCheck });
   const reading = [
@@ -1230,7 +1254,10 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide) {
 
   return `
     <div class="ride-pane" role="tabpanel" aria-labelledby="${esc(rideTabId(index, ride))}">
-      ${typeFilter(types, picked, index, Boolean(msg.typesOpen), ofThisRide)}
+      <div class="ride-pane-controls">
+        ${typeFilter(types, picked, index, Boolean(msg.typesOpen), ofThisRide)}
+        ${segmentedSort('ride-sort', index, sort, t('rides.sortRide'))}
+      </div>
       <div class="ride-pane-head">
         <div class="ride-who">
           <span class="ride-rider">${esc(ride.rider || '—')}</span>
@@ -4212,7 +4239,7 @@ document.addEventListener('click', (event) => {
     + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
     + '[data-desk-add],[data-register-hls],[data-schedule-live],'
     + '[data-opener],[data-opener-back],[data-ingest-src],'
-    + '[data-rename],[data-rename-save],[data-rename-cancel],'
+    + '[data-rename],[data-rename-save],[data-rename-cancel],[data-ride-sort],'
     + '[data-scope-pick],[data-scope-sport],[data-scope-disc],[data-scope-game],'
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
     + '[data-pc],[data-player-range],[data-watch-ride],'
@@ -4303,12 +4330,22 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
+  if (hit.dataset.rideSort) {
+    const [index, key] = hit.dataset.rideSort.split(':');
+    const msg = state.msgs[Number(index)];
+    if (msg) { msg.rideSort = key; msg.page = 0; }
+    render();
+    return;
+  }
   if (hit.dataset.sort) {
     const [index, key] = hit.dataset.sort.split(':');
     const msg = state.msgs[Number(index)];
     // Back to the first page: page four of a score-ranked list is not page four
     // of the same moments in match order.
-    if (msg) { msg.sort = key; msg.page = 0; }
+    // The pane follows the board again: the board's sort is the answer to "how
+    // should this be ordered", and a pane still holding the previous one would
+    // make the new choice look like it had done nothing.
+    if (msg) { msg.sort = key; msg.rideSort = null; msg.page = 0; }
     render();
     return;
   }

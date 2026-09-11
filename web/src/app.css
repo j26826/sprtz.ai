@@ -1916,7 +1916,22 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
+  min-width: 0;
 }
+
+/* The pane's two controls: what is shown, and in what order. Side by side
+   because they are two halves of one question about this ride, and the sort
+   is pushed right so the eye finds the filter first — the filter changes what
+   is there, the sort only changes where it is. */
+.ride-pane-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.ride-pane-controls .segmented { flex: none; }
 .type-filter { position: relative; }
 
 .type-filter-toggle {

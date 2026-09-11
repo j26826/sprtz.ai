@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
-  rideNamedIn, rideScoreAsked, ridesAsked,
+  rideNamedIn, rideScoreAsked, ridesAsked, sortRideGroups,
 } from '../src/ridegroups.js';
 
 const event = {
@@ -225,4 +225,59 @@ test('a moment with neither a code nor a label is counted as no type', () => {
 test('filtering never writes back to the groups it was given', () => {
   filterByTypes(board, ['piaffe']);
   assert.equal(board[0].moments.length, 2);
+});
+
+
+/* ── ordering the rail ────────────────────────────────────────────────────── */
+
+const day = [
+  { ride: { order: 1, rider: 'Susanna Wade' },
+    moments: [{ momentId: 'a', highlightScore: 0.61 }, { momentId: 'b', highlightScore: 0.72 }] },
+  { ride: { order: 2, rider: 'Elan Williams' }, moments: [] },
+  { ride: { order: 3, rider: 'Loretta Joynson' },
+    moments: [{ momentId: 'c', highlightScore: 0.94 }] },
+  { ride: { order: 4, rider: 'Marcus Ainsley' }, moments: [] },
+];
+const riders = (groups) => groups.map((g) => g.ride.rider);
+
+test('match order is the running order, untouched', () => {
+  assert.deepEqual(riders(sortRideGroups(day, 'time')), riders(day));
+});
+
+test('best first puts the ride holding the strongest moment at the top', () => {
+  assert.deepEqual(riders(sortRideGroups(day, 'score')),
+    ['Loretta Joynson', 'Susanna Wade', 'Elan Williams', 'Marcus Ainsley']);
+});
+
+test('a ride is ranked by its best moment, not by how many it has', () => {
+  const groups = [
+    { ride: { order: 1, rider: 'Many' },
+      moments: [{ highlightScore: 0.4 }, { highlightScore: 0.4 }, { highlightScore: 0.4 }] },
+    { ride: { order: 2, rider: 'One good one' }, moments: [{ highlightScore: 0.9 }] },
+  ];
+  assert.deepEqual(riders(sortRideGroups(groups, 'score')), ['One good one', 'Many']);
+});
+
+test('rides the sort cannot tell apart keep their running order', () => {
+  // Stable: two rounds that found nothing must not swap places between renders.
+  assert.deepEqual(riders(sortRideGroups(day, 'score')).slice(2),
+    ['Elan Williams', 'Marcus Ainsley']);
+});
+
+test('ordering never writes back to the groups it was given', () => {
+  sortRideGroups(day, 'score');
+  assert.deepEqual(riders(day),
+    ['Susanna Wade', 'Elan Williams', 'Loretta Joynson', 'Marcus Ainsley']);
+});
+
+test('an unscored moment does not lift its ride', () => {
+  const groups = [
+    { ride: { order: 1, rider: 'Unscored' }, moments: [{ momentId: 'x' }] },
+    { ride: { order: 2, rider: 'Scored' }, moments: [{ highlightScore: 0.1 }] },
+  ];
+  assert.deepEqual(riders(sortRideGroups(groups, 'score')), ['Scored', 'Unscored']);
+});
+
+test('nothing to order is nothing, not a crash', () => {
+  assert.deepEqual(sortRideGroups(null, 'score'), []);
 });

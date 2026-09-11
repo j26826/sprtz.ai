@@ -367,6 +367,8 @@ const STRINGS = {
     'rename.save': 'Save',
     'rename.cancel': 'Cancel',
     'rename.failed': 'That name could not be saved',
+    'rides.sortEvent': 'Order the rides',
+    'rides.sortRide': 'Order this ride’s moments',
   },
 
   'en-US': {
@@ -744,6 +746,8 @@ const STRINGS = {
     'rename.save': 'Speichern',
     'rename.cancel': 'Abbrechen',
     'rename.failed': 'Dieser Name konnte nicht gespeichert werden',
+    'rides.sortEvent': 'Ritte sortieren',
+    'rides.sortRide': 'Szenen dieses Ritts sortieren',
   },
 
   it: {
@@ -1099,6 +1103,8 @@ const STRINGS = {
     'rename.save': 'Salva',
     'rename.cancel': 'Annulla',
     'rename.failed': 'Non è stato possibile salvare questo nome',
+    'rides.sortEvent': 'Ordina le riprese',
+    'rides.sortRide': 'Ordina i momenti di questa ripresa',
   },
 
   fr: {
@@ -1457,6 +1463,8 @@ const STRINGS = {
     'rename.save': 'Enregistrer',
     'rename.cancel': 'Annuler',
     'rename.failed': 'Ce nom n a pas pu être enregistré',
+    'rides.sortEvent': 'Trier les reprises',
+    'rides.sortRide': 'Trier les moments de cette reprise',
   },
 
   es: {
@@ -1812,6 +1820,8 @@ const STRINGS = {
     'rename.save': 'Guardar',
     'rename.cancel': 'Cancelar',
     'rename.failed': 'No se pudo guardar ese nombre',
+    'rides.sortEvent': 'Ordenar los recorridos',
+    'rides.sortRide': 'Ordenar los momentos de este recorrido',
   },
 };
 
