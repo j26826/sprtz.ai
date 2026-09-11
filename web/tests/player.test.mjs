@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  PREVIEW_PAD_SEC, SPEEDS, clampTo, nextSpeed, playRange, shortClock, sourceReference, widen,
+  PREVIEW_PAD_SEC, SPEEDS, clampTo, nextSpeed, playRange, shortClock, widen,
 } from '../src/player.js';
 
 test('the player shows three seconds either side of the moment', () => {
@@ -48,14 +48,3 @@ test('positions read as m:ss, and h:mm:ss past the hour', () => {
   assert.equal(shortClock(-3), '0:00');
 });
 
-test('the reference names the file, the offset and the length, and cuts without re-encoding', () => {
-  const ref = sourceReference('psg-720p.mp4', { start: 7606, end: 7912 }, 'ride-12');
-  assert.equal(ref.at, 'psg-720p.mp4 @ 7606.0s + 306.0s');
-  assert.equal(ref.command, 'ffmpeg -ss 7606.0 -t 306.0 -i psg-720p.mp4 -c copy psg-720p-ride-12.mp4');
-});
-
-test('a file name with spaces is quoted so the line pastes as it is', () => {
-  const ref = sourceReference("Day 2 Arena's feed.mov", { start: 1, end: 2 }, 'Piaffe 482');
-  assert.equal(ref.command,
-    "ffmpeg -ss 1.0 -t 1.0 -i 'Day 2 Arena'\\''s feed.mov' -c copy 'Day 2 Arena'\\''s feed-piaffe-482.mp4'");
-});

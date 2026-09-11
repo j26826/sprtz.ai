@@ -37,9 +37,11 @@ import {
   filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
 } from './search.js';
 import {
-  clampTo, nextSpeed, playRange, shortClock, sourceReference, widen,
+  clampTo, nextSpeed, playRange, shortClock, widen,
 } from './player.js';
-import { groupByRide, notesForRide, rideNamedIn, ridesAsked } from './ridegroups.js';
+import {
+  filterByTypes, groupByRide, momentTypesIn, notesForRide, rideNamedIn, ridesAsked,
+} from './ridegroups.js';
 import {
   METADATA_LANGUAGES, applyTheme, getSettings, loadSettings, saveSettings, themeOptions,
 } from './settings.js';
@@ -883,7 +885,7 @@ function momentTile(m, opts = {}) {
       <div class="tile-meta">${esc(meta)}</div>
       ${m.rerankReason ? `<div class="tile-why">${esc(m.rerankReason)}</div>` : ''}
       <div class="tile-actions">
-        <button class="link-btn" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-details="${esc(m.momentId)}"`}>${esc(t('moment.details'))}</button>
+        <button class="${opts.bigDetails ? 'btn-solid' : 'link-btn'}" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-details="${esc(m.momentId)}"`}>${esc(t('moment.details'))}</button>
         ${opts.add ? `<button class="btn-outline" data-desk-add="${esc(opts.add)}">${esc(t('moment.add'))}</button>` : clip
           ? `<button class="btn-outline" data-remove-clip="${esc(m.momentId)}">${esc(t('moment.remove'))}</button>`
           : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
@@ -1014,11 +1016,19 @@ function ridesFor(msg) {
 
 
 /**
- * The rides a question asked for, each with its moments under it.
+ * The rides a question asked for, as a board: who on the left, what on top.
  *
- * The same ride groups as the moments card, but the ride is the answer here:
- * the head says what narrowed them — a name, a score bar — and how many of the
- * event's rides that left, and the moments inside each follow the card's sort.
+ * A competition day asks two questions at once — which round, and which
+ * movement — and one column of rides answers only the first. Finding the
+ * half-pass somebody asked about meant opening forty headings and reading
+ * every tile under each of them. So the two axes are separated: the rail is
+ * the running order and stays where it is while the pane changes, the type
+ * filter crosses every ride at once, and the pane is one ride's moments.
+ * Choosing Half-pass narrows the rail to the riders who rode one, which is the
+ * question that filter is really asking.
+ *
+ * The head is unchanged — what narrowed the rides, how many of the event's
+ * that left, and the sort, which still decides the order inside the pane.
  */
 function ridesCard(msg, index) {
   const found = ridesFor(msg);
@@ -1029,10 +1039,19 @@ function ridesCard(msg, index) {
   }
 
   const { asked, event, total } = found;
-  const view = pageOf(asked.groups, msg.page, RIDES_PER_PAGE);
+  // A type the moments no longer carry is dropped rather than left selected:
+  // the filter lives on the message and outlives a re-render, while an
+  // analysis still running changes what there is to choose from.
+  const types = momentTypesIn(asked.groups);
+  const picked = (msg.types || []).filter((key) => types.some((ty) => ty.key === key));
+  const shown = filterByTypes(asked.groups, picked);
+  const current = shown.find((g) => String(g.ride.order) === String(msg.ride)) || shown[0];
+  if (!current) return emptyCard(t('rides.noMatch'));
+
   const bar = asked.score ? `${asked.score.inclusive ? '≥' : '>'} ${asked.score.min}%` : '';
   const title = [t('rides.title'), ...asked.names, bar].filter(Boolean).join(' · ');
-  const count = asked.narrowed ? `${asked.groups.length} ${t('pager.of')} ${total}` : String(total);
+  const count = shown.length === total
+    ? String(total) : `${shown.length} ${t('pager.of')} ${total}`;
   const sort = msg.sort === 'time' ? 'time' : 'score';
 
   return `
@@ -1046,17 +1065,146 @@ function ridesCard(msg, index) {
                     aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join('')}
         </div>
       </div>
-      ${eventHead(event)}
+      ${eventHead(event, { prominent: true })}
       ${asked.unchecked
         ? `<div class="ride-group-empty">${esc(t('rides.unchecked').replace('{n}', String(asked.unchecked)))}</div>`
         : ''}
-      ${view.slice.map(rideGroup).join('')}
+      ${typeFilter(types, picked, index, Boolean(msg.typesOpen))}
+      <div class="ride-board">
+        <div class="ride-rail">
+          <div class="ride-tabs-head">${esc(t('rides.runningOrder'))}</div>
+          <div class="ride-tabs" role="tablist" aria-label="${esc(t('rides.runningOrder'))}">
+            ${shown.map((group) => rideTab(group, index, current)).join('')}
+          </div>
+        </div>
+        ${ridePane(current, index, msg)}
+      </div>
+    </div>`;
+}
+
+
+/**
+ * The moment-type axis: one dropdown, many choices at once.
+ *
+ * A dropdown rather than a row of chips because a class contains a dozen
+ * movements and a row of them becomes a second navigation competing with the
+ * rail — the rail is what the eye follows here, and the filter should stay one
+ * control. Multi-select because "half-pass and pirouette" is one question
+ * rather than two.
+ *
+ * The types are the ones the moments actually carry (`momentTypesIn`), not the
+ * sport's whole catalogue: a filter offering two dozen movements that match
+ * nothing is a filter nobody trusts. Nothing chosen reads as the whole ride,
+ * because that is what the card shows before anyone touches it.
+ *
+ * Open state lives on the message, as the page and the sort do: render()
+ * rebuilds the transcript, so anything the DOM would have held is lost.
+ */
+function typeFilter(types, picked, index, open) {
+  if (!types.length) return '';
+  const chosen = types.filter((ty) => picked.includes(ty.key));
+  let label = t('rides.allTypes');
+  if (chosen.length && chosen.length <= 2) label = chosen.map((ty) => ty.label).join(', ');
+  else if (chosen.length) label = t('rides.typesPicked').replace('{n}', String(chosen.length));
+
+  const option = (key, name, count, on) => `
+    <button class="type-opt" data-type-pick="${esc(`${index}:${key}`)}" aria-pressed="${on}">
+      <span class="type-opt-box" aria-hidden="true"></span>
+      <span class="type-opt-name">${esc(name)}</span>
+      ${count == null ? '' : `<span class="list-count">${count}</span>`}
+    </button>`;
+
+  return `
+    <div class="ride-filter">
+      <div class="type-filter">
+        <button class="btn-outline type-filter-toggle" data-type-menu="${index}"
+                aria-expanded="${open}">${esc(`${t('rides.types')}: ${label}`)}</button>
+        ${open ? `
+          <div class="type-menu" role="group" aria-label="${esc(t('rides.types'))}">
+            ${option('', t('rides.allTypes'), null, !chosen.length)}
+            ${types.map((ty) => option(ty.key, ty.label, ty.count, picked.includes(ty.key))).join('')}
+          </div>` : ''}
+      </div>
+    </div>`;
+}
+
+
+/**
+ * One ride as a tab: who rode, on what, and when they were in the arena.
+ *
+ * Three lines of the ride table's own row, in its order — running number, then
+ * the rider, then the horse and the span. The rider is what the rail is read
+ * down, so it is the line in the sans; the horse and the clock qualify it and
+ * take the mono, as every reading in this app does.
+ */
+const rideTabId = (index, ride) => `ride-tab-${index}-${ride.order ?? 'x'}`;
+
+
+function rideTab({ ride, moments }, index, current) {
+  const who = `${ride.startNumber ? `#${ride.startNumber} ` : ''}${
+    ride.identitySource === 'schedule' ? '~' : ''}${ride.rider || '—'}`;
+  const under = [ride.horse, `${clock(ride.startSec)}–${clock(ride.endSec)}`]
+    .filter(Boolean).join(' · ');
+  const published = [ride.groundedRider, ride.groundedHorse].filter(Boolean).join(' / ');
+
+  return `
+    <button class="ride-tab" role="tab" aria-selected="${ride === current.ride}"
+            id="${esc(rideTabId(index, ride))}"
+            data-ride-tab="${esc(`${index}:${ride.order ?? ''}`)}"
+            ${published ? `title="${esc(published)}"` : ''}>
+      <span class="ride-num">${esc(String(ride.order ?? ''))}</span>
+      <span class="ride-who">
+        <span class="ride-rider">${esc(who)}</span>
+        <span class="ride-horse">${esc(under)}</span>
+      </span>
+      <span class="list-count">${moments.length}</span>
+    </button>`;
+}
+
+
+/**
+ * The open ride: how it scored, and its moments.
+ *
+ * The heading carries what the group heading used to — the test, the total and
+ * the placing, with the check on a total that failed one — and Watch, which
+ * puts the whole ride in the player. The tiles below it are the same tiles the
+ * flat list shows, paged, with Details raised to a solid button: opening a
+ * moment's record is the thing a ride is read for, and a link beside a
+ * bordered Add button reads as the lesser of the two.
+ */
+function ridePane({ ride, moments }, index, msg) {
+  const result = ride.result || {};
+  const check = rideCheck({ score_check: result.scoreCheck });
+  const reading = [
+    ride.testType ? t(`ride.${ride.testType}`) : '',
+    result.totalPct == null ? '' : `${Number(result.totalPct).toFixed(3)}%`,
+    result.place == null ? '' : `${t('ride.place')} ${result.place}`,
+  ].filter(Boolean).join(' · ');
+  const view = pageOf(moments, msg.page);
+
+  return `
+    <div class="ride-pane" role="tabpanel" aria-labelledby="${esc(rideTabId(index, ride))}">
+      <div class="ride-pane-head">
+        <div class="ride-who">
+          <span class="ride-rider">${esc(ride.rider || '—')}</span>
+          <span class="ride-horse">${esc([ride.horse,
+    `${clock(ride.startSec)}–${clock(ride.endSec)}`].filter(Boolean).join(' · '))}</span>
+        </div>
+        <div class="ride-group-result">${esc(reading)}${check.text
+    ? `<span class="ride-check" data-tone="${check.tone}">${esc(check.text)}</span>` : ''}</div>
+        <button class="btn-outline" data-watch-ride="${esc(String(ride.order ?? ''))}"
+                >${esc(t('ride.watch'))}</button>
+      </div>
+      ${moments.length
+    ? `<div class="tile-row">${view.slice
+      .map((m) => momentTile(m, { inRide: true, bigDetails: true })).join('')}</div>`
+    : `<div class="ride-group-empty">${esc(t('ride.none'))}</div>`}
       ${pagerRow(view, index)}
     </div>`;
 }
 
 
-function eventHead(event) {
+function eventHead(event, { prominent = false } = {}) {
   const meta = [event.discipline, event.competition, event.venue, event.date]
     .filter(Boolean).join(' · ');
   return `
@@ -1068,7 +1216,8 @@ function eventHead(event) {
           ${event.outcome ? `<div class="game-outcome">${esc(event.outcome)}</div>` : ''}
         </div>
         <div class="moment-actions">
-          <button class="link-btn" data-game-details="1">${esc(t('moment.details'))}</button>
+          <button class="${prominent ? 'btn-outline' : 'link-btn'}"
+                  data-game-details="1">${esc(t('moment.details'))}</button>
         </div>
       </div>
     </div>`;
@@ -1259,9 +1408,10 @@ function openRide(order) {
 
 function openPlayer(p) {
   $('details-title').textContent = p.title;
-  // The slot holds the live player; the block under it is redrawn on its own,
-  // so re-aiming the player never rebuilds the video.
-  $('details-player').innerHTML = `${playerMarkup(p.key)}<div class="player-under"></div>`;
+  // The slot holds the live player; the blocks either side of it are redrawn
+  // on their own, so re-aiming the player never rebuilds the video.
+  $('details-player').innerHTML = '<div class="player-over"></div>'
+    + `${playerMarkup(p.key)}<div class="player-under"></div>`;
   state.details = p.key;
   state.playing = { full: false, loop: false, rate: 1, ...p };
   renderDetailsBody();
@@ -1271,19 +1421,21 @@ function openPlayer(p) {
 
 
 /**
- * Everything around the player. Under it: the ride this is part of, how it
- * scored and where that score came from, the chips that move the player
- * through it, and the cut into the source for what is playing. Beside it:
+ * Everything around the player. Above it: the moments of this ride, as chips
+ * that re-aim it — they are what the player is driven by, so they sit where
+ * they can be reached without scrolling past the video to find them. Under it:
+ * the ride itself, how it scored and where that score came from. Beside it:
  * what the analysis looked for and did not find, the incidents, and the
  * moment's own record. Redrawn when the range changes, so the chip that is
- * playing and the reference into the source always describe what is on
- * screen.
+ * playing always describes what is on screen.
  */
 function renderDetailsBody() {
   const p = state.playing;
   if (!p) return;
   const ride = treeRide(p.rideOrder);
   const panel = ride ? ridePanel(ride, p) : null;
+  const over = $('details-player').querySelector('.player-over');
+  if (over) over.innerHTML = panel ? panel.over : '';
   const under = $('details-player').querySelector('.player-under');
   if (under) under.innerHTML = panel ? panel.summary : '';
   const body = $('details-body');
@@ -1379,13 +1531,13 @@ function ridePanel(ride, p) {
 
   const notes = notesForRide(state.game?.notConfirmed, ride.segments);
   const incidents = moments.filter((mo) => mo.category === 'incident' || mo.requiresHumanReview);
-  const job = state.jobs.find((j) => j.id === state.jobId);
-  const ref = sourceReference(job?.source?.originalName || '', p,
-    p.full ? `ride-${ride.order}` : `${p.label}-${Math.round(p.start)}`);
+  // Above the player, the one thing that drives it: the chips that pick what
+  // is playing. They used to sit under the ride's score tiles, which put the
+  // controls for the video below the video and everything about it.
+  const over = panelSection(t('ride.momentsInRide'), `<div class="range-chips">${chips}</div>`);
 
-  // Two halves. Under the player, the ride itself and the chips that drive
-  // the player — beside its own controls, where a hand already is. Beside it,
-  // the reference material an editor reads rather than acts on.
+  // Under it, the ride itself — who rode, what it scored and where the score
+  // came from. Beside it, the material an editor reads rather than acts on.
   const summary = `
     <section class="ride-panel">
       <div class="ride-panel-head">
@@ -1398,10 +1550,6 @@ function ridePanel(ride, p) {
       ${check.text ? `<div class="ride-callout" data-tone="${check.tone}">${esc(check.text)}</div>` : ''}
       ${panelSection(t('ride.provenance'), `<div class="panel-line">${esc(provenanceText(r))}</div>${
         r.scoreboard ? `<pre class="source-ref">${esc(r.scoreboard)}</pre>` : ''}`)}
-      ${panelSection(t('ride.momentsInRide'), `<div class="range-chips">${chips}</div>`)}
-      ${panelSection(t('ride.reference'), `
-        <pre class="source-ref" data-source-ref>${esc(ref.at)}\n${esc(ref.command)}</pre>
-        <button class="link-btn" data-copy-ref="1">${esc(t('player.copy'))}</button>`)}
     </section>`;
 
   // What the analysis found beyond the moments: what it looked for and could
@@ -1416,7 +1564,7 @@ function ridePanel(ride, p) {
         : `<div class="panel-line">${esc(t('ride.noIncidents'))}</div>`)}
     </section>`;
 
-  return { summary, reference };
+  return { over, summary, reference };
 }
 
 
@@ -1477,20 +1625,6 @@ function playerControl(kind) {
     return;
   }
   syncPlayer();
-}
-
-
-async function copyReference(button) {
-  const text = $('details').querySelector('[data-source-ref]')?.textContent || '';
-  try {
-    await navigator.clipboard.writeText(text);
-    button.textContent = t('player.copied');
-  } catch {
-    // Clipboard refused (an insecure origin, a denied permission): select the
-    // text instead, so a keyboard copy still works.
-    const pre = $('details').querySelector('[data-source-ref]');
-    if (pre) window.getSelection()?.selectAllChildren(pre);
-  }
 }
 
 
@@ -3734,12 +3868,12 @@ document.addEventListener('click', (event) => {
     + '[data-desk-add],[data-ingest-tab],[data-register-hls],[data-schedule-live],'
     + '[data-scope-pick],[data-scope-sport],[data-scope-disc],[data-scope-game],'
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
-    + '[data-pc],[data-player-range],[data-copy-ref],[data-watch-ride]');
+    + '[data-pc],[data-player-range],[data-watch-ride],'
+    + '[data-ride-tab],[data-type-menu],[data-type-pick]');
   if (!hit) return;
 
   if (hit.dataset.pc) { playerControl(hit.dataset.pc); return; }
   if (hit.dataset.playerRange) { setPlayerRange(hit.dataset.playerRange); return; }
-  if (hit.dataset.copyRef) { copyReference(hit); return; }
   if (hit.dataset.watchRide) { openRide(Number(hit.dataset.watchRide)); return; }
 
   if (hit.dataset.ask) {
@@ -3774,6 +3908,39 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.showAll) {
     const msg = state.msgs[Number(hit.dataset.showAll)];
     if (msg) { msg.showAll = true; msg.page = 0; }
+    render();
+    return;
+  }
+  if (hit.dataset.rideTab) {
+    const [index, order] = hit.dataset.rideTab.split(':');
+    const msg = state.msgs[Number(index)];
+    // Back to the first page: page two of this ride's moments is not page two
+    // of the next one's, and a ride with fewer moments would open on nothing.
+    if (msg) { msg.ride = order; msg.page = 0; }
+    render();
+    return;
+  }
+  if (hit.dataset.typeMenu) {
+    const msg = state.msgs[Number(hit.dataset.typeMenu)];
+    if (msg) msg.typesOpen = !msg.typesOpen;
+    render();
+    return;
+  }
+  if (hit.dataset.typePick) {
+    const [index, key] = hit.dataset.typePick.split(':');
+    const msg = state.msgs[Number(index)];
+    if (msg) {
+      const picked = msg.types || [];
+      // The blank key is "the whole ride" — the resting state, so it clears
+      // rather than being a type of its own. The menu stays open either way:
+      // choosing several is one question, and closing after each would make it
+      // three round trips.
+      msg.types = !key ? []
+        : picked.includes(key) ? picked.filter((k) => k !== key) : [...picked, key];
+      // The rail is narrowed by the choice, so the open ride may no longer be
+      // on it; ridesCard falls back to the first, and the page has to follow.
+      msg.page = 0;
+    }
     render();
     return;
   }
