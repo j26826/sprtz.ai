@@ -328,7 +328,7 @@ const STRINGS = {
     'agent.label': 'Agent',
     'publish.note': 'Arenos packages clips for download — it does not post on your behalf.',
     'opener.add': 'Add a new video',
-    'opener.addDesc': 'Bring a recording in, or reserve the pipeline for a fixture that has not been played yet.',
+    'opener.addDesc': 'Bring a recording in, reserve the pipeline for a fixture that has not been played yet, or see what is already running.',
     'opener.find': 'Find moments',
     'opener.findDesc': 'Search what is already analysed — the whole catalogue, one event, a set of events, or a sport and its disciplines.',
     'opener.clips': 'Generate clips / highlights',
@@ -359,6 +359,8 @@ const STRINGS = {
     'ingest.readyMoments': 'moments only',
     'ingest.pickSource': 'Pick a source to begin.',
     'ingest.liveNeeds': 'Add a stream URL, a start and an end.',
+    'opener.link.status': 'Check status',
+    'opener.back': 'Back to the start',
   },
 
   'en-US': {
@@ -697,7 +699,7 @@ const STRINGS = {
     'publish.note':
       'Arenos stellt Clips zum Download bereit — es veröffentlicht nichts in Ihrem Namen.',
     'opener.add': 'Neues Video hinzufügen',
-    'opener.addDesc': 'Eine Aufzeichnung einbringen oder die Pipeline für eine noch nicht gespielte Begegnung reservieren.',
+    'opener.addDesc': 'Eine Aufzeichnung einbringen, die Pipeline für eine noch nicht gespielte Begegnung reservieren oder sehen, was gerade läuft.',
     'opener.find': 'Szenen finden',
     'opener.findDesc': 'Das bereits Analysierte durchsuchen — den ganzen Katalog, eine Veranstaltung, mehrere Veranstaltungen oder eine Sportart und ihre Disziplinen.',
     'opener.clips': 'Clips / Highlights erzeugen',
@@ -728,6 +730,8 @@ const STRINGS = {
     'ingest.readyMoments': 'nur Szenen',
     'ingest.pickSource': 'Wählen Sie eine Quelle.',
     'ingest.liveNeeds': 'Stream-URL, Start und Ende angeben.',
+    'opener.link.status': 'Status prüfen',
+    'opener.back': 'Zurück zum Anfang',
   },
 
   it: {
@@ -1044,7 +1048,7 @@ const STRINGS = {
     'publish.note':
       'Arenos prepara le clip da scaricare — non pubblica nulla per tuo conto.',
     'opener.add': 'Aggiungi un nuovo video',
-    'opener.addDesc': 'Porta dentro una registrazione, o riserva la pipeline per un evento non ancora disputato.',
+    'opener.addDesc': 'Porta dentro una registrazione, riserva la pipeline per un evento non ancora disputato, o guarda cosa è già in corso.',
     'opener.find': 'Trova momenti',
     'opener.findDesc': 'Cerca in ciò che è già analizzato — tutto il catalogo, un evento, più eventi, o uno sport e le sue discipline.',
     'opener.clips': 'Genera clip / highlight',
@@ -1075,6 +1079,8 @@ const STRINGS = {
     'ingest.readyMoments': 'solo momenti',
     'ingest.pickSource': 'Scegli una sorgente per iniziare.',
     'ingest.liveNeeds': 'Aggiungi un URL dello stream, un inizio e una fine.',
+    'opener.link.status': 'Controlla lo stato',
+    'opener.back': 'Torna all’inizio',
   },
 
   fr: {
@@ -1394,7 +1400,7 @@ const STRINGS = {
     'publish.note':
       'Arenos prépare des clips à télécharger — il ne publie rien à votre place.',
     'opener.add': 'Ajouter une nouvelle vidéo',
-    'opener.addDesc': 'Faites entrer un enregistrement, ou réservez le pipeline pour une rencontre qui n a pas encore eu lieu.',
+    'opener.addDesc': 'Faites entrer un enregistrement, réservez le pipeline pour une rencontre qui n a pas encore eu lieu, ou voyez ce qui tourne déjà.',
     'opener.find': 'Trouver des moments',
     'opener.findDesc': 'Cherchez dans ce qui est déjà analysé — tout le catalogue, un événement, plusieurs événements, ou un sport et ses disciplines.',
     'opener.clips': 'Générer clips / temps forts',
@@ -1425,6 +1431,8 @@ const STRINGS = {
     'ingest.readyMoments': 'moments seuls',
     'ingest.pickSource': 'Choisissez une source pour commencer.',
     'ingest.liveNeeds': 'Ajoutez une URL de flux, un début et une fin.',
+    'opener.link.status': 'Voir l’état',
+    'opener.back': 'Retour au début',
   },
 
   es: {
@@ -1741,7 +1749,7 @@ const STRINGS = {
     'publish.note':
       'Arenos prepara clips para descargar — no publica nada en tu nombre.',
     'opener.add': 'Añadir un vídeo nuevo',
-    'opener.addDesc': 'Trae una grabación, o reserva el pipeline para un encuentro que aún no se ha jugado.',
+    'opener.addDesc': 'Trae una grabación, reserva el pipeline para un encuentro que aún no se ha jugado, o mira lo que ya está en marcha.',
     'opener.find': 'Encontrar momentos',
     'opener.findDesc': 'Busca en lo ya analizado — todo el catálogo, un evento, varios eventos, o un deporte y sus disciplinas.',
     'opener.clips': 'Generar clips / resúmenes',
@@ -1772,6 +1780,8 @@ const STRINGS = {
     'ingest.readyMoments': 'solo momentos',
     'ingest.pickSource': 'Elige un origen para empezar.',
     'ingest.liveNeeds': 'Añade una URL de emisión, un inicio y un fin.',
+    'opener.link.status': 'Ver el estado',
+    'opener.back': 'Volver al inicio',
   },
 };
 

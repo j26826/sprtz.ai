@@ -1706,14 +1706,10 @@ function closeDetails() {
  * Which one is on the message rather than in `state.upload`, so an ingest
  * panel scrolled back to is the panel that was opened.
  */
-function ingestCard(m, index) {
+function ingestCard(m) {
   const u = state.upload;
   const busy = u.status !== 'idle';
   const live = m?.ingestKind === 'live';
-  // Only when the opener put this here: an ingest panel the editor asked for
-  // in words has no opener behind it to go back to.
-  const back = m?.showScope === false && m?.scopeStep === 'choose'
-    ? `<button class="link-btn" data-opener-back="${index}">${esc(t('scope.back'))}</button>` : '';
   return `
     <div class="panel ingest">
       <div class="ingest-head">
@@ -1721,7 +1717,6 @@ function ingestCard(m, index) {
           <div class="ingest-eyebrow">${esc(t(live ? 'ingest.liveHeading' : 'ingest.addHeading'))}</div>
           <div class="ingest-lede">${esc(t(live ? 'ingest.liveLede' : 'ingest.addLede'))}</div>
         </div>
-        ${back}
       </div>
       ${live ? liveForm(u, busy) : uploadForm(u, busy)}
     </div>`;
@@ -2936,10 +2931,28 @@ const OPENER_SCOPES = ['all', 'recent', 'games', 'category'];
 
 function openerOptions() {
   return [
-    { key: 'add', icon: 'upload', links: ['upload', 'live'] },
+    { key: 'add', icon: 'upload', links: ['upload', 'live', 'status'] },
     { key: 'find', icon: 'search', links: OPENER_SCOPES },
     { key: 'clips', icon: 'film', links: OPENER_SCOPES },
   ];
+}
+
+
+/**
+ * The way back from whatever the opener swapped in.
+ *
+ * Only when the opener put it there — a stage strip or an ingest panel the
+ * editor asked for in words has no opener behind it to return to, and a Back
+ * that restored a card nobody had seen would be a trapdoor rather than a way
+ * out. `showScope: false` with the step still on 'choose' is exactly the state
+ * the swap leaves behind, and nothing else produces it.
+ */
+function openerBackRow(m, i) {
+  if (m.showScope !== false || m.scopeStep !== 'choose') return '';
+  if (!m.showIngest && !m.showJobs) return '';
+  return `<div class="opener-back">
+    <button class="link-btn" data-opener-back="${i}">${esc(t('opener.back'))}</button>
+  </div>`;
 }
 
 
@@ -2967,21 +2980,13 @@ function openerCard(i) {
 }
 
 
-/**
- * A way in, chosen.
- *
- * Adding a video opens the panel for it. Everything else is a scope question
- * with an intent attached: the scope steps are the ones the scope card already
- * had, and when one of them settles, `applyScope` asks the agent for what the
- * session was opened to get. The intent rides on the message so it survives
- * the two or three renders a discipline picker takes.
- */
-/** Back out of an ingest panel to the opener that offered it. */
+/** Back out of whatever the opener swapped in, to the opener itself. */
 function onOpenerBack(hit) {
   const msg = state.msgs[Number(hit.dataset.openerBack)];
   if (!msg) return;
   msg.showIngest = false;
   msg.ingestKind = null;
+  msg.showJobs = false;
   msg.showScope = true;
   msg.scopeStep = 'choose';
   msg.text = t('scope.prompt');
@@ -2990,6 +2995,20 @@ function onOpenerBack(hit) {
 }
 
 
+/**
+ * A way in, chosen.
+ *
+ * The first three swap a card into the message that offered them — the two
+ * ingest panels, and the stage strip for "check status". They are local: the
+ * strip renders from the jobs listener, so asking the agent what is running
+ * would be a round trip for something already on the client, and on a desk
+ * mid-analysis the answer would arrive after the bar had moved.
+ *
+ * The rest are a scope question with an intent attached: the scope steps are
+ * the ones the scope card already had, and when one settles `applyScope` asks
+ * the agent for what the session was opened to get. The intent rides on the
+ * message so it survives the two or three renders a discipline picker takes.
+ */
 function onOpenerClick(hit) {
   const [rawIndex, group, key] = hit.dataset.opener.split(':');
   const i = Number(rawIndex);
@@ -2997,13 +3016,18 @@ function onOpenerClick(hit) {
   if (!msg) return;
 
   if (group === 'add') {
-    // The panel replaces the opener in the message that offered it, rather
+    // The card replaces the opener in the message that offered it, rather
     // than arriving under it: they are two states of the same question, and
     // stacked they read as a card that did not clear.
     msg.showScope = false;
-    msg.showIngest = true;
-    msg.ingestKind = key === 'live' ? 'live' : 'upload';
     msg.text = '';
+    if (key === 'status') {
+      msg.showJobs = true;
+      msg.page = 0;
+    } else {
+      msg.showIngest = true;
+      msg.ingestKind = key === 'live' ? 'live' : 'upload';
+    }
     persistTranscript();
     render();
     return;
@@ -3238,13 +3262,14 @@ function render() {
     return `
     <div class="msg ${agent ? `msg-agent card${fresh ? ' fade-in' : ''}` : 'msg-user'}">
       <div class="msg-label">${agent ? 'Agent' : 'You'}</div>
-      ${cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
+      ${!m.text || cardAnswersIt(m) ? '' : `<div class="msg-text">${esc(m.text)}</div>`}
+      ${openerBackRow(m, i)}
       ${m.showScope ? scopeCard(m, i) : ''}
       ${m.showSearch ? searchPanel(m, i) + searchCard(m, i) : ''}
       ${m.showDeskMoments ? deskMomentsCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showRides ? ridesCard(m, i) : ''}
-      ${m.showIngest ? ingestCard(m, i) : ''}
+      ${m.showIngest ? ingestCard(m) : ''}
       ${m.showReel ? reelCard(m, i) : ''}
       ${m.showJobs ? jobsCard(m, i) : ''}
       ${m.showGame ? gameCard() : ''}

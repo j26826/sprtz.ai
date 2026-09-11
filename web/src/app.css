@@ -2188,6 +2188,11 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
    card in the transcript. */
 .opener { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
 
+/* The way back from whatever the opener swapped in. Above the card rather
+   than inside it, because all three of them can be swapped in and only one
+   had a header to hang it on. */
+.opener-back { margin-bottom: 10px; }
+
 .opener-option {
   display: flex;
   align-items: stretch;
