@@ -336,8 +336,17 @@ the recorder begins five minutes early, and a broadcaster who goes live on the
 minute has produced nothing for exactly that long; waiting on a stream that has
 not begun is the lead-in. The limit is an editor setting (default 5 minutes,
 1-240), copied onto the event when it is booked like the metadata language, so
-it reaches the recorder as `STALL_MINUTES` on its execution. An event booked
-before it existed carries none and waits for its end time as before. The cost
+it reaches the recorder as `STALL_MINUTES` on its execution. **An event booked
+without one gets the default** (`SPRTZ_LIVE_STALL_MINUTES`, 5): the first cut
+let it wait for its end time, and the LeMieux day — booked an hour before the
+setting existed — polled a stream gone since 17:01 to 21:30 on exactly that. **A
+restart onto a dead stream ends, it does not fail.** A resumed recording's
+stream is not late, it was flowing and has gone, so its stall clock runs from
+the restart and `resolve` waits only the stall limit rather than the ten-minute
+grace a late producer gets; before, it gave up as "failed", was restarted three
+times, and the tick failed the whole event over hours of good chunks. And a
+**running execution keeps the image it started with**: a fix to the recorder
+reaches the next recording, never the one in progress. The cost
 of a short limit is real and worth knowing: a lunch break the broadcaster cuts
 the feed for is, to the recorder, a stream that stopped.
 
@@ -380,7 +389,9 @@ second pass on their own once the burst is over — what the HTTP retry cannot
 cover is a response that came back unparseable, and a window asked again with
 the quota free usually answers.
 
-Three figures are mirrored and must move together: the lead-in
+Four figures are mirrored and must move together: the stall default
+(`liveStallMinutes` in `web/src/settings.js`, `stall_minutes` on the API's
+`LiveEventRequest`, `SPRTZ_LIVE_STALL_MINUTES` on the engine), the lead-in
 (`SPRTZ_LIVE_LEAD_SECONDS`, `LIVE_LEAD_SECONDS` on the API, `LIVE_LEAD_SEC` in
 `web/src/live.js`) and the chunk length (`live_chunk_seconds` in Terraform,
 reaching the recorder, the media service and the engine) — the web's copies

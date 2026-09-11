@@ -159,3 +159,87 @@ class TestTheStallSetting:
             recorder.return_value.run.return_value = 0
             live_capture.main()
         assert recorder.call_args.kwargs["stall_sec"] == 0
+
+
+class TestARestartOntoAStreamThatHasGone:
+    """A resumed recording's stream is not late, it was flowing and has gone.
+
+    It used to be treated like a stream that had not come up yet: ten minutes
+    of waiting for the playlist, then "the stream never answered", exit 1 — and
+    the tick restarted it three times and then failed the whole event, over
+    hours of good chunks.
+    """
+
+    def _resolve_dead(self, *, resumed: bool, stall_min: float):
+        clock = _Clock()
+        recorder = live_capture.Recorder(
+            "j1", "https://x/master.m3u8", T0 + timedelta(hours=4), 300, MagicMock(),
+            stall_sec=stall_min * 60)
+        recorder.resumed = resumed
+        recorder.store.stream_bucket = None
+        with patch.object(live_capture.time, "monotonic", clock.monotonic), \
+             patch.object(live_capture.time, "sleep", clock.sleep), \
+             patch.object(live_capture, "now", clock.now), \
+             patch.object(live_capture, "_fetch", side_effect=RuntimeError("404 Not Found")), \
+             patch.object(recorder, "report"):
+            code = recorder.run()
+        return recorder, code, clock.t / 60
+
+    def test_it_ends_the_event_cleanly_within_the_stall_limit(self):
+        recorder, code, minutes = self._resolve_dead(resumed=True, stall_min=5)
+        assert (recorder.ended_by, recorder.state, code) == ("stalled", "finished", 0)
+        assert minutes <= 5.5                     # not the ten-minute grace
+
+    def test_a_first_start_still_gives_a_late_producer_the_grace(self):
+        """A stream that has not come up yet is the lead-in, not an ending."""
+        recorder, code, minutes = self._resolve_dead(resumed=False, stall_min=5)
+        assert (recorder.state, code) == ("failed", 1)
+        assert minutes >= 10
+
+    def test_without_a_limit_a_restart_fails_as_it_did(self):
+        recorder, code, _ = self._resolve_dead(resumed=True, stall_min=0)
+        assert (recorder.state, code) == ("failed", 1)
+
+
+class TestARestartOntoAStreamThatAnswersButIsStill:
+    def test_the_stall_clock_runs_from_the_restart(self):
+        """No first segment is coming, so waiting for one would wait for ever."""
+        clock = _Clock()
+        recorder = live_capture.Recorder(
+            "j1", "https://x/master.m3u8", T0 + timedelta(hours=4), 300, MagicMock(),
+            stall_sec=5 * 60)
+        recorder.resumed = True
+        with patch.object(live_capture.time, "monotonic", clock.monotonic), \
+             patch.object(live_capture.time, "sleep", clock.sleep), \
+             patch.object(live_capture, "now", clock.now), \
+             patch.object(recorder, "resolve", return_value=_Playlist(fresh=0)), \
+             patch.object(recorder, "poll", return_value=_Playlist(fresh=0)), \
+             patch.object(recorder, "take", return_value=0), \
+             patch.object(recorder, "close_chunk"), patch.object(recorder, "report"):
+            code = recorder.run()
+        assert (recorder.ended_by, code) == ("stalled", 0)
+        assert 4.9 <= clock.t / 60 <= 5.2
+
+
+class TestMainMarksAResume:
+    def test_a_recording_with_chunks_on_record_is_a_resume(self):
+        with patch.dict(live_capture.os.environ, {
+                "JOB_ID": "j1", "HLS_URL": "https://x/m.m3u8",
+                "EVENT_END": "2026-09-11T21:30:00Z", "STALL_MINUTES": "5"}), \
+             patch.object(live_capture, "MEDIA_BUCKET", "b"), \
+             patch.object(live_capture, "Store") as store, \
+             patch.object(live_capture.Recorder, "run", return_value=0):
+            store.return_value.resume_point.return_value = {
+                "next_index": 43, "cumulative_sec": 12878.4, "capture_start": None}
+            store.return_value.read_stream.return_value = ""
+            recorders = []
+            original = live_capture.Recorder.__init__
+
+            def capture(self, *a, **k):
+                original(self, *a, **k)
+                recorders.append(self)
+
+            with patch.object(live_capture.Recorder, "__init__", capture):
+                live_capture.main()
+        assert recorders[0].resumed is True
+        assert recorders[0].chunks_captured == 43
