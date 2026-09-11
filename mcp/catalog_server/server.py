@@ -32,7 +32,8 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                original_name: str, size_bytes: int, content_type: str = "",
                metadata_language: str = "en", context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "", event_start: str = "",
-               event_end: str = "", chunk_sec: int = 0, make_clips: bool = True) -> dict:
+               event_end: str = "", chunk_sec: int = 0, make_clips: bool = True,
+               title_source: str = "derived") -> dict:
     """Open a new analysis job for an uploaded video, an HLS URL, or a live event.
 
     Args:
@@ -54,12 +55,16 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         event_start: ISO 8601 start of a live event.
         event_end: ISO 8601 end of a live event.
         chunk_sec: Live chunk length; the deployment default when 0.
+        title_source: "editor" when a person typed the title, "derived" when it
+            was taken off a filename or a URL. The editor's own name wins over
+            the title the game record would compose for itself.
     """
     try:
         return {"status": "success", **store.create_job(
             job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
             content_type, metadata_language, context_urls or [],
-            kind, hls_url, event_start, event_end, chunk_sec, make_clips=make_clips)}
+            kind, hls_url, event_start, event_end, chunk_sec, make_clips=make_clips,
+            title_source=title_source)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 
@@ -266,6 +271,24 @@ def record_moment_thumbnails(job_id: str, thumbnails: dict) -> dict:
     try:
         saved = store.record_moment_thumbnails(job_id, thumbnails)
         return {"status": "success", "job_id": job_id, "saved": saved}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def rename_job(job_id: str, title: str) -> dict:
+    """Rename a job, and its game record with it.
+
+    One recording, one name. An editor who renames a match has said which name
+    they want, so the analysis keeps it rather than composing over it next time.
+
+    Args:
+        job_id: The job.
+        title: The new name. Blank is refused — a match with no name is worse
+            than one named after its file.
+    """
+    try:
+        return {"status": "success", **store.rename_job(job_id, title)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 

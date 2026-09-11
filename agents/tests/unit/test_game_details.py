@@ -10,7 +10,7 @@ in code is what makes that impossible.
 from __future__ import annotations
 
 from sprtz_agents.schemas import GameDetails, Moment
-from sprtz_agents.tools import game_summary
+from sprtz_agents.tools import game_summary, pipeline
 
 
 def _moment(**kwargs) -> Moment:
@@ -163,3 +163,62 @@ class TestGameEmbedding:
             job_id="j1", sport="handball", home_team="SWE", away_team="DEN",
         ))
         assert "SWE v DEN" in text
+
+
+class TestTheNameAnEditorGave:
+    """A title someone typed is not a fallback.
+
+    The desk showed two names for one recording: the job said what had been
+    typed into the ingest panel and the game said "dressage — LeMieux National
+    Dressage Championships", composed from what was read on screen. Composing
+    is still right for an upload called GAME_2026_03_11_FINAL.mp4, which is why
+    the filename stays last rather than first.
+    """
+
+    def test_a_chosen_name_beats_the_teams_on_screen(self):
+        assert game_summary.compose_title(
+            home="SWE", away="DEN", competition="EHF Euro", fallback="clip.mp4",
+            chosen="Sweden v Denmark, the one with the double save",
+        ) == "Sweden v Denmark, the one with the double save"
+
+    def test_a_chosen_name_beats_the_discipline_and_competition(self):
+        assert game_summary.compose_title(
+            home="", away="", competition="LeMieux Nationals", discipline="Dressage",
+            fallback="upload.mov", chosen="LeMieux Nationals 2026, 11 Sep",
+        ) == "LeMieux Nationals 2026, 11 Sep"
+
+    def test_without_one_the_screen_still_names_the_match(self):
+        assert game_summary.compose_title(
+            home="SWE", away="DEN", competition="EHF Euro", fallback="clip.mp4",
+        ) == "SWE v DEN — EHF Euro"
+
+    def test_a_filename_is_still_the_last_resort(self):
+        assert game_summary.compose_title(
+            home="", away="", competition="", fallback="clip.mp4") == "clip.mp4"
+
+    def test_the_record_carries_the_chosen_name(self):
+        game = game_summary.assemble(
+            job_id="j1", sport="equestrian", moments=[], segment_summaries=[],
+            competitions=["LeMieux Nationals"], venues=[], discipline="Dressage",
+            fallback_title="lemieux_day2.mp4", chosen_title="Day 2, Arena 1",
+            teams_are_constant=False,
+        )
+        assert game.title == "Day 2, Arena 1"
+
+
+class TestWhoseNameItIs:
+    """Only a name a person gave wins; one taken off a filename does not."""
+
+    def test_a_typed_title_is_the_chosen_one(self):
+        assert pipeline.chosen_title(
+            {"title": "Day 2, Arena 1", "titleSource": "editor"}) == "Day 2, Arena 1"
+
+    def test_a_filename_title_is_not(self):
+        assert pipeline.chosen_title(
+            {"title": "lemieux_day2", "titleSource": "derived"}) == ""
+
+    def test_a_job_from_before_this_existed_keeps_its_composed_title(self):
+        assert pipeline.chosen_title({"title": "lemieux_day2"}) == ""
+
+    def test_an_empty_title_is_not_a_choice(self):
+        assert pipeline.chosen_title({"title": "  ", "titleSource": "editor"}) == ""

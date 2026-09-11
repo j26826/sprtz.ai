@@ -2193,6 +2193,33 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
    had a header to hang it on. */
 .opener-back { margin-bottom: 10px; }
 
+/* ── Renaming a match where its name is read ──────────────────────────────
+   One name belongs to a match and it is shown in three places, so it is
+   editable in all three rather than behind a settings page nobody would look
+   for. The pencil stays out of the way until the row is hovered: a title is
+   read far more often than it is changed, and a control beside every name
+   competes with the names. */
+.is-titled { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.titled-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rename-btn { flex: none; opacity: 0; transition: opacity 90ms linear; }
+.is-titled:hover .rename-btn,
+.rename-btn:focus-visible { opacity: 1; }
+
+.is-renaming { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.is-renaming .btn-accent { flex: none; }
+
+/* Touch has no hover, so the control cannot hide behind one. */
+@media (hover: none) {
+  .rename-btn { opacity: 1; }
+}
+
 .opener-option {
   display: flex;
   align-items: stretch;

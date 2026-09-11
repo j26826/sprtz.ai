@@ -888,6 +888,7 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
         competitions=result.get("competitions", []),
         venues=result.get("venues", []),
         fallback_title=job.get("title", ""),
+        chosen=chosen_title(job),
         context_urls=job.get("contextUrls") or [],
         discipline=discipline_label,
         discipline_confidence=float(found_discipline.get("confidence", 0.0)),
@@ -977,10 +978,23 @@ async def _patch_moment_identities(
         return 0
 
 
+def chosen_title(job: dict) -> str:
+    """The name a person gave this match, or nothing.
+
+    A job's title is either what someone typed into the ingest panel (or a
+    rename) or what was taken off a filename — `titleSource` says which, and
+    only the first beats the title the game record composes from the screen.
+    Absent on a job from before that was recorded, it means "derived", so
+    nothing already on the desk changes its name.
+    """
+    return (job.get("title") or "").strip() if job.get("titleSource") == "editor" else ""
+
+
 async def record_game_facts(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
-    fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
+    fallback_title: str = "", chosen: str = "",
+    discipline: str = "", discipline_confidence: float = 0.0,
     rides: list[dict] | None = None,
     teams_are_constant: bool = True,
 ) -> None:
@@ -998,7 +1012,7 @@ async def record_game_facts(
             job_id=job_id, sport=sport, moments=moments,
             segment_summaries=segment_summaries,
             competitions=competitions, venues=venues,
-            fallback_title=fallback_title,
+            fallback_title=fallback_title, chosen_title=chosen,
             discipline=discipline, discipline_confidence=discipline_confidence,
             not_confirmed=[], rides=rides or [],
             teams_are_constant=teams_are_constant,
@@ -1017,7 +1031,8 @@ async def record_game_facts(
 async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
-    fallback_title: str = "", discipline: str = "", discipline_confidence: float = 0.0,
+    fallback_title: str = "", chosen: str = "",
+    discipline: str = "", discipline_confidence: float = 0.0,
     not_confirmed: list[dict] | None = None,
     rides: list[dict] | None = None,
     context_urls: list[str] | None = None,
@@ -1034,7 +1049,7 @@ async def _record_game_details(
             job_id=job_id, sport=sport, moments=moments,
             segment_summaries=segment_summaries,
             competitions=competitions, venues=venues,
-            fallback_title=fallback_title,
+            fallback_title=fallback_title, chosen_title=chosen,
             discipline=discipline, discipline_confidence=discipline_confidence,
             not_confirmed=not_confirmed or [],
             rides=rides or [],
@@ -1190,6 +1205,7 @@ async def summarise_match(job_id: str) -> dict:
         job_id=job_id, sport=sport, moments=moments,
         segment_summaries=summaries, competitions=competitions, venues=venues,
         fallback_title=job.get("title", ""),
+        chosen=chosen_title(job),
         discipline=discipline, discipline_confidence=confidence,
         context_urls=list(job.get("contextUrls") or []),
         teams_are_constant=getattr(profile, "teams_are_constant", True),
