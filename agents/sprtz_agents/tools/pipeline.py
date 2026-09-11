@@ -1235,11 +1235,19 @@ async def _judge_game(sport: str, moments: list[Moment], segment_summaries: list
 async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int = 100) -> int:
     """Embed and store moments in batches.
 
-    What goes into the vector is the whole ActionPlay: the class, the category,
-    the outcome, the participant and their role, then the description. Embedding
-    the description alone answers "a keeper diving left" but not "double save"
-    or "who scored from the wing", because those facts live in the structured
-    fields beside the prose rather than inside it.
+    What goes into the vector is the whole ActionPlay — the class, the
+    category, the outcome, the participant and their role, how it was ridden
+    and by whom, then the prose. Embedding the description alone answers "a
+    keeper diving left" but not "double save", "who scored from the wing" or
+    "Joynson\'s half-pass", because those facts live in the structured fields
+    beside the prose rather than inside it.
+
+    **That list lives in `store.action_play_text`, not here.** This used to
+    compose its own and send it as `embed_text`, which the catalog prefers over
+    its own function — so the catalog's definition was dead code, and drifted
+    two fields behind without anything failing: execution details and the
+    harmony index never reached a single equestrian vector, which in a sport
+    judged on form is most of what anyone searches by.
     """
     if not moments:
         return 0
@@ -1247,19 +1255,14 @@ async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int =
     saved = 0
     for start in range(0, len(moments), batch_size):
         chunk = moments[start : start + batch_size]
-        payload = [
-            {
-                **m.model_dump(),
-                "embed_text": ". ".join(
-                    part for part in (
-                        m.label, m.category, m.action_result,
-                        m.participant_role, m.participant, m.action_team,
-                        m.summary, m.description,
-                    ) if part and part.strip()
-                ),
-            }
-            for m in chunk
-        ]
+        # No embed_text: what a moment's vector carries is decided once, by
+        # `store.action_play_text` in the catalog that writes it. This used to
+        # compose its own and it always won (`embed_text or action_play_text`),
+        # so the catalog's definition was dead code — and two fields behind it.
+        # Execution details and the harmony index never reached a single
+        # equestrian vector, which is most of what anyone searches a judged
+        # sport by, and neither did the rider or the horse.
+        payload = [m.model_dump() for m in chunk]
         response = await mcp_client.call_tool(
             "catalog", "upsert_moments", {"job_id": job_id, "moments": payload}
         )
@@ -1909,7 +1912,7 @@ async def list_rides(
         narrowed = [
             r for r in narrowed
             if r.get("total_pct") is not None
-            and not str(r.get("score_check", "")).startswith("mismatch")
+            and not rides_tool.untrusted(r.get("score_check", ""))
             and float(r["total_pct"]) >= min_score
         ]
     wanted = [w.strip() for w in watchlist.split(",") if w.strip()]

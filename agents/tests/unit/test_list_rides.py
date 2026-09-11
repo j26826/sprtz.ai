@@ -68,3 +68,52 @@ async def test_no_game_record_is_passed_through_as_the_error_it_is():
     with patch.object(pipeline.mcp_client, "call_tool", mock):
         out = await pipeline.list_rides("x")
     assert out["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_a_score_bar_also_leaves_out_a_total_the_results_page_contradicts():
+    """The other way a total fails its check, and the one nobody was reading.
+
+    `apply_grounding` writes "<source> disagrees: …" when the published result
+    does not match the screen. The bar tested `startswith("mismatch")`, so this
+    ride came back as clearing 70% on a number the results page says is wrong.
+    """
+    rides = [dict(RIDES[0]), dict(RIDES[1])]
+    rides[1]["score_check"] = "equipe disagrees: shown 76.020, published 71.400"
+    mock = AsyncMock(return_value={"status": "success", "job_id": "j1", "rides": rides})
+    with patch.object(pipeline.mcp_client, "call_tool", mock):
+        out = await pipeline.list_rides("j1", min_score=70)
+    assert [r["rider"] for r in out["rides"]] == ["Anna Berger"]
+
+
+@pytest.mark.asyncio
+async def test_moments_are_saved_without_an_embed_text_of_their_own():
+    """What a vector carries is decided once, in the catalog that writes it.
+
+    This composed its own and sent it as `embed_text`, which the catalog
+    prefers over `store.action_play_text` — so the catalog's definition was
+    unreachable and drifted two fields behind it with nothing failing. An
+    equestrian moment's execution details, harmony index, rider and horse were
+    all absent from every vector, which is most of what a judged sport is
+    searched by.
+    """
+    from sprtz_agents.schemas import Moment
+
+    moment = Moment(
+        job_id="j1", moment_id="m1", moment_type="half_pass", category="movement",
+        label="Half-pass",
+        start_sec=10.0, end_sec=19.0, peak_sec=14.0, confidence=0.9, excitement=0.8,
+        highlight_score=0.85, description="Crossing well with a clear bend.",
+        summary="An expressive half-pass left.",
+        execution_details="Uphill balance throughout.", harmony_index="Soft in the contact.",
+        rider="Loretta Joynson", horse="Tresais Lancelot",
+    )
+    mock = AsyncMock(return_value={"status": "success", "saved": 1})
+    with patch.object(pipeline.mcp_client, "call_tool", mock):
+        await pipeline._persist_moments("j1", [moment])
+
+    sent = mock.await_args.args[2]["moments"][0]
+    assert "embed_text" not in sent
+    # The fields the catalog's own text reads are all on the record it is given.
+    for field in ("execution_details", "harmony_index", "rider", "horse"):
+        assert sent[field]
