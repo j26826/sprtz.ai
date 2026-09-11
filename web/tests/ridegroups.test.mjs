@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
-  rideNamedIn, rideScoreAsked, ridesAsked, sortRideGroups,
+  rideNamedIn, rideRank, rideScoreAsked, ridesAsked, sortRideGroups,
 } from '../src/ridegroups.js';
 
 const event = {
@@ -280,4 +280,16 @@ test('an unscored moment does not lift its ride', () => {
 
 test('nothing to order is nothing, not a crash', () => {
   assert.deepEqual(sortRideGroups(null, 'score'), []);
+});
+
+
+test('a rank is a whole placing from 1 up, and anything else is not a rank yet', () => {
+  const r = (place) => ({ result: { place } });
+  assert.equal(rideRank(r(1)), 1);
+  assert.equal(rideRank(r(12)), 12);
+  for (const none of [null, undefined, 0, -1, 2.5, '', 'first', NaN]) {
+    assert.equal(rideRank(r(none)), null, `place ${String(none)}`);
+  }
+  assert.equal(rideRank({}), null);
+  assert.equal(rideRank(null), null);
 });

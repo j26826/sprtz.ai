@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  PREVIEW_PAD_SEC, SPEEDS, clampTo, nextSpeed, playRange, shortClock, widen,
+  PREVIEW_PAD_SEC, SPEEDS, clampTo, nextSpeed, playRange, playerTimeline, rangeBand, shortClock, widen,
 } from '../src/player.js';
 
 test('the player shows three seconds either side of the moment', () => {
@@ -48,3 +48,22 @@ test('positions read as m:ss, and h:mm:ss past the hour', () => {
   assert.equal(shortClock(-3), '0:00');
 });
 
+
+
+test('the bar is the ride, and always covers what is playing', () => {
+  const ride = { startSec: 700, endSec: 1100 };
+  assert.deepEqual(playerTimeline({ start: 719, end: 735 }, ride), { start: 700, end: 1100 });
+  assert.deepEqual(playerTimeline({ start: 690, end: 735 }, ride), { start: 690, end: 1100 });
+  assert.deepEqual(playerTimeline({ start: 719, end: 735 }, null), { start: 719, end: 735 });
+});
+
+test('the moment is marked where it sits on the ride', () => {
+  const band = rangeBand({ start: 800, end: 900 }, { start: 700, end: 1100 });
+  assert.equal(band.left, 25);
+  assert.equal(band.width, 25);
+});
+
+test('nothing is marked when the range is the whole bar', () => {
+  assert.equal(rangeBand({ start: 700, end: 1100 }, { start: 700, end: 1100 }), null);
+  assert.equal(rangeBand({ start: 5, end: 5 }, { start: 5, end: 5 }), null);
+});

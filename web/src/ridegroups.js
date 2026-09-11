@@ -303,3 +303,18 @@ export function sortRideGroups(groups, sort) {
     .sort((a, b) => b.best - a.best || a.at - b.at)
     .map(({ group }) => group);
 }
+
+
+/**
+ * A ride's current rank in its class, or null when there is none yet.
+ *
+ * The published placing when grounding found one, else the rank the results
+ * graphic showed at the time (the tree's `result.place` is already that
+ * choice). Only a whole number from 1 up is a rank: a live class whose results
+ * have not been shown, or a total nobody put on screen, has none — and saying
+ * so beats printing a 0 or leaving a blank that reads as last.
+ */
+export function rideRank(ride) {
+  const place = Number(ride?.result?.place);
+  return Number.isInteger(place) && place >= 1 ? place : null;
+}

@@ -38,11 +38,11 @@ import {
   filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
 } from './search.js';
 import {
-  clampTo, nextSpeed, playRange, shortClock, widen,
+  clampTo, nextSpeed, playRange, playerTimeline, rangeBand, shortClock, widen,
 } from './player.js';
 import {
   countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
-  rideNamedIn, ridesAsked, sortRideGroups,
+  rideNamedIn, rideRank, ridesAsked, sortRideGroups,
 } from './ridegroups.js';
 import {
   METADATA_LANGUAGES, applyTheme, clampStallMinutes, getSettings, loadSettings, saveSettings,
@@ -264,7 +264,10 @@ function mountSettings() {
     if (e.target.id === 'settings') closeSettings();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeSettings(); closeDetails(); toggleAccountMenu(false); }
+    if (e.key === 'Escape') {
+      closeSettings(); closeDetails(); toggleAccountMenu(false);
+      if (closeTypeMenus()) render();
+    }
   });
 }
 
@@ -604,6 +607,8 @@ function persistTranscript() {
   const msgs = state.msgs.slice(-80).map((m) => {
     const copy = { ...m };
     if (Array.isArray(copy.searchResults) && copy.searchResults.length > 20) copy.searchResults = null;
+    // A menu open when the session was saved is not one to reopen on load.
+    delete copy.typesOpen;
     return copy;
   });
   updateSession(state.sessionKey, { msgs, agentSessionId: state.sessionId });
@@ -863,24 +868,27 @@ function momentsHead(view, index, inReel) {
 /**
  * One moment as a tile.
  *
- * The summary is still the headline, as it is in the row this replaces — the
- * line an editor scans by is who did what, not what the taxonomy calls it — so
- * the class drops into the meta line underneath. It is clamped rather than
- * truncated at a character count, because where a sentence can be cut without
- * losing its subject depends on the sentence.
+ * The picture is the way in: a play button sits on it, and the whole frame
+ * opens the moment in the player, where its record, its ride and the reel
+ * controls are. The buttons that used to sit at the foot of every tile are
+ * gone — a row of Details and Add repeated down a page was most of what the
+ * page said, and the player answers both.
  *
- * Confidence goes in that meta line rather than on the picture. The design
- * puts a badge in the corner of the frame, but a still from a match is not a
- * flat colour: text laid straight onto it is legible against a dark crowd and
- * gone against a bright floor. The star is the exception, and only because a
- * filled amber disc carries its own contrast wherever it lands.
+ * The summary is still the headline — the line an editor scans by is who did
+ * what, not what the taxonomy calls it — clamped rather than cut at a
+ * character count, because where a sentence can lose words without losing its
+ * subject depends on the sentence. The foot holds the two readings an editor
+ * weighs a moment by: what kind of moment the model called it, and how sure it
+ * was. Both below the picture rather than on it: a still from a match is not a
+ * flat colour, and text laid straight onto it is legible against a dark crowd
+ * and gone against a bright floor. The star and the play button are the
+ * exceptions, because each carries its own ground wherever it lands.
  */
 function momentTile(m, opts = {}) {
-  // A moment from another game cannot be played or added through the open
-  // match's listeners, which do not hold it. opts.open routes the thumbnail
-  // and Details through the row payload instead, opts.add selects that game
-  // first, and opts.game puts the match on the tile — across the desk a
-  // moment without its match is a sentence without a subject.
+  // A moment from another game cannot be played through the open match's
+  // listeners, which do not hold it. opts.open routes the picture through the
+  // row payload instead, and opts.game puts the match on the tile — across the
+  // desk a moment without its match is a sentence without a subject.
   const clip = opts.open ? null : state.clips.find((c) => c.momentId === m.momentId);
   const meta = [
     // H.No and rider first: on a competition day that is what a tile is
@@ -888,16 +896,15 @@ function momentTile(m, opts = {}) {
     // a ride group, whose heading already says it once for every tile.
     m.rider && !opts.inRide
       ? `${m.startNumber ? `#${m.startNumber} ` : ''}${m.identitySource === 'schedule' ? '~' : ''}${m.rider}` : '',
-    // With the movement on the frame it is not in the line under it as well.
-    opts.typeBadge ? '' : (m.label || m.momentType),
     `${Math.round(m.endSec - m.startSec)}s`,
-    m.confidence == null ? '' : `${Math.round(m.confidence * 100)}%`,
   ].filter(Boolean).join(' \u00b7 ');
+  const kind = m.label || m.momentType || '';
+  const sure = m.confidence == null ? null : Math.round(Math.min(Math.max(Number(m.confidence), 0), 1) * 100);
 
   return `
     <div class="tile">
       <button class="thumb" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-play="${esc(m.momentId)}"`}
-              title="${esc(t('moment.play'))}"
+              title="${esc(t('moment.play'))}" aria-label="${esc(`${t('moment.play')}: ${m.summary || kind}`)}"
               ${m.thumbUri && !state.thumbs.urls[m.momentId]
                 ? `data-thumb="${esc(m.momentId)}"${m.jobId && m.jobId !== state.jobId ? ` data-thumb-job="${esc(m.jobId)}"` : ''}`
                 : ''}>
@@ -905,23 +912,27 @@ function momentTile(m, opts = {}) {
           ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
           : '<span class="thumb-stripes"></span>'}
         ${clip ? `<span class="tile-star" title="${esc(t('moment.inReel'))}">${STAR}</span>` : ''}
-        ${opts.typeBadge ? `<span class="thumb-type">${esc(m.label || m.momentType || '')}</span>` : ''}
+        <span class="thumb-play" aria-hidden="true"></span>
         <span class="thumb-clock">${clock(m.startSec)}</span>
       </button>
       ${opts.game ? `<div class="tile-game">${esc(opts.game.title || m.jobId || '')}${
         opts.game.discipline || opts.game.sport ? ` · ${esc(opts.game.discipline || opts.game.sport)}` : ''}</div>` : ''}
-      <div class="tile-name">${esc(m.summary || m.label || m.momentType)}</div>
+      <div class="tile-name">${esc(m.summary || kind)}</div>
       <div class="tile-meta">${esc(meta)}</div>
       ${m.rerankReason ? `<div class="tile-why">${esc(m.rerankReason)}</div>` : ''}
-      <div class="tile-actions">
-        <button class="${opts.bigDetails ? 'btn-accent' : 'link-btn'}" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-details="${esc(m.momentId)}"`}>${esc(t('moment.details'))}</button>
-        ${opts.add ? `<button class="btn-outline" data-desk-add="${esc(opts.add)}">${esc(t('moment.add'))}</button>` : clip
-          ? `<button class="btn-outline" data-remove-clip="${esc(m.momentId)}">${esc(t('moment.remove'))}</button>`
-          : `<button class="btn-outline" data-add="${esc(m.momentId)}">${esc(t('moment.add'))}</button>`}
-      </div>
+      <dl class="tile-facts">
+        <div class="tile-fact">
+          <dt>${esc(t('moment.type'))}</dt>
+          <dd class="tile-kind">${esc(kind || '—')}</dd>
+        </div>
+        <div class="tile-fact">
+          <dt>${esc(t('moment.confidence'))}</dt>
+          <dd class="tile-sure">${sure == null ? '—' : `${sure}%`}
+            ${sure == null ? '' : `<span class="sure-meter" aria-hidden="true"><span style="width:${sure}%"></span></span>`}</dd>
+        </div>
+      </dl>
     </div>`;
 }
-
 
 function momentsCard(msg, index) {
   const found = momentsFor(msg);
@@ -1029,11 +1040,11 @@ function ridesFor(msg) {
   // The tree is the open event's; an earlier answer about another event says
   // so rather than borrowing this one's rides.
   if (!jobId || jobId !== state.jobId) return { empty: t('rides.elsewhere') };
-  if (state.gameFor !== jobId) return { empty: t('rides.loading') };
+  if (state.gameFor !== jobId) return { empty: t('rides.loading'), loading: true };
   const stored = Array.isArray(state.game?.rides) ? state.game.rides : [];
   if (!stored.length) return { empty: t('rides.none') };
   const tree = state.eventTree;
-  if (!tree || tree.jobId !== jobId) return { empty: t('rides.loading') };
+  if (!tree || tree.jobId !== jobId) return { empty: t('rides.loading'), loading: true };
 
   const moments = selectMoments(state.moments, { sort: msg.sort }).list;
   const all = groupByRide(tree.event, moments).filter((g) => g.ride);
@@ -1041,6 +1052,40 @@ function ridesFor(msg) {
   const asked = ridesAsked(all, msg.rideQuery || '');
   if (!asked.groups.length) return { empty: t('rides.noMatch'), unchecked: asked.unchecked };
   return { event: tree.event, total: all.length, asked };
+}
+
+
+/**
+ * The rides board while an event's rides are still arriving.
+ *
+ * Opening an event starts its listeners and asks the catalog for its tree,
+ * which takes a moment on a day of forty rides — and a line of grey text in an
+ * empty card read as "nothing here" rather than "coming". So the wait says
+ * what it is doing, with something moving, over an outline of the board it is
+ * about to become: riders on the left, moments on the right. Announced as a
+ * status for screen readers; still, not spinning, for anyone who has asked
+ * for less motion.
+ */
+function ridesLoading() {
+  const rows = Array.from({ length: 5 }, () => `
+    <div class="skel-row"><span class="skel skel-name"></span><span class="skel skel-line"></span></div>`).join('');
+  const tiles = Array.from({ length: 3 }, () => `
+    <div class="skel-tile"><span class="skel skel-frame"></span>
+      <span class="skel skel-line"></span><span class="skel skel-line skel-short"></span></div>`).join('');
+  return `
+    <div class="rides-loading" role="status" aria-live="polite">
+      <div class="rides-loading-head">
+        <span class="loading-ring" aria-hidden="true"></span>
+        <div>
+          <div class="rides-loading-title">${esc(t('rides.loading'))}</div>
+          <div class="rides-loading-hint">${esc(t('rides.loadingHint'))}</div>
+        </div>
+      </div>
+      <div class="rides-loading-board" aria-hidden="true">
+        <div class="skel-rail">${rows}</div>
+        <div class="skel-pane">${tiles}</div>
+      </div>
+    </div>`;
 }
 
 
@@ -1059,6 +1104,7 @@ function ridesFor(msg) {
  */
 function ridesCard(msg, index) {
   const found = ridesFor(msg);
+  if (found.loading) return ridesLoading();
   if (!found.asked) {
     const note = found.unchecked
       ? ` ${t('rides.unchecked').replace('{n}', String(found.unchecked))}` : '';
@@ -1175,6 +1221,25 @@ function typeFilter(types, picked, index, open, moments) {
 
 
 /**
+ * Close every open moment-type menu but the one named, if any.
+ *
+ * The open state lives on the message (render() rebuilds the transcript), so
+ * closing is a state change the caller then renders. Returns whether anything
+ * closed, so a click that changed nothing does not redraw the page.
+ */
+function closeTypeMenus(except = null) {
+  let closed = false;
+  state.msgs.forEach((m, i) => {
+    if (m.typesOpen && String(i) !== String(except)) {
+      m.typesOpen = false;
+      closed = true;
+    }
+  });
+  return closed;
+}
+
+
+/**
  * Best first or match order, as one choice with two states.
  *
  * Two of them are on the board and they answer different questions: the one in
@@ -1198,15 +1263,20 @@ const rideTabId = (index, ride) => `ride-tab-${index}-${ride.order ?? 'x'}`;
 
 
 /**
- * One ride as a tab: who rode, on what, and when they were in the arena.
+ * One ride as a tab: who rode and where they stand, on what and when, and how
+ * much the analysis found in it.
  *
- *     Loretta Joynson
- *     Tresais Lancelot · 2:25:15–2:31:58            5
+ *     Loretta Joynson                          Rank 2
+ *     Tresais Lancelot · 2:25:15–2:31:58
+ *     5 moments found
  *
  * The rider is what the rail is read down, so it is the line in the sans; the
- * horse and the span qualify it and take the mono, as every reading in this
- * app does. The count is what the type filter leaves, so a rider who did none
- * of the chosen movement reads zero rather than disappearing.
+ * horse, the span and the count qualify it and take the mono, as every reading
+ * in this app does. The rank is the current placing (rideRank) and says TBD
+ * when there is none yet — a live class before its results, a round with no
+ * total on screen — rather than leaving a gap that reads as last. The count is
+ * what the type filter leaves, so a rider who did none of the chosen movement
+ * reads "no moments" rather than disappearing.
  */
 function rideTab({ ride, moments }, index, current) {
   const who = `${ride.startNumber ? `#${ride.startNumber} ` : ''}${
@@ -1214,6 +1284,10 @@ function rideTab({ ride, moments }, index, current) {
   const under = [ride.horse, `${clock(ride.startSec)}–${clock(ride.endSec)}`]
     .filter(Boolean).join(' · ');
   const published = [ride.groundedRider, ride.groundedHorse].filter(Boolean).join(' / ');
+  const rank = rideRank(ride);
+  const found = moments.length === 0 ? t('rides.noMoments')
+    : moments.length === 1 ? t('rides.oneMoment')
+      : t('rides.momentsFound').replace('{n}', String(moments.length));
 
   return `
     <button class="ride-tab" role="tab" aria-selected="${ride === current.ride}"
@@ -1221,10 +1295,15 @@ function rideTab({ ride, moments }, index, current) {
             data-ride-tab="${esc(`${index}:${ride.order ?? ''}`)}"
             ${published ? `title="${esc(published)}"` : ''}>
       <span class="ride-who">
-        <span class="ride-rider">${esc(who)}</span>
+        <span class="ride-name-line">
+          <span class="ride-rider">${esc(who)}</span>
+          <span class="ride-rank" data-known="${rank != null}"
+                ${rank == null ? `title="${esc(t('rides.rankTbdHint'))}"` : ''}>${
+            esc(rank == null ? t('rides.rankTbd') : t('rides.rank').replace('{n}', String(rank)))}</span>
+        </span>
         <span class="ride-horse">${esc(under)}</span>
+        <span class="ride-found">${esc(found)}</span>
       </span>
-      <span class="list-count">${moments.length}</span>
     </button>`;
 }
 
@@ -1259,7 +1338,7 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boar
   let body = `<div class="ride-group-empty">${esc(t('ride.none'))}</div>`;
   if (moments.length) {
     body = `<div class="tile-row">${view.slice
-      .map((m) => momentTile(m, { inRide: true, bigDetails: true, typeBadge: true })).join('')}</div>`;
+      .map((m) => momentTile(m, { inRide: true })).join('')}</div>`;
   } else if (picked.length) {
     body = `<div class="ride-group-empty">${esc(t('rides.noTypeHere'))}</div>`;
   }
@@ -1278,8 +1357,7 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boar
         </div>
         <div class="ride-group-result">${esc(reading)}${check.text
     ? `<span class="ride-check" data-tone="${check.tone}">${esc(check.text)}</span>` : ''}</div>
-        <button class="btn-outline" data-watch-ride="${esc(String(ride.order ?? ''))}"
-                >${esc(t('ride.watch'))}</button>
+        ${playRideButton(ride, 'btn-solid play-ride')}
       </div>
       ${body}
       ${pagerRow(view, index)}
@@ -1356,7 +1434,7 @@ function rideGroup({ ride, moments }) {
         </span>
         <span class="ride-group-result">${esc(reading)}${check.text
           ? `<span class="ride-check" data-tone="${check.tone}">${esc(check.text)}</span>` : ''}</span>
-        <button class="link-btn" data-watch-ride="${esc(String(ride.order ?? ''))}">${esc(t('ride.watch'))}</button>
+        ${playRideButton(ride, 'link-btn')}
         <span class="list-count">${moments.length}</span>
       </div>
       ${tiles}
@@ -1391,9 +1469,9 @@ const DETAIL_ROWS = [
   ['moment.class', (m) => m.label || m.momentType],
   ['moment.category', (m) => m.category],
   ['moment.result', (m) => m.actionResult],
-  ['moment.start', (m) => clock(m.startSec)],
-  ['moment.end', (m) => clock(m.endSec)],
-  ['moment.peak', (m) => clock(m.peakSec)],
+  // No start, end or peak rows: the player's range label says where the
+  // moment is ("Halt and salute · 11:45–12:18 in source") and the scrubber
+  // is the moment itself, so three more timecodes here were noise.
   ['moment.rider', (m) => m.rider],
   ['moment.horse', (m) => m.horse],
   ['moment.startNumber', (m) => m.startNumber],
@@ -1472,12 +1550,34 @@ function openDetails(momentId, range = null) {
 }
 
 
+/**
+ * The way into a whole ride, from wherever the ride is shown.
+ *
+ * Named for what it does and carrying the ride's length, because "Watch" read
+ * as nothing in particular and people went into a moment to find the full
+ * ride instead. The value is the running order, or the ride's start second
+ * when it has no order: an empty value is one the click handler never sees,
+ * which made the button silently do nothing.
+ */
+function playRideButton(ride, className) {
+  const key = ride.order != null ? String(ride.order) : `@${ride.startSec}`;
+  const length = shortClock(Math.max(0, Number(ride.endSec) - Number(ride.startSec)));
+  return `<button class="${className}" data-watch-ride="${esc(key)}">
+      <span aria-hidden="true">▶</span> ${esc(t('ride.playFull'))} <span class="play-ride-len">${esc(length)}</span>
+    </button>`;
+}
+
+
 /** Open a whole ride in the player, from its first second to its last. */
-function openRide(order) {
-  const ride = treeRide(order);
+function openRide(key) {
+  const text = String(key ?? '');
+  const ride = text.startsWith('@')
+    ? (state.eventTree?.event?.riders || []).find((r) => String(r.startSec) === text.slice(1)) || null
+    : treeRide(Number(text));
   if (!ride) return;
+  const order = ride.order;
   openPlayer({
-    key: `ride-${order}`,
+    key: `ride-${order ?? text}`,
     moment: null,
     rideOrder: order,
     full: true,
@@ -1496,7 +1596,7 @@ function openPlayer(p) {
   $('details-player').innerHTML = '<div class="player-over"></div>'
     + `${playerMarkup(p.key)}<div class="player-under"></div>`;
   state.details = p.key;
-  state.playing = { full: false, loop: false, rate: 1, ...p };
+  state.playing = { full: false, loop: false, rate: 1, free: false, ...p };
   renderDetailsBody();
   showDetailsModal(true);
   mountPlayer();
@@ -1670,12 +1770,31 @@ function setPlayerRange(which) {
     });
     $('details-title').textContent = mo.summary || mo.label || t('moment.details');
   }
+  p.free = false;
   renderDetailsBody();
   const video = playerEl?.querySelector('video');
   if (video) {
     video.currentTime = p.start;
     video.play().catch(() => {});
   }
+  syncPlayer();
+}
+
+
+/** What the scrubber spans for what is playing: its ride, or itself. */
+function timelineOf(p) {
+  return playerTimeline(p, treeRide(p.rideOrder));
+}
+
+
+/**
+ * Move the playhead. Inside the moment's band it still stops at the out
+ * point; outside it the ride runs on, because someone who reached past the
+ * moment wants to see what came before or after it, not be pulled back.
+ */
+function moveTo(p, video, at) {
+  video.currentTime = at;
+  p.free = at < p.start || at > p.end;
   syncPlayer();
 }
 
@@ -1687,21 +1806,27 @@ function playerControl(kind) {
   if (!p || !video) return;
   if (kind === 'play') {
     if (video.paused) {
-      // Play from the top when the range has been watched to its end.
-      if (video.currentTime >= p.end - 0.05 || video.currentTime < p.start) video.currentTime = p.start;
+      const at = video.currentTime;
+      // Play from the in point when the moment has been watched to its end, or
+      // when a free run has reached the end of the ride — both re-arm it.
+      if (p.free ? at >= timelineOf(p).end - 0.05 : (at >= p.end - 0.05 || at < p.start)) {
+        video.currentTime = p.start;
+        p.free = false;
+      }
       video.play().catch(() => {});
     } else {
       video.pause();
     }
   } else if (kind === 'back' || kind === 'fwd') {
-    video.currentTime = clampTo(p, video.currentTime + (kind === 'back' ? -5 : 5));
+    moveTo(p, video, clampTo(timelineOf(p), video.currentTime + (kind === 'back' ? -5 : 5)));
+    return;
   } else if (kind === 'loop') {
     p.loop = !p.loop;
   } else if (kind === 'speed') {
     p.rate = nextSpeed(p.rate);
     video.playbackRate = p.rate;
   } else if (kind === 'widen') {
-    Object.assign(p, widen(p, { duration: jobDuration() }), { full: false });
+    Object.assign(p, widen(p, { duration: jobDuration() }), { full: false, free: false });
     renderDetailsBody();
   } else if (kind === 'ride') {
     setPlayerRange('full');
@@ -2400,17 +2525,6 @@ function ridesTable(g) {
 }
 
 
-/** What the analysis looked for and did not find. An absence is a finding. */
-function notConfirmedBlock(g) {
-  const items = Array.isArray(g.notConfirmed) ? g.notConfirmed : [];
-  if (!items.length) return '';
-  return `
-    <div class="detail-key">${esc(t('game.notConfirmed'))}</div>
-    <div class="detail-value">${items.map((n) => `
-      <div class="not-confirmed"><b>${esc(n.momentType || '')}</b>${
-        (n.notes || []).length ? ` — ${esc((n.notes || []).join(' '))}` : ''}</div>`).join('')}</div>`;
-}
-
 
 function openGameDetails(game) {
   const g = game || state.game;
@@ -2440,7 +2554,7 @@ function openGameDetails(game) {
   $('details-body').innerHTML = rows.map(([label, value]) => `
     <div class="detail-key">${esc(label)}</div>
     <div class="detail-value">${esc(String(value))}</div>`).join('')
-    + ridesTable(g) + notConfirmedBlock(g) + equipe + sources;
+    + ridesTable(g) + equipe + sources;
 
   // The two share one dialog, so a game opened after a moment would otherwise
   // inherit that moment's video — playing, beside a record it has nothing to
@@ -2706,7 +2820,7 @@ function deskMomentsCard(msg, index) {
         <div class="panel-head-meta"><span class="list-count">${rows.length}</span></div>
       </div>
       <div class="tile-row">${rows.map((row, k) =>
-        momentTile(camel(row), { game: row.game || {}, open: `${index}:${k}`, add: `${index}:${k}` })).join('')}</div>
+        momentTile(camel(row), { game: row.game || {}, open: `${index}:${k}` })).join('')}</div>
       ${note}
     </div>`;
 }
@@ -3496,9 +3610,14 @@ async function ensurePlaybackUrl() {
  *
  * Built once per open popup and kept across renders; the range it plays lives
  * in state.playing and is read on every tick, so a chip, Widen or Full ride
- * re-aims this same video rather than building another. The scrubber and the
- * clock are relative to the range, not the match — "0:04 / 5:06" into the
- * ride, not two hours into the recording.
+ * re-aims this same video rather than building another.
+ *
+ * The scrubber is the whole ride (playerTimeline), with the moment marked on
+ * it as a band between an in and an out marker — a movement is judged in its
+ * round, not cut out of it. The clock reads the same bar: "5:12 / 6:30" into
+ * the ride, not two hours into the recording. Playing stops at the moment's
+ * out point (or loops) as it always did; a seek outside the band lets the
+ * ride run on (`free`), and a chip, Widen or Play from the end re-arms it.
  */
 function buildPlayerEl() {
   const el = document.createElement('div');
@@ -3509,7 +3628,14 @@ function buildPlayerEl() {
       <span class="player-tag" data-player-tag></span>
     </div>
     <div class="scrub" data-scrub role="slider" tabindex="0" aria-label="${esc(t('player.position'))}">
-      <div class="scrub-track" data-scrub-track><div class="scrub-fill" data-scrub-fill></div></div>
+      <div class="scrub-track" data-scrub-track>
+        <div class="scrub-fill" data-scrub-fill></div>
+        <div class="scrub-range" data-scrub-range hidden>
+          <span class="scrub-mark scrub-mark-in" data-scrub-in></span>
+          <span class="scrub-mark scrub-mark-out" data-scrub-out></span>
+        </div>
+        <div class="scrub-head" data-scrub-head></div>
+      </div>
     </div>
     <div class="player-controls">
       <button class="btn-solid player-play" data-pc="play">${esc(t('player.play'))}</button>
@@ -3534,8 +3660,8 @@ function buildPlayerEl() {
     if (!p) return;
     const box = el.querySelector('[data-scrub-track]').getBoundingClientRect();
     const share = Math.min(Math.max((clientX - box.left) / Math.max(box.width, 1), 0), 1);
-    video.currentTime = p.start + share * (p.end - p.start);
-    syncPlayer();
+    const tl = timelineOf(p);
+    moveTo(p, video, tl.start + share * (tl.end - tl.start));
   };
   scrub.addEventListener('pointerdown', (e) => {
     scrub.setPointerCapture(e.pointerId);
@@ -3548,15 +3674,16 @@ function buildPlayerEl() {
     const p = state.playing;
     if (!p || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
     e.preventDefault();
-    video.currentTime = clampTo(p, video.currentTime + (e.key === 'ArrowLeft' ? -1 : 1));
-    syncPlayer();
+    moveTo(p, video, clampTo(timelineOf(p), video.currentTime + (e.key === 'ArrowLeft' ? -1 : 1)));
   });
 
   // The out point is read from state on every tick, because the range moves.
   video.addEventListener('timeupdate', () => {
     const p = state.playing;
     if (!p) return;
-    if (video.currentTime >= p.end) {
+    if (p.free) {
+      if (video.currentTime >= timelineOf(p).end) video.pause();
+    } else if (video.currentTime >= p.end) {
       if (p.loop) video.currentTime = p.start;
       else video.pause();
     }
@@ -3573,12 +3700,27 @@ function syncPlayer() {
   const p = state.playing;
   if (!playerEl || !p) return;
   const video = playerEl.querySelector('video');
-  const length = Math.max(0, p.end - p.start);
-  const at = Math.min(Math.max((video.currentTime || p.start) - p.start, 0), length);
+  const tl = timelineOf(p);
+  const length = Math.max(0, tl.end - tl.start);
+  const at = Math.min(Math.max((video.currentTime || p.start) - tl.start, 0), length);
+  const share = `${length ? (at / length) * 100 : 0}%`;
   const q = (sel) => playerEl.querySelector(sel);
 
   q('[data-player-tag]').textContent = `${p.label} · ${clock(p.start)}–${clock(p.end)} ${t('player.inSource')}`;
-  q('[data-scrub-fill]').style.width = `${length ? (at / length) * 100 : 0}%`;
+  q('[data-scrub-fill]').style.width = share;
+  q('[data-scrub-head]').style.left = share;
+  // The moment on the ride: a band between its in and out markers, or nothing
+  // when what is playing is the whole bar.
+  const band = rangeBand(p, tl);
+  const range = q('[data-scrub-range]');
+  range.hidden = !band;
+  q('[data-scrub-track]').dataset.banded = String(Boolean(band));
+  if (band) {
+    range.style.left = `${band.left}%`;
+    range.style.width = `${band.width}%`;
+    q('[data-scrub-in]').title = `${t('player.markIn')} ${clock(p.start)}`;
+    q('[data-scrub-out]').title = `${t('player.markOut')} ${clock(p.end)}`;
+  }
   const scrub = q('[data-scrub]');
   scrub.setAttribute('aria-valuemin', '0');
   scrub.setAttribute('aria-valuemax', String(Math.round(length)));
@@ -4257,11 +4399,26 @@ document.addEventListener('click', (event) => {
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
     + '[data-pc],[data-player-range],[data-watch-ride],'
     + '[data-ride-tab],[data-type-menu],[data-type-pick]');
-  if (!hit) return;
+
+  // An open moment-type menu closes on any click outside its own filter. Its
+  // toggle used to be the only way out, and a menu only its own button can
+  // close is one people get stuck in. Read before any handler re-renders: a
+  // rebuilt transcript detaches the clicked element, and a detached element is
+  // outside everything.
+  const menuHere = event.target.closest('.ride-filter')
+    ?.querySelector('[data-type-menu]')?.dataset.typeMenu;
+  const closedMenu = closeTypeMenus(menuHere);
+  if (!hit) {
+    if (closedMenu) render();
+    return;
+  }
+  // Most handlers render; the few that do not still must not leave the menu
+  // drawn open after its state has closed.
+  if (closedMenu) queueMicrotask(render);
 
   if (hit.dataset.pc) { playerControl(hit.dataset.pc); return; }
   if (hit.dataset.playerRange) { setPlayerRange(hit.dataset.playerRange); return; }
-  if (hit.dataset.watchRide) { openRide(Number(hit.dataset.watchRide)); return; }
+  if (hit.dataset.watchRide) { openRide(hit.dataset.watchRide); return; }
 
   if (hit.dataset.ask) {
     const q = hit.dataset.ask;
@@ -4336,6 +4493,10 @@ document.addEventListener('click', (event) => {
       // three round trips.
       msg.types = !key ? []
         : picked.includes(key) ? picked.filter((k) => k !== key) : [...picked, key];
+      // Clear is the way back to the whole ride, so it is also done with the
+      // menu. With nothing chosen it used to change nothing at all and look
+      // broken.
+      if (!key) msg.typesOpen = false;
       // The rail is narrowed by the choice, so the open ride may no longer be
       // on it; ridesCard falls back to the first, and the page has to follow.
       msg.page = 0;

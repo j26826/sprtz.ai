@@ -1158,8 +1158,16 @@ moments did.
 ### The two detail widgets
 
 A moment row and a game row are the same shape on purpose: a headline worth
-reading, the facts that qualify it underneath, and everything else behind one
-Details button into a shared popup.
+reading, the facts that qualify it underneath, and everything else in a shared
+popup.
+
+**A moment tile has no buttons.** The frame carries a play button and the
+whole frame opens the moment in the player, where its record, its ride and the
+reel sit; the foot shows the moment's type and its confidence (a mono
+percentage and a bar). Details and Add used to sit at the foot of every tile,
+and down a page of moments they were most of what the page said. Adding to the
+reel from a tile went with them: a single moment now goes in by asking the
+agent, or a whole list with its "Cut all of these".
 
 **The moment plays inside its own popup and nowhere else**, in the wider left
 column, autoplaying from the in point and stopping at the out point. The row's
@@ -1952,12 +1960,16 @@ writing "<source> disagrees: …", and every Python caller tested only
 as one of the day's best while the editor's own card excluded it. "events" and "competitions" are the games
 list, as "games" is.
 
-**The player is a ride player.** Opening a moment (or Watch on a ride's
-heading) plays a *range* held in `state.playing` — the moment padded 3s, or
-the whole ride — and every control re-aims that one video rather than building
-another: −5s/+5s, Loop, speed (1× → 0.5× → 0.25× → 2×, slower first because
-judging a movement means watching it slowly), Widen (+5s each side), Full
-ride, and a scrubber and clock relative to the range. Under the player: the
+**The player is a ride player.** Opening a moment (or "Play full ride" on a
+ride's heading) plays a *range* held in `state.playing` — the moment padded 3s,
+or the whole ride — and every control re-aims that one video rather than
+building another: −5s/+5s, Loop, speed (1× → 0.5× → 0.25× → 2×, slower first
+because judging a movement means watching it slowly), Widen (+5s each side)
+and Full ride. **The scrubber is the whole ride** (`playerTimeline`), with the
+moment as an amber band between an in and an out marker (`rangeBand`), and
+the clock reads the same bar. Playing stops at the moment's out point (or
+loops); a seek outside the band sets `free` and the ride runs on, and a chip,
+Widen or Play from the end re-arms the out point. Under the player: the
 ride, its score tiles (one per judge — the analysis does not split technical
 and artistic marks, so they are not shown), where the score came from, the
 moments as chips that re-aim the player, and the `ffmpeg` cut of what is
