@@ -114,6 +114,15 @@
   --color-accent-2-800: #EBB4B1;
   --color-accent-2-900: #F5D6D4;
 
+  /* Arenos indigo — the brand's information/links hue (colors.css
+     --arenos-indigo #2F55C8, with the --arenos-indigo-on-dark lift #6A86DC).
+     Not a third accent: it is a state colour beside success and alert, and it
+     means "this is a way through", which is why the opener's ways in wear it
+     on a card already edged in amber. */
+  --color-info: #6A86DC;
+  --color-info-100: rgba(106, 134, 220, 0.12);
+  --color-info-300: rgba(106, 134, 220, 0.32);
+
   --font-heading: "Geist", "Helvetica Neue", Arial, sans-serif;
   --font-heading-weight: 500;
   --font-body: "Geist", "Helvetica Neue", Arial, sans-serif;
