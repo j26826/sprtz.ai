@@ -327,7 +327,7 @@ function renderYouTube() {
              data-youtube-field="refreshToken" value="${esc(form.refreshToken || '')}" />
       <div class="setting-hint">${esc(t('youtube.refreshHint'))}</div>
       <div class="yt-actions">
-        <button class="btn-outline" data-youtube-act="save">${esc(t('youtube.save'))}</button>
+        <button class="btn-quiet" data-youtube-act="save">${esc(t('youtube.save'))}</button>
       </div>
       ${y.redirect_uri ? `<div class="setting-hint">${esc(t('youtube.redirectUri'))}
         <code class="yt-uri">${esc(y.redirect_uri)}</code></div>` : ''}
@@ -342,7 +342,7 @@ function renderYouTube() {
     ${client}
     ${channel}
     <div class="yt-actions">
-      <button class="btn-accent" data-youtube-act="connect" ${y.can_connect ? '' : 'disabled'}>${
+      <button class="btn-primary" data-youtube-act="connect" ${y.can_connect ? '' : 'disabled'}>${
         esc(y.connected ? t('youtube.reconnect') : t('youtube.connect'))}</button>
       ${y.connected ? `<button class="link-btn" data-youtube-act="disconnect">${
         esc(t('youtube.disconnect'))}</button>` : ''}
@@ -927,10 +927,10 @@ function pagerRow(view, index) {
   if (view.total <= view.size) return '';
   return `
     <div class="pager">
-      <button class="link-btn" data-page="${index}:${view.current - 1}"
+      <button class="btn-quiet btn-step" data-page="${index}:${view.current - 1}"
               ${view.current === 0 ? 'disabled' : ''}>${esc(t('pager.previous'))}</button>
       <div class="pager-count">${view.from}–${view.to} ${esc(t('pager.of'))} ${view.total}</div>
-      <button class="link-btn" data-page="${index}:${view.current + 1}"
+      <button class="btn-quiet btn-step" data-page="${index}:${view.current + 1}"
               ${view.current >= view.pages - 1 ? 'disabled' : ''}>${esc(t('pager.next'))}</button>
     </div>`;
 }
@@ -1070,7 +1070,6 @@ function momentTile(m, opts = {}) {
 
   return `
     <div class="tile">
-      <span class="tile-beta" aria-hidden="true"><span>${esc(t('preview.badge'))}</span></span>
       <button class="thumb" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-play="${esc(m.momentId)}"`}
               title="${esc(t('moment.play'))}" aria-label="${esc(`${t('moment.play')}: ${m.summary || kind}`)}"
               ${m.thumbUri && !state.thumbs.urls[m.momentId]
@@ -1079,6 +1078,7 @@ function momentTile(m, opts = {}) {
         ${state.thumbs.urls[m.momentId]
           ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
           : '<span class="thumb-stripes"></span>'}
+        <span class="tile-beta" aria-hidden="true"><span>${esc(t('preview.badge'))}</span></span>
         <span class="thumb-play" aria-hidden="true"></span>
         <span class="thumb-clock">${clock(m.startSec)}</span>
       </button>
@@ -1551,7 +1551,7 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boar
         </div>
         <div class="ride-group-result">${esc(reading)}${check.text
     ? `<span class="ride-check" data-tone="${check.tone}">${esc(check.text)}</span>` : ''}</div>
-        ${playRideButton(ride, 'btn-solid play-ride')}
+        ${playRideButton(ride, 'btn-primary play-ride')}
       </div>
       ${body}
       ${pagerRow(view, index)}
@@ -1571,7 +1571,10 @@ function eventHead(event, { prominent = false } = {}) {
           ${event.outcome ? `<div class="game-outcome">${esc(event.outcome)}</div>` : ''}
         </div>
         <div class="moment-actions">
-          <button class="${prominent ? 'btn-accent btn-accent-lg' : 'link-btn'}"
+          <!-- Quiet even when prominent: the fill on this card belongs to Play
+               full ride, which is what the card is for. Details opens the
+               record beside it and only has to be findable. -->
+          <button class="${prominent ? 'btn-quiet btn-lg' : 'link-btn'}"
                   data-game-details="1">${esc(t('moment.details'))}</button>
         </div>
       </div>
@@ -1842,14 +1845,16 @@ function detailActions() {
   if (!p?.moment) return '';
   const busy = state.share?.status === 'sending';
   const publishing = state.share?.mode === 'publish';
-  // Both accent, and so is Close beside them in the markup: three buttons in
-  // three treatments read as three kinds of thing, and these are one kind —
-  // what you do with the moment you are looking at.
+  // One shape for the three, and all three in the amber family: they are one
+  // kind of thing — what you do with the moment you are looking at — and three
+  // idioms read as three kinds. The fill stays scarce, which is the brand's
+  // rule: Publish is the action, Download and Close are the same button
+  // outlined. `.detail-action` is what carries the amber to the quiet two.
   return `
-    <button class="btn-accent detail-action" data-detail-act="download" ${
+    <button class="btn-quiet detail-action" data-detail-act="download" ${
       state.share?.downloading ? 'disabled' : ''}>${
       esc(state.share?.downloading ? t('share.preparing') : t('share.download'))}</button>
-    <button class="btn-accent detail-action" data-detail-act="publish"
+    <button class="btn-primary detail-action" data-detail-act="publish"
             aria-pressed="${publishing}" ${busy ? 'disabled' : ''}>${esc(t('share.publish'))}</button>`;
 }
 
@@ -1919,7 +1924,7 @@ function publishPanel() {
       </select>
 
       <div class="platform-row">
-        <button class="btn-accent" data-publish-to="youtube" ${
+        <button class="btn-primary" data-publish-to="youtube" ${
           status === 'sending' ? 'disabled' : ''}>${
           esc(status === 'sending' ? t('share.sending') : t('share.toYouTube'))}</button>
         <span class="platform-soon">${esc(t('share.instagramSoon'))}</span>
@@ -2430,21 +2435,21 @@ function uploadForm(u, busy) {
         </div>` : ''}
       <div class="ingest-foot">
         ${u.src === 'file' ? `
-          <button class="btn-accent btn-accent-lg" id="start-analysis"
+          <button class="btn-primary btn-lg" id="start-analysis"
                   ${u.file && !busy ? '' : 'disabled'}>
             ${esc(u.status === 'uploading' ? t('ingest.uploading')
     : u.status === 'analyzing' ? t('ingest.analysing') : t('ingest.start'))}
           </button>` : u.src === 'path' ? `
-          <button class="btn-accent btn-accent-lg" data-register-gcs="1"
+          <button class="btn-primary btn-lg" data-register-gcs="1"
                   ${u.gcsUri.trim() && !busy ? '' : 'disabled'}>${esc(t('ingest.useLocation'))}</button>`
     : `
-          <button class="btn-accent btn-accent-lg" data-register-hls="1"
+          <button class="btn-primary btn-lg" data-register-hls="1"
                   ${u.hlsUrl.trim() && !busy ? '' : 'disabled'}>${esc(t('ingest.useStream'))}</button>`}
         <span class="ingest-ready">${esc(ready
     ? `${t('ingest.ready')} — ${u.sport}, ${t('ingest.readyMoments')}`
     : t('ingest.pickSource'))}</span>
         ${pending && u.src === 'file' ? `
-          <button class="btn-outline" data-resume="${esc(pending.job_id)}" ${busy ? 'disabled' : ''}
+          <button class="btn-quiet" data-resume="${esc(pending.job_id)}" ${busy ? 'disabled' : ''}
                   title="${esc(pending.filename)} — ${bytes(pending.size_bytes)}">
             ${esc(t('ingest.useLastUpload'))}
           </button>` : ''}
@@ -2485,7 +2490,7 @@ function liveForm(u, busy) {
         ${contextField(u)}
       </div>
       <div class="ingest-foot">
-        <button class="btn-accent btn-accent-lg" data-schedule-live="1"
+        <button class="btn-primary btn-lg" data-schedule-live="1"
                 ${ready && !busy ? '' : 'disabled'}>
           ${esc(u.status === 'scheduling'
     ? (l.editing ? t('ingest.saving') : t('ingest.scheduling'))
@@ -2634,7 +2639,7 @@ function editableTitle(jobId, text, cls) {
   return `<div class="${cls} is-renaming">
     <input class="composer-input rename-input" data-rename-input
            aria-label="${esc(t('rename.label'))}" value="${esc(state.renaming.value)}" />
-    <button class="btn-accent" data-rename-save="${esc(jobId)}"
+    <button class="btn-primary" data-rename-save="${esc(jobId)}"
             ${state.renaming.value.trim() ? '' : 'disabled'}>${esc(t('rename.save'))}</button>
     <button class="link-btn" data-rename-cancel="1">${esc(t('rename.cancel'))}</button>
   </div>`;
@@ -3071,7 +3076,7 @@ function reanalysePanel(j) {
           </div>`).join('') : none}
         <div class="ctx-row">
           <input class="input ctx-input" data-ctx-input placeholder="${esc(t('reanalyse.placeholder'))}" />
-          <button class="btn-outline" data-ctx-add="1">${esc(t('reanalyse.add'))}</button>
+          <button class="btn-quiet" data-ctx-add="1">${esc(t('reanalyse.add'))}</button>
         </div>
       </div>
 
@@ -3087,7 +3092,7 @@ function reanalysePanel(j) {
       <div class="ctx-list ctx-muted">${queries.length ? queries.map((q) => `<div>${esc(q)}</div>`).join('') : none}</div>
 
       <div class="ctx-actions">
-        <button class="btn-solid" data-reanalyse-go="${esc(j.id)}">${esc(t('reanalyse.go'))}</button>
+        <button class="btn-primary" data-reanalyse-go="${esc(j.id)}">${esc(t('reanalyse.go'))}</button>
         <button class="link-btn" data-reanalyse-cancel="1">${esc(t('reanalyse.cancel'))}</button>
       </div>
     </div>`;
@@ -3137,7 +3142,7 @@ function searchPanel(msg, index) {
                              (msg.searchJobs || []).includes(g.jobId || g.id))).join('')}
         </div>` : ''}
       <div class="ctx-actions">
-        <button class="btn-solid" data-search-run="${index}" ${msg.searching ? 'disabled' : ''}>
+        <button class="btn-primary" data-search-run="${index}" ${msg.searching ? 'disabled' : ''}>
           ${esc(msg.searching ? t('search.running') : t('search.run'))}
         </button>
       </div>
@@ -3327,12 +3332,12 @@ function jobsCard(msg, index) {
           <div class="job-error">
             <p>${esc(t('jobs.noProgress'))} ${esc(sinceLabel(j.updatedAt))}.
                ${esc(t('jobs.deadRun'))}</p>
-            <button class="btn-outline" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
+            <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
           </div>` : ''}
         ${failed && j.error ? `
           <div class="job-error">
             <p>${esc(jobFailure(j.error, { t }))}</p>
-            <button class="btn-outline" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
+            <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
           </div>` : ''}
         <div class="job-actions">
           ${running && !stalled
@@ -3482,7 +3487,7 @@ function scopeCard(m, i) {
           ${discs.map((d) => chip('scope-disc', d, d, chosen.includes(d))).join('')}
         </div>
         <div class="ctx-actions">
-          <button class="btn-solid" data-scope-done="${i}">${esc(t('scope.done'))}</button>
+          <button class="btn-primary" data-scope-done="${i}">${esc(t('scope.done'))}</button>
           ${back}
         </div>
       </div>`;
@@ -3502,7 +3507,7 @@ function scopeCard(m, i) {
             : `<span class="setting-hint">${esc(t('scope.noMatches'))}</span>`}
         </div>
         <div class="ctx-actions">
-          <button class="btn-solid" data-scope-done="${i}" ${chosen.length ? '' : 'disabled'}>
+          <button class="btn-primary" data-scope-done="${i}" ${chosen.length ? '' : 'disabled'}>
             ${esc(t('scope.done'))}${chosen.length ? ` (${chosen.length})` : ''}
           </button>
           ${back}
@@ -4046,7 +4051,7 @@ function buildPlayerEl() {
       </div>
     </div>
     <div class="player-controls">
-      <button class="btn-solid player-play" data-pc="play">${esc(t('player.play'))}</button>
+      <button class="btn-primary player-play" data-pc="play">${esc(t('player.play'))}</button>
       <button class="pc" data-pc="back" aria-label="${esc(t('player.back5'))}">−5s</button>
       <button class="pc" data-pc="fwd" aria-label="${esc(t('player.fwd5'))}">+5s</button>
       <button class="pc" data-pc="loop" aria-pressed="false">${esc(t('player.loop'))}</button>
@@ -4183,7 +4188,7 @@ async function mountPlayer() {
           ? esc(t('player.notPackaged'))
           : `${esc(t('player.notReady'))}: ${esc(humanError(err, 'error.desk'))}`}</p>
         ${notReady && state.jobId ? `
-          <button class="btn-outline" data-prepare-playback="${esc(state.jobId)}">
+          <button class="btn-quiet" data-prepare-playback="${esc(state.jobId)}">
             ${esc(t('player.preparePlayback'))}
           </button>` : ''}
       </div>`);

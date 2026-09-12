@@ -220,6 +220,22 @@ input, button, textarea { font-family: var(--font-body); }
 
 /* The chosen sort. A pressed link-button reads as the current state rather
    than as somewhere to go, so it takes the text colour and loses the hand. */
+/* The quietest control: a word that acts, with no box around it. Withdrawing
+   the reel (#147) took this rule out with the styles that went with it, but
+   28 buttons still carry the class — so every one of them fell back to the
+   browser's own grey box, and the pressed one to light text on it. */
+.link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--color-neutral-600);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+.link-btn:hover { color: var(--color-accent); }
+
 .link-btn[aria-pressed="true"] {
   color: var(--color-text);
   text-decoration: underline;
@@ -283,37 +299,31 @@ input, button, textarea { font-family: var(--font-body); }
    every tile of a page. Hidden from assistive tech on the tile — a screen
    reader reading "beta" before every one of two hundred moments is noise; the
    list's own head is where that belongs. */
+/* A banner in the top-right corner of the frame, over the picture: level, so
+   it reads as a statement about the moment rather than as a sticker across
+   its corner, and out of the way of the clock at bottom-left and the play
+   button in the middle. */
 .tile-beta {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 78px;
-  height: 78px;
+  top: 6px;
+  right: 6px;
+  max-width: calc(100% - 12px);
   overflow: hidden;
   pointer-events: none;
   z-index: 2;
-  /* The tile rounds and this sits in the corner it rounds, so it carries the
-     same radius: without it the ribbon's square corner pokes out past the
-     card's curve. Same rule as everywhere else here — a container that rounds
-     also clips. */
-  border-top-left-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
 }
 .tile-beta > span {
-  position: absolute;
-  top: 15px;
-  left: -28px;
-  width: 116px;
-  transform: rotate(-45deg);
+  display: block;
+  padding: 2px 7px;
   background: var(--color-accent);
   /* Ink on amber, never white: amber as a fill is about 1.9:1 against white. */
   color: var(--color-on-accent);
-  font-size: 7.5px;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  text-align: center;
-  padding: 2px 0;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  white-space: nowrap;
 }
 
 .tile {
@@ -557,59 +567,18 @@ button.tile:hover { border-color: var(--color-accent); }
   line-height: 1.4;
 }
 
-/* Buttons — flush left labels, radius from the theme's own tokens */
-
-.btn-outline {
-  border: var(--rule-hair) solid var(--color-rule);
-  background: transparent;
-  color: var(--color-text);
-  padding: 6px 10px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.btn-outline:hover { background: var(--color-accent-100); }
-.btn-outline:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.btn-solid {
-  border: 0;
-  background: var(--color-accent);
-  /* On the accent, not on --color-bg (the page's own colour, and only
-     readable here by luck of which theme is active). --color-on-accent is a
-     fixed ink/white choice per theme — Arenos requires ink here because white
-     on its amber fails contrast outright; the fallback covers any theme that
-     does not define the token. */
-  color: var(--color-on-accent, #fff);
-  padding: 9px 14px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-.btn-solid:hover { background: var(--color-accent-600); }
+/* Buttons: one system, further down under "Buttons, on the brand's own
+   terms". What is left here belongs to particular buttons, not to a family. */
 
 /* A ride's way into its whole round: the pane's one filled button, because
    watching the ride is what the pane is for. The length is a timecode, so it
    is set in the mono. */
-.play-ride {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-}
 .play-ride-len {
   font-family: var(--font-mono);
   font-weight: 500;
   letter-spacing: 0;
   opacity: 0.8;
 }
-.btn-solid:active { background: var(--color-accent-700); }
-.btn-solid:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .chip {
   border: var(--rule-hair) solid var(--color-neutral-400);
@@ -741,7 +710,6 @@ button.tile:hover { border-color: var(--color-accent); }
   padding: 0 12px 10px;
   background: var(--color-bg);
 }
-.player-play { min-width: 68px; padding: 8px 14px; border-radius: var(--radius-sm); }
 .pc {
   border: var(--rule-hair) solid var(--color-neutral-400);
   border-radius: var(--radius-sm);
@@ -1097,7 +1065,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 .modal-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
   border-bottom: var(--rule) solid var(--color-rule);
@@ -1494,7 +1462,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
    Close. The title gives way rather than the buttons wrapping: a head that
    reflows as the title changes length moves the buttons under the cursor. */
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; padding-right: 12px; }
-.detail-action { padding: 6px 12px; font-size: 12px; }
 #details .modal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .publish-panel { padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 6px; }
@@ -1630,7 +1597,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-family: var(--font-mono);
 }
 
-.pager .link-btn[disabled] { opacity: 0.35; cursor: default; }
 
 
 /* ── Rounding ───────────────────────────────────────────────────────────
@@ -2255,31 +2221,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-weight: 500;
 }
 
-/* Details, as the design draws it: the accent as an outline rather than as a
-   fill. Amber takes ink and not white (--color-on-accent), so a filled
-   Details beside a bordered Add would be the loudest thing on the card; an
-   outline is prominent without shouting, and the accent is still the accent. */
-.btn-accent {
-  flex: 1;
-  padding: 4px 8px;
-  background: transparent;
-  border: var(--rule-hair) solid var(--color-accent);
-  border-radius: 6px;
-  font-family: var(--font-body);
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--color-accent);
-  cursor: pointer;
-}
-.btn-accent:hover { background: var(--color-accent-200); }
-.btn-accent-lg {
-  flex: none;
-  padding: 8px 18px;
-  border-radius: var(--radius-lg);
-  font-size: 12.5px;
-  letter-spacing: 0.03em;
-}
-
 /* Inside a ride, the frame is the thing being judged, so it gets the design's
    16:9 rather than the 56px strip the flat lists use. */
 .ride-pane .tile .thumb { height: auto; aspect-ratio: 16 / 9; }
@@ -2334,8 +2275,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   overflow-y: auto;
 }
 
-.btn-solid,
-.btn-outline,
 .chip,
 .link-btn,
 .file-label,
@@ -2398,7 +2337,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-size: 12.5px;
   font-weight: 500;
 }
-.is-renaming .btn-accent { flex: none; }
+.is-renaming .btn-primary { flex: none; }
 
 /* Touch has no hover, so the control cannot hide behind one. */
 @media (hover: none) {
@@ -2664,3 +2603,88 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   color: var(--color-text);
   max-width: 68ch;
 }
+
+/* ── Buttons, on the brand's own terms ─────────────────────────────────────
+   One shape and one scale, three weights of emphasis. The moment player used
+   three unrelated idioms side by side — an uppercase outline, a sentence-case
+   amber outline and a bare text link — at radii (6px, none) the system does
+   not have. Arenos gives buttons the 5px step, one hairline, Geist at 500,
+   sentence case, and keeps amber scarce: one filled action, the rest quiet.
+   Ink on amber, never white. */
+.btn-primary,
+.btn-quiet,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: var(--radius-md);
+  border: var(--rule-hair) solid transparent;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn-primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.btn-primary:hover:not(:disabled) { background: var(--color-accent-600); border-color: var(--color-accent-600); }
+.btn-primary[aria-pressed="true"] { background: var(--color-accent-700); border-color: var(--color-accent-700); }
+
+.btn-quiet {
+  border-color: var(--color-rule);
+  color: var(--color-text);
+}
+.btn-quiet:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent-700); }
+
+.btn-ghost { color: var(--color-neutral-700); }
+
+/* The player's three: Download, Publish and Close. They act on the moment on
+   screen and are one kind of thing, so they are one button in three weights
+   rather than three idioms — and all three carry the amber, because that is
+   what they have in common. The fill still belongs to Publish alone: an amber
+   rectangle three times over in one row is emphasis that has stopped meaning
+   anything. */
+.btn-quiet.detail-action {
+  border-color: var(--color-accent-300);
+  color: var(--color-accent-900);
+}
+.btn-quiet.detail-action:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+}
+.btn-ghost:hover:not(:disabled) { color: var(--color-text); }
+
+.btn-primary:disabled,
+.btn-quiet:disabled,
+.btn-ghost:disabled { opacity: 0.4; cursor: default; }
+
+/* The pager's two steps: the same quiet button, smaller, because they sit
+   under a list rather than in a head. */
+.btn-step { padding: 4px 10px; font-size: 11.5px; }
+
+/* The one thing a card or a card-sized panel exists to do — start an
+   analysis, schedule a live event, open the record. Larger than a button in a
+   row of buttons, and the only one of its size on the surface. */
+.btn-lg { padding: 9px 18px; font-size: 12.5px; }
+
+/* Play sits in the transport row, so it takes that row's height and radius
+   rather than the system's default — the fill is what marks it out, not the
+   size. */
+.player-play {
+  min-width: 68px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+/* The ride pane's own play, with the round's length set beside the label. */
+.play-ride { gap: 7px; }
