@@ -449,3 +449,29 @@ class TestTheStartListMayNotCrossTheDay:
             recorded_from=datetime.datetime(2026, 9, 12, 12, 30, tzinfo=datetime.UTC))
         assert [r.show_class.class_id for r in runs] == [1278780]
         assert runs[0].decided_by == "caption"
+
+    def test_a_class_not_due_for_hours_cannot_claim_a_morning_ride(self):
+        # The morning capture, and the same fault running forwards. A rider
+        # down for the afternoon freestyle rides at 09:16; the start list
+        # narrows to that one class, and the clock — left with nothing else,
+        # and with no allowance forward to refuse it — hands it over through
+        # its own "before anything was due" fallback.
+        morning = datetime.datetime(2026, 9, 12, 7, 9, 27, tzinfo=datetime.UTC)
+        rides = [{"order": 11, "rider": "Dannie Morgan",
+                  "start_sec": 4015.0, "end_sec": 4275.0,
+                  "scoreboard": "(119) Dannie Morgan Freya VII"}]
+        runs = equipe.assign_classes(
+            rides, equipe.classes_on(_show(), "2026-09-12", arena=CAMERA),
+            recorded_from=morning, entrants={1278780: ["Dannie Morgan"]})
+        assert [r.show_class.class_id for r in runs] == [1278778]
+
+    def test_a_caption_may_still_bring_a_class_forward(self):
+        # The asymmetry, stated: the arena's own card can say a class went in
+        # early, because somebody read it off the screen. A list of names
+        # cannot say anything of the kind.
+        classes = equipe.classes_on(_show(), "2026-09-12", arena=CAMERA)
+        at = datetime.datetime(2026, 9, 12, 9, 40, tzinfo=equipe.show_offset(_show()))
+        # 25 minutes before the Grand Prix was due, and it is in the ring.
+        assert not equipe._not_due_yet(classes[1], at)
+        # The freestyle, four hours out, is not — by any reading.
+        assert equipe._not_due_yet(classes[2], at)

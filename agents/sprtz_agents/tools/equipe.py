@@ -540,12 +540,14 @@ def _entered_in(ride: dict, classes: list[ShowClass],
     return named or list(classes)
 
 
-# How long after the next class was due a class may still be running. A
-# timetable slips and a class over-runs its slot, so the ring is not free the
-# moment the next one is published to start — but it is free long before the
-# afternoon. This bounds the start list, which knows who rode and nothing at
-# all about when.
-OVERRUN = datetime.timedelta(minutes=30)
+# How far a class may run from its published slot in either direction. A
+# timetable slips: a class over-runs, so the ring is not free the moment the
+# next one is due, and a class goes in early, so a ride just before its
+# published time is still its own. What this rules out is the other order of
+# magnitude — a class the day finished with hours ago, or one not due until
+# the afternoon. It bounds the two signals that read a rider and a graphic
+# and know nothing whatever about when.
+SLACK = datetime.timedelta(minutes=30)
 
 
 def _ended_before(show_class: ShowClass, at: datetime.datetime,
@@ -553,22 +555,42 @@ def _ended_before(show_class: ShowClass, at: datetime.datetime,
     """Whether the ring had moved on from this class by the time of a ride.
 
     A class ends when the next one in its own ring begins, give or take the
-    over-run. The last class of the day never ends, because nothing follows it
+    slack. The last class of the day never ends, because nothing follows it
     to say that it has.
     """
     if show_class.start_at is None:
         return False
     after = [c.start_at for c in classes
              if c.start_at and c.start_at > show_class.start_at]
-    return bool(after) and at >= min(after) + OVERRUN
+    return bool(after) and at >= min(after) + SLACK
 
 
-def _still_running(pool: list[ShowClass], at: datetime.datetime | None,
-                   classes: list[ShowClass]) -> list[ShowClass]:
-    """The pool without the classes the day had already finished with."""
+def _not_due_yet(show_class: ShowClass, at: datetime.datetime) -> bool:
+    """Whether the day had not yet reached this class when a ride happened.
+
+    The mirror of the one above, and it had to be written for the same reason.
+    The clock alone never picks a class that has not started — there is
+    deliberately no allowance forward — but a start list narrowed to a single
+    future class leaves the clock nothing else to answer, and its own fallback
+    for "before anything was due" then hands the ride to it. That is how two
+    rounds of a morning young horses class were filed under an afternoon
+    freestyle five hours before it was due in the ring.
+    """
+    return show_class.start_at is not None and at < show_class.start_at - SLACK
+
+
+def _not_past(classes: list[ShowClass], at: datetime.datetime | None) -> list[ShowClass]:
+    """The classes the ring had not already finished with."""
     if at is None:
-        return list(pool)
-    return [c for c in pool if not _ended_before(c, at, classes)]
+        return list(classes)
+    return [c for c in classes if not _ended_before(c, at, classes)]
+
+
+def _reached(classes: list[ShowClass], at: datetime.datetime | None) -> list[ShowClass]:
+    """Those of them the day had actually got to."""
+    if at is None:
+        return list(classes)
+    return [c for c in classes if not _not_due_yet(c, at)]
 
 
 def assign_classes(rides: list[dict], classes: list[ShowClass], *,
@@ -603,9 +625,19 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
     clock, asked only about that class, answers it — while a recap card cut in
     between rounds names a class that finished hours ago perfectly clearly. So
     a class the ring has finished with is dropped before either is asked. It is
-    finished with once the next class in the ring has started and the over-run
-    allowance has passed; the last class of the day is never finished with,
-    because nothing follows it to say so.
+    finished with once the next class in the ring has started and the slack has
+    passed; the last class of the day is never finished with, because nothing
+    follows it to say so.
+
+    **The forward bound is the start list's alone.** A caption is read off the
+    arena, so it can see a class go in early and report it — that is the
+    timetable slipping, which is the thing the caption exists to correct. A
+    start list sees nothing. Narrowed to a single class that is not due for
+    hours, it leaves the clock with one answer and the clock's own fallback for
+    "before anything was due" gives it: two rounds of a morning young horses
+    class were filed under an afternoon freestyle five hours early exactly that
+    way. So the caption is offered every class the ring has not finished with,
+    and the start list only those the day has reached.
 
     A ride with no absolute time cannot be placed by the clock at all. That is
     an uploaded file rather than a live event, and the answer there is the
@@ -627,14 +659,22 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
         # freestyle were filed under a young horses class that ended at
         # breakfast because their riders were down for it too, and a fourth
         # under a Grand Prix four hours over, off a recap card the broadcast
-        # cut to between rounds. Neither is a boundary correction; both are
-        # jumps across the day.
-        live = _still_running(classes, at, classes) or list(classes)
-        # The start lists narrow what is left: everything below asks its
-        # question of the classes this rider could actually have been in.
-        pool = _entered_in(ride, live, entrants or {})
+        # cut to between rounds. The morning capture of the same day did it
+        # forwards: two of its rounds went to a freestyle not due for five
+        # hours. None of that is a boundary correction; all of it is a jump
+        # across the day.
+        live = _not_past(classes, at) or list(classes)
+        # The two bounds are not the same shape, because the two signals are
+        # not. A caption is read off the arena, so it can see a class go in
+        # early and say so — that is the timetable slipping, and it is what
+        # the caption is for. A start list is a list of names: it cannot see
+        # anything, least of all a class that is not due for another five
+        # hours. So the caption is offered every class the ring has not
+        # finished with, and the start list only those the day has reached.
+        reached = _reached(live, at) or list(live)
+        pool = _entered_in(ride, reached, entrants or {})
         by_clock = _class_at(at, pool) if at is not None else None
-        named, score = _class_named_in(ride, pool)
+        named, score = _class_named_in(ride, live)
         chosen = None
         if named is not None and by_clock is not None and named.class_id != by_clock.class_id:
             # Both answered and they disagree. The caption only wins by a
@@ -660,8 +700,8 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
             chosen = by_id[pool[0].class_id] if pool else runs[0]
         # Say so when the start list is what moved it. The clock's own answer
         # over every class is what the record would have said before.
-        if len(pool) < len(live) and at is not None:
-            unnarrowed = _class_at(at, live)
+        if len(pool) < len(reached) and at is not None:
+            unnarrowed = _class_at(at, reached)
             if unnarrowed is not None and unnarrowed.class_id != chosen.show_class.class_id:
                 chosen.decided_by = "start list"
         chosen.rides.append(ride)
