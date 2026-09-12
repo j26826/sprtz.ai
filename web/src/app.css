@@ -567,59 +567,18 @@ button.tile:hover { border-color: var(--color-accent); }
   line-height: 1.4;
 }
 
-/* Buttons — flush left labels, radius from the theme's own tokens */
-
-.btn-outline {
-  border: var(--rule-hair) solid var(--color-rule);
-  background: transparent;
-  color: var(--color-text);
-  padding: 6px 10px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.btn-outline:hover { background: var(--color-accent-100); }
-.btn-outline:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.btn-solid {
-  border: 0;
-  background: var(--color-accent);
-  /* On the accent, not on --color-bg (the page's own colour, and only
-     readable here by luck of which theme is active). --color-on-accent is a
-     fixed ink/white choice per theme — Arenos requires ink here because white
-     on its amber fails contrast outright; the fallback covers any theme that
-     does not define the token. */
-  color: var(--color-on-accent, #fff);
-  padding: 9px 14px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-.btn-solid:hover { background: var(--color-accent-600); }
+/* Buttons: one system, further down under "Buttons, on the brand's own
+   terms". What is left here belongs to particular buttons, not to a family. */
 
 /* A ride's way into its whole round: the pane's one filled button, because
    watching the ride is what the pane is for. The length is a timecode, so it
    is set in the mono. */
-.play-ride {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-}
 .play-ride-len {
   font-family: var(--font-mono);
   font-weight: 500;
   letter-spacing: 0;
   opacity: 0.8;
 }
-.btn-solid:active { background: var(--color-accent-700); }
-.btn-solid:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .chip {
   border: var(--rule-hair) solid var(--color-neutral-400);
@@ -751,7 +710,6 @@ button.tile:hover { border-color: var(--color-accent); }
   padding: 0 12px 10px;
   background: var(--color-bg);
 }
-.player-play { min-width: 68px; padding: 8px 14px; border-radius: var(--radius-sm); }
 .pc {
   border: var(--rule-hair) solid var(--color-neutral-400);
   border-radius: var(--radius-sm);
@@ -2270,31 +2228,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-weight: 500;
 }
 
-/* Details, as the design draws it: the accent as an outline rather than as a
-   fill. Amber takes ink and not white (--color-on-accent), so a filled
-   Details beside a bordered Add would be the loudest thing on the card; an
-   outline is prominent without shouting, and the accent is still the accent. */
-.btn-accent {
-  flex: 1;
-  padding: 4px 8px;
-  background: transparent;
-  border: var(--rule-hair) solid var(--color-accent);
-  border-radius: 6px;
-  font-family: var(--font-body);
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--color-accent);
-  cursor: pointer;
-}
-.btn-accent:hover { background: var(--color-accent-200); }
-.btn-accent-lg {
-  flex: none;
-  padding: 8px 18px;
-  border-radius: var(--radius-lg);
-  font-size: 12.5px;
-  letter-spacing: 0.03em;
-}
-
 /* Inside a ride, the frame is the thing being judged, so it gets the design's
    16:9 rather than the 56px strip the flat lists use. */
 .ride-pane .tile .thumb { height: auto; aspect-ratio: 16 / 9; }
@@ -2349,8 +2282,6 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   overflow-y: auto;
 }
 
-.btn-solid,
-.btn-outline,
 .chip,
 .link-btn,
 .file-label,
@@ -2413,7 +2344,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-size: 12.5px;
   font-weight: 500;
 }
-.is-renaming .btn-accent { flex: none; }
+.is-renaming .btn-primary { flex: none; }
 
 /* Touch has no hover, so the control cannot hide behind one. */
 @media (hover: none) {
@@ -2729,3 +2660,22 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 /* The pager's two steps: the same quiet button, smaller, because they sit
    under a list rather than in a head. */
 .btn-step { padding: 4px 10px; font-size: 11.5px; }
+
+/* The one thing a card or a card-sized panel exists to do — start an
+   analysis, schedule a live event, open the record. Larger than a button in a
+   row of buttons, and the only one of its size on the surface. */
+.btn-lg { padding: 9px 18px; font-size: 12.5px; }
+
+/* Play sits in the transport row, so it takes that row's height and radius
+   rather than the system's default — the fill is what marks it out, not the
+   size. */
+.player-play {
+  min-width: 68px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+/* The ride pane's own play, with the round's length set beside the label. */
+.play-ride { gap: 7px; }
