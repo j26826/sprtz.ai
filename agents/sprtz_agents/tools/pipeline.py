@@ -1480,8 +1480,19 @@ async def split_event_classes(job_id: str, arena: str = "") -> dict:
     stored = await mcp_client.call_tool(
         "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
 
+    # The catalog wraps it — {"status": …, "game": {…}} — and this spread the
+    # envelope rather than the record, so the only key reaching the model was
+    # the word "game". Every field of GameDetails has a default except `sport`,
+    # so the failure was one missing-field error rather than a wrong record,
+    # the tool raised before it read a timetable, and the agent wrote the
+    # refusal an editor saw out of the docstring. A split has never once run.
+    record = found.get("game")
+    if not isinstance(record, dict):
+        return {"status": "error", "job_id": job_id,
+                "error": "This recording has no game record to split."}
+
     game = GameDetails.model_validate({
-        **_snake_keys({k: v for k, v in found.items() if k not in ("status", "type")}),
+        **_snake_keys(record),
         "job_id": job_id,
         "rides": rides.get("rides") or [],
     })
