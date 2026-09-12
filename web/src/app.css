@@ -2555,7 +2555,9 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  padding: 0 48px 6px;
+  /* Five above, six below: the line needs air off the transcript's last card
+     more than it needs it off the box, which it belongs to. */
+  padding: 5px 48px 6px;
   min-width: 0;
 }
 @media (max-width: 900px) {
