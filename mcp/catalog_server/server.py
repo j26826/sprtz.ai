@@ -466,16 +466,53 @@ def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> 
 
 
 @mcp.tool
-def upsert_game(job_id: str, game: dict, embed_text: str = "") -> dict:
+def upsert_game(job_id: str, game: dict, embed_text: str = "", class_id: str = "") -> dict:
     """Save the match-level record and index it for game search.
 
     Args:
         job_id: Job the game belongs to.
         game: GameDetails fields.
         embed_text: What to embed. Falls back to the teams and summary.
+        class_id: One competition of a recording that held several. Empty is
+            the whole recording, which is how every sport but equestrian and
+            every single-class day is stored.
     """
     try:
-        return {"status": "success", **store.upsert_game(job_id, game, embed_text)}
+        return {"status": "success",
+                **store.upsert_game(job_id, game, embed_text, class_id=class_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def delete_game(job_id: str, class_id: str = "") -> dict:
+    """Remove one game record, leaving the job and its moments untouched.
+
+    Args:
+        job_id: Identifier of the job.
+        class_id: One competition of it, or empty for the whole-recording
+            record — which is what a day being split into its classes leaves
+            behind.
+    """
+    try:
+        return {"status": "success", **store.delete_game(job_id, class_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
+def list_games(job_id: str) -> dict:
+    """Every competition one recording holds, in running order.
+
+    A live URL points at an arena, so a day's capture can cross several
+    classes; each is an event of its own. One entry for a recording that held
+    one competition, which is every sport but equestrian.
+
+    Args:
+        job_id: Identifier of the job.
+    """
+    try:
+        return {"status": "success", "job_id": job_id, "games": store.list_games(job_id)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 
@@ -496,16 +533,18 @@ def get_game(job_id: str) -> dict:
 
 
 @mcp.tool
-def list_game_rides(job_id: str) -> dict:
+def list_game_rides(job_id: str, class_id: str = "") -> dict:
     """A competition day's rides in running order, as the game record holds
     them: rider, horse, start and end, test type, judges' marks, total, rank,
     score check and where the score came from. One document read.
 
     Args:
         job_id: Job whose rides to read.
+        class_id: One competition of it, or empty for the whole recording.
     """
     try:
-        return {"status": "success", "job_id": job_id, "rides": store.get_rides(job_id)}
+        return {"status": "success", "job_id": job_id,
+                "rides": store.get_rides(job_id, class_id=class_id)}
     except KeyError as exc:
         return {"status": "error", "error": str(exc), "job_id": job_id}
     except Exception as exc:  # noqa: BLE001
@@ -513,7 +552,7 @@ def list_game_rides(job_id: str) -> dict:
 
 
 @mcp.tool
-def get_event_tree(job_id: str) -> dict:
+def get_event_tree(job_id: str, class_id: str = "") -> dict:
     """One event as a tree: the event, each ride in running order (a rider on
     one horse), and the moments that happened during each ride.
 
@@ -522,9 +561,11 @@ def get_event_tree(job_id: str) -> dict:
 
     Args:
         job_id: Job whose event to read.
+        class_id: One competition of a day that held several; empty is the
+            first of them, which is the whole recording when it held one.
     """
     try:
-        return {"status": "success", **store.event_tree(job_id)}
+        return {"status": "success", **store.event_tree(job_id, class_id=class_id)}
     except KeyError as exc:
         return {"status": "error", "error": str(exc), "job_id": job_id}
     except Exception as exc:  # noqa: BLE001

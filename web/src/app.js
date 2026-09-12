@@ -43,7 +43,7 @@ import {
   shortClock, trim, widen,
 } from './player.js';
 import {
-  countTypesIn, filterByTypes, groupByRide, momentTypesIn,
+  countTypesIn, filterByTypes, groupByRide, hasRides, momentTypesIn,
   rideNamedIn, rideRank, ridesAsked, sortRideGroups,
 } from './ridegroups.js';
 import {
@@ -75,7 +75,11 @@ const state = {
   sessions: [],
   sessionKey: null,    // the open session, which may not have a job yet
   scope: null,         // what this session is about — see scope.js
-  jobId: null,
+  jobId: null,          // the recording
+  // The event of it that is open. One recording can hold several — a day's
+  // capture crosses class after class — and this is the game document's id,
+  // which is the job's own id for a recording that held one competition.
+  gameId: null,
   job: null,
   moments: [],
   events: [],
@@ -86,6 +90,16 @@ const state = {
   // it: { momentId, title, description, privacy, status, error, url }. It
   // lives here rather than on a message because the popup is not a message.
   share: null,
+  // Which jobs have their events listed under them. A set rather than one id
+  // because this is navigation, not a dialog: comparing what two recordings
+  // produced is the reason to look, and a disclosure that closes the last one
+  // makes that impossible.
+  jobEvents: new Set(),
+  // Whose progress the popup is showing. Module state rather than the message
+  // that opened it: `render()` rebuilds the transcript on every job write, and
+  // the popup has to survive that — which is also what lets its bar move while
+  // it is open.
+  progressJobId: null,
   // What the server says is configured for YouTube, and what someone has typed
   // into the settings panel but not saved yet.
   youtube: null,
@@ -434,7 +448,7 @@ function mountSettings() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      closeSettings(); closeDetails(); toggleAccountMenu(false);
+      closeSettings(); closeDetails(); closeProgress(); toggleAccountMenu(false);
       if (closeTypeMenus()) render();
     }
   });
@@ -570,6 +584,8 @@ onAuthStateChanged(auth, async (user) => {
     // left open over it would still be playing their match.
     closeDetails();
     closeSettings();
+    closeProgress();
+    state.jobEvents.clear();
     state.msgs = [];
     state.jobs = [];
     state.jobId = null;
@@ -671,14 +687,27 @@ function ensureJobContext() {
     : null;
   if (session?.jobId) return;
   const inScope = gamesInScope(state.scope, state.games);
-  selectJob(inScope[0] ? (inScope[0].jobId || inScope[0].id) : state.jobs[0].id);
+  const first = inScope[0];
+  if (first) selectJob(first.jobId || first.id, first.id || first.jobId);
+  else selectJob(state.jobs[0].id);
 }
 
 
-function selectJob(jobId) {
+/**
+ * Open a recording, and one event of it.
+ *
+ * A job is a recording and a game is an event, and one recording can hold
+ * several: a day's live capture crosses class after class, and each class is a
+ * record of its own. So the job's listeners are the recording's — its moments,
+ * its feed — while the game listener is the open event's, by document id.
+ * Without a class named, it is the recording's own record, which is what every
+ * handball match and every single-class day has.
+ */
+function selectJob(jobId, gameId = '') {
   state.unsubscribe.forEach((fn) => fn());
   state.unsubscribe = [];
   state.jobId = jobId;
+  state.gameId = gameId || jobId;
   state.moments = [];
   state.game = null;
   state.gameFor = null;
@@ -696,9 +725,10 @@ function selectJob(jobId) {
     if (snap.exists()) { state.job = { id: snap.id, ...snap.data() }; render(); }
   }));
 
-  // The game record lives in its own top-level collection, keyed by job id, so
-  // it is a separate listener rather than part of the job document.
-  state.unsubscribe.push(onSnapshot(doc(db, 'games', jobId), (snap) => {
+  // The game record lives in its own top-level collection and is keyed by the
+  // event rather than by the recording, so it is a separate listener.
+  const gameDoc = state.gameId;
+  state.unsubscribe.push(onSnapshot(doc(db, 'games', gameDoc), (snap) => {
     state.game = snap.exists() ? snap.data() : null;
     state.gameFor = jobId;
     refreshEventTree();
@@ -742,6 +772,7 @@ function refreshEventTree() {
 
   const key = [
     jobId,
+    state.gameId || '',
     rides.map((r) => `${r.order}@${r.start_sec}-${r.end_sec}`).join(','),
     state.moments.map((m) => `${m.momentId}:${m.rideOrder ?? ''}`).join(','),
   ].join('|');
@@ -750,7 +781,12 @@ function refreshEventTree() {
   eventTreeTimer = setTimeout(async () => {
     eventTreeKey = key;
     try {
-      const { event } = await api(`/api/jobs/${encodeURIComponent(jobId)}/event`);
+      // One class of a day is one event: its own rides, and only the moments
+      // that happened inside them.
+      const forClass = state.game?.classId
+        ? `?class_id=${encodeURIComponent(state.game.classId)}` : '';
+      const { event } = await api(
+        `/api/jobs/${encodeURIComponent(jobId)}/event${forClass}`);
       if (state.jobId !== jobId) return;
       state.eventTree = { jobId, event };
       render();
@@ -1131,17 +1167,22 @@ function momentsCard(msg, index) {
 
 
 /**
- * Whether the desk is on one event rather than a catalogue of them.
+ * The one event the desk is on, or null when it is on a catalogue of them.
  *
  * The board answers for a single competition day; across several matches the
  * first axis is the match, not the rider, and a rail of riders from four
  * events is a rail of strangers. A session scoped to one game says this
  * outright; a desk holding exactly one game says it by having nothing else.
  */
-function oneEventSelected() {
+function soleEventInContext() {
   const inScope = gamesInScope(state.scope, state.games);
-  if (inScope.length === 1) return true;
-  return !state.scope && state.games.length === 1;
+  if (inScope.length === 1) return inScope[0];
+  if (!state.scope && state.games.length === 1) return state.games[0];
+  return null;
+}
+
+function oneEventSelected() {
+  return Boolean(soleEventInContext());
 }
 
 
@@ -1160,9 +1201,11 @@ function eventFor(msg) {
 }
 
 
-// Moments per page inside one rider's pane. Twelve rather than the list's ten:
-// the pane is the width of the board and a row holds four, so twelve is three
-// full rows and ten leaves a ragged one.
+// Moments per page inside one rider's pane: four across by three down, which
+// the pane's own grid is fixed at (`.ride-pane .tile-row`). The two are one
+// decision — the page fills the grid exactly, so the board is the same height
+// for every rider, and the rail beside it is measured against that height.
+// Change one and change both.
 const RIDE_MOMENTS_PER_PAGE = 12;
 
 // Rides per page. A ride is a heading and a row of tiles, so a page of them is
@@ -1203,7 +1246,6 @@ function rideGroupsCard(msg, index, found, event) {
  */
 function rideJobFor(question) {
   const idOf = (g) => g.jobId || g.id;
-  const hasRides = (g) => Array.isArray(g.rides) && g.rides.length > 0;
   const named = gameNamedIn(question);
   if (named && hasRides(named)) return idOf(named);
 
@@ -1656,6 +1698,15 @@ function playerMarkup(key) {
 // happened, then when, then who, then how sure. The row is skipped when the
 // value is empty rather than printed blank — a table half full of dashes reads
 // as broken data rather than as unreadable footage.
+/** The class a moment happened in, named from the events on the desk. */
+function classNameOf(m) {
+  if (!m?.classId) return '';
+  const game = state.games.find((g) => g.classId === m.classId
+    && (g.jobId || g.id) === (m.jobId || state.jobId));
+  return game ? (game.title || '') : '';
+}
+
+
 const DETAIL_ROWS = [
   ['moment.summary', (m) => m.summary],
   ['moment.description', (m) => m.description],
@@ -1677,6 +1728,9 @@ const DETAIL_ROWS = [
   // record exists to avoid.
   ['moment.identitySource', (m) => (m.identitySource
     ? t(`identity.${m.identitySource}`) : '')],
+  // Which competition of the day this moment happened in. A recording can
+  // cross class after class, and the same rider appears in more than one.
+  ['moment.competition', (m) => classNameOf(m)],
   ['moment.participant', (m) => m.participant],
   ['moment.participantRole', (m) => m.participantRole],
   ['moment.actionTeam', (m) => m.actionTeam],
@@ -2118,11 +2172,19 @@ function ridePanel(ride, p) {
   // knows it: the marks are read in that order off the results graphic.
   const marks = (r.judgeMarks || []).map((mark, i) =>
     [`${t('ride.judge')} ${judges[i]?.position || i + 1}`, `${Number(mark).toFixed(2)}%`]);
+  // What the results page says, beside what the screen showed. Each judge's own
+  // percentage by the letter they sat at — a mark means nothing without it —
+  // and a freestyle's two halves, which the arena graphic never shows at all.
+  const published = Object.entries(r.groundedJudgeMarks || {})
+    .map(([where, pct]) => [`${t('ride.judge')} ${where}`, `${Number(pct).toFixed(3)}%`]);
   const tiles = [
     [t('ride.total'), r.totalPct == null ? '' : `${Number(r.totalPct).toFixed(3)}%`],
     [t('ride.place'), r.place == null ? '' : String(r.place)],
     ...marks,
     [t('ride.published'), r.groundedTotalPct == null ? '' : `${Number(r.groundedTotalPct).toFixed(3)}%`],
+    ...published,
+    [t('ride.technical'), r.groundedTechnicalPct == null ? '' : `${Number(r.groundedTechnicalPct).toFixed(3)}%`],
+    [t('ride.artistic'), r.groundedArtisticPct == null ? '' : `${Number(r.groundedArtisticPct).toFixed(3)}%`],
   ].filter(([, value]) => value);
   const check = rideCheck({ score_check: r.scoreCheck });
   const who = `${ride.startNumber ? `#${ride.startNumber} ` : ''}${
@@ -2574,6 +2636,27 @@ function stageStrip(job) {
 // and one found by a web search are different kinds of claim.
 const GAME_DETAIL_ROWS = [
   ['game.title', (g) => g.title],
+  // What the show published about this class, where the recording turned out
+  // to hold several. The class is what the record *is*, so it leads; the show
+  // it belonged to is beside it, and the rest — the number the organiser gave
+  // it, the arena, the test that was ridden — is what an editor checks a class
+  // against.
+  ['game.class', (g) => g.className || (g.classId ? g.title : '')],
+  ['game.classNo', (g) => g.classNo],
+  ['game.arena', (g) => g.arena],
+  ['game.test', (g) => g.testName],
+  ['game.classStart', (g) => (g.classStartAt
+    ? new Date(g.classStartAt).toLocaleString(undefined,
+      { dateStyle: 'medium', timeStyle: 'short' }) : '')],
+  // Whether the placings can still move. A result that is not final is not a
+  // result, and the difference is invisible in the number itself.
+  ['game.resultsFinal', (g) => (g.classId
+    ? t(g.resultsFinal ? 'game.resultsFinalYes' : 'game.resultsFinalNo') : '')],
+  // Which decided the boundary: the published timetable, or what was read in
+  // the arena. A class that ran late is placed by its caption, and that is
+  // worth being able to see.
+  ['game.classDecidedBy', (g) => (g.classDecidedBy
+    ? t(`game.decided.${g.classDecidedBy}`) : '')],
   // The published name of the event and where it was, from Equipe. Beside the
   // observed title rather than in place of it: one was read off a caption and
   // one was found by a search, and they are different kinds of claim.
@@ -2744,7 +2827,9 @@ function gameStatus(g) {
  * picture arrives, which already means "no frame here".
  */
 function gameTile(g) {
-  const id = g.jobId || g.id;
+  // The event's own id, not the recording's: a day that crossed three classes
+  // is three tiles, and all three carry the same jobId.
+  const id = g.id || g.jobId;
   const meta = [
     g.sport,
     g.discipline,
@@ -2754,7 +2839,7 @@ function gameTile(g) {
 
   return `
     <button class="tile" data-open-game="${esc(id)}"
-            ${id === state.jobId ? 'aria-current="true"' : ''}>
+            ${id === state.gameId ? 'aria-current="true"' : ''}>
       <span class="tile-thumb"></span>
       <span class="tile-name">${esc(gameHeadline(g))}</span>
       <span class="tile-meta">${esc(meta || t('game.notIdentified'))}</span>
@@ -2803,7 +2888,7 @@ function gamesCard(msg, index) {
                     .filter(Boolean).join(' \u00b7 ') || t('game.notIdentified'))}</div>
                 </div>
                 <div class="moment-actions">
-                  <button class="link-btn" data-open-game="${esc(g.jobId || g.id)}">
+                  <button class="link-btn" data-open-game="${esc(g.id || g.jobId)}">
                     ${esc(t('moment.details'))}
                   </button>
                 </div>
@@ -3302,43 +3387,192 @@ function openSearchResult(index, k) {
 }
 
 
+/**
+ * Every run on the desk, as a table.
+ *
+ * It was a stack of blocks, one per job, each carrying a title, a status, a
+ * stage line, a four-part stage strip and a meter. That reads well for one
+ * job and not at all for twenty: a competition day's desk is a screen of
+ * repeated structure where the only question ever asked of it is "which one
+ * is stuck", and that is a column to scan down, not a paragraph to read per
+ * row. The columns are the five things asked, in the order they are asked.
+ *
+ * Uploads and live events share the table. They are different runs — one has
+ * stages, the other has chunks — but they are the same question to whoever is
+ * looking, and two tables side by side would make the reader work out which
+ * of them a match is in before they could find it.
+ */
+const JOB_COLUMNS = ['jobs.colMatch', 'jobs.colStatus', 'jobs.colStage',
+  'jobs.colEvents', 'jobs.colProgress', 'jobs.colActions'];
+
+
+/**
+ * The events a recording produced, in the order they ran.
+ *
+ * One, normally — a handball match, a single-class day — and several once a
+ * capture has crossed class after class, which is what an equestrian live URL
+ * does all day. Those are separate game records (`{job}__{classId}`) and the
+ * desk had nowhere that said a recording had become three of them: the games
+ * list shows the classes with no sign of which capture they came out of, and
+ * the job row showed the capture with no sign of what came out of it.
+ *
+ * Ordered by when the class started, as `canonical_game` orders them, so the
+ * first row is the one a question about the recording is answered by.
+ */
+function eventsOfJob(jobId) {
+  return state.games
+    .filter((g) => (g.jobId || g.id) === jobId)
+    .sort((a, b) => String(a.classStartAt || '').localeCompare(String(b.classStartAt || ''))
+      || Number(a.classNo || 0) - Number(b.classNo || 0));
+}
+
+
+/**
+ * How many events came out of a recording, and a way to see which.
+ *
+ * The same shape as the progress column and for the same reason: the figure
+ * answers the question most often being asked — did this capture split into
+ * the classes it should have — in the width of a number, and the list is one
+ * click away for the times the answer is no.
+ *
+ * It opens under the row rather than in a popup, because a list of events is
+ * navigation: the next thing done with it is opening one, and a dialog that
+ * has to be dismissed first is in the way of that.
+ */
+function eventsCell(jobId) {
+  const events = eventsOfJob(jobId);
+  if (!events.length) return '<span class="job-pct-none">—</span>';
+  const open = state.jobEvents.has(jobId);
+  return `<button class="link-btn job-events" data-job-events="${esc(jobId)}"
+            aria-expanded="${open}" title="${esc(t('jobs.showEvents'))}"
+          ><span class="job-pct">${events.length}</span></button>`;
+}
+
+
+/**
+ * The events themselves, when the row has been opened.
+ *
+ * Each names its class and opens it — which selects that class's rides and
+ * moments, not the whole recording's. The line under it is what tells two
+ * classes of one day apart: the number the organiser gave it, the arena, and
+ * when it ran.
+ */
+function eventsNote(jobId) {
+  const events = eventsOfJob(jobId);
+  if (!state.jobEvents.has(jobId) || !events.length) return '';
+  return noteRow(`<div class="job-events-list">${events.map((g) => {
+    const meta = [
+      g.classNo ? `${t('game.classNo')} ${g.classNo}` : '',
+      g.arena,
+      g.classStartAt
+        ? new Date(g.classStartAt).toLocaleString(undefined,
+          { dateStyle: 'medium', timeStyle: 'short' }) : '',
+      Array.isArray(g.rides) && g.rides.length
+        ? `${g.rides.length} ${t('game.rides').toLowerCase()}` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="job-event">
+        <button class="link-btn job-event-name"
+                data-open-game="${esc(g.id || g.jobId)}">${
+          esc(g.className || gameHeadline(g))}</button>
+        ${meta ? `<div class="job-event-meta">${esc(meta)}</div>` : ''}
+      </div>`;
+  }).join('')}</div>`);
+}
+
+
 function jobsCard(msg, index) {
   if (!state.jobs.length) return emptyCard(t('jobs.none'));
+  // Ten a page, as every other list here. A table makes fifty rows cheaper to
+  // draw than fifty blocks did, which is not the same as making them readable.
   const view = pageOf(state.jobs, msg.page);
-  return `<div class="panel-light">${view.slice.map((j) => {
-    if (j.kind === 'live') return liveJobRow(j);
-    const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
-    const failed = j.status === 'failed';
-    const stalled = running && isStalled(j);
-    const tone = failed || stalled ? 'failed' : running ? 'running' : 'idle';
-    return `
-      <div class="job">
-        ${state.reanalyse?.jobId === j.id ? reanalysePanel(j) : ''}
-        <div class="job-top">
-          ${editableTitle(j.id, j.title || j.source?.originalName || j.id, 'job-name')}
-          <div class="job-status" data-tone="${tone}">${
-            stalled ? esc(t('jobs.stalled')) : esc(j.status || 'unknown')}</div>
-        </div>
-        <div class="job-stage">${esc(j.stage || '')}${
-          j.media?.segmentCount ? ` · ${j.media.segmentCount} segments` : ''}${
-          j.recovery?.attempts ? ` · ${esc(t('jobs.recovered'))} ×${j.recovery.attempts}` : ''}</div>
-        ${running && !stalled ? `
-          ${stageStrip(j)}
-          <div class="meter-row">
-            <div class="meter meter-neutral"><i style="width:${j.progress || 0}%"></i></div>
-            <div class="meter-pct">${Math.round(j.progress || 0)}%</div>
-          </div>` : ''}
-        ${stalled ? `
-          <div class="job-error">
-            <p>${esc(t('jobs.noProgress'))} ${esc(sinceLabel(j.updatedAt))}.
-               ${esc(t('jobs.deadRun'))}</p>
-            <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
-          </div>` : ''}
-        ${failed && j.error ? `
-          <div class="job-error">
-            <p>${esc(jobFailure(j.error, { t }))}</p>
-            <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
-          </div>` : ''}
+  return `<div class="panel-light">
+    <div class="job-table-wrap">
+      <table class="job-table">
+        <thead>
+          <tr>${JOB_COLUMNS.map((key) => `<th>${esc(t(key))}</th>`).join('')}</tr>
+        </thead>
+        ${view.slice.map((j) => (j.kind === 'live' ? liveJobRow(j) : jobRow(j))).join('')}
+      </table>
+    </div>
+    ${pagerRow(view, index)}</div>`;
+}
+
+
+/**
+ * A panel that belongs to the row above it, across the whole table.
+ *
+ * An error, a retry offer, the re-analyse form and a finished event's game
+ * record are each a paragraph and a button or two. Put in one of five columns
+ * they would be a wrapped block that makes every other cell in that row tall;
+ * across the table they read as what they are — something said about the run
+ * on the line above.
+ */
+function noteRow(inner) {
+  return `<tr class="job-note"><td colspan="${JOB_COLUMNS.length}">${inner}</td></tr>`;
+}
+
+
+/**
+ * One job's rows, grouped.
+ *
+ * A run is not always one row — the re-analyse form opens above it, an error
+ * or a finished event's record sits under it — and the line between two jobs
+ * has to fall between the groups rather than between every pair of rows. Which
+ * rows start a new job cannot be read off adjacency, so the grouping says it:
+ * a `<tbody>` per job, which is what several tbodies in one table are for.
+ */
+function jobGroup(rows) {
+  return `<tbody class="job-group">${rows}</tbody>`;
+}
+
+
+/**
+ * How far along, as a figure and a way to see the rest.
+ *
+ * The bar is deliberately not in the table. Twenty rows of meters is a wall of
+ * moving parts, and only ever one of them is the run somebody is waiting on —
+ * so the column answers "how far" in the width of a number, and the button
+ * opens the stages for the one run that is being watched.
+ *
+ * A job with nothing in flight gets a dash rather than `0%`, which would read
+ * as a run that has started and got nowhere.
+ */
+function progressCell(jobId, pct) {
+  if (pct == null) return '<span class="job-pct-none">—</span>';
+  // The figure is the label. Under a column headed Progress a button reading
+  // "Progress" says the same word twice and costs the width to say it; the
+  // percentage is the thing being asked for, and it opens the rest. Mono,
+  // like every other figure here. The accessible name is the verb, since a
+  // screen reader reaches the button without the column heading beside it.
+  return `<button class="link-btn job-progress" data-progress="${esc(jobId)}"
+            title="${esc(t('jobs.viewProgress'))}" aria-label="${esc(t('jobs.viewProgress'))}"
+          ><span class="job-pct">${Math.round(pct)}%</span></button>`;
+}
+
+
+function jobRow(j) {
+  const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
+  const failed = j.status === 'failed';
+  const stalled = running && isStalled(j);
+  const tone = failed || stalled ? 'failed' : running ? 'running' : 'idle';
+  const detail = [
+    j.stage || '',
+    j.media?.segmentCount ? `${j.media.segmentCount} segments` : '',
+    j.recovery?.attempts ? `${t('jobs.recovered')} ×${j.recovery.attempts}` : '',
+  ].filter(Boolean).join(' · ');
+  return jobGroup(`
+    ${state.reanalyse?.jobId === j.id ? noteRow(reanalysePanel(j)) : ''}
+    <tr class="job-row">
+      <td class="job-cell-name">${
+        editableTitle(j.id, j.title || j.source?.originalName || j.id, 'job-name')}</td>
+      <td><span class="job-status" data-tone="${tone}">${
+        stalled ? esc(t('jobs.stalled')) : esc(j.status || t('jobs.unknown'))}</span></td>
+      <td class="job-stage">${esc(detail)}</td>
+      <td class="job-cell-events">${eventsCell(j.id)}</td>
+      <td class="job-cell-progress">${
+        progressCell(j.id, running && !stalled ? (j.progress || 0) : null)}</td>
+      <td class="job-cell-actions">
         <div class="job-actions">
           ${running && !stalled
             ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
@@ -3346,18 +3580,34 @@ function jobsCard(msg, index) {
           <button class="link-btn" data-delete-job="${esc(j.id)}"
                   data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
-      </div>`;
-  }).join('')}${pagerRow(view, index)}</div>`;
+      </td>
+    </tr>
+    ${stalled ? noteRow(`
+      <div class="job-error">
+        <p>${esc(t('jobs.noProgress'))} ${esc(sinceLabel(j.updatedAt))}.
+           ${esc(t('jobs.deadRun'))}</p>
+        <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
+      </div>`) : ''}
+    ${failed && j.error ? noteRow(`
+      <div class="job-error">
+        <p>${esc(jobFailure(j.error, { t }))}</p>
+        <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
+      </div>`) : ''}
+    ${eventsNote(j.id)}`);
 }
 
+
 /**
- * A live event's row: its own state rather than the job status, a strip of
- * the three things that happen to it, and — once it is over — the game
- * record where the moments list would otherwise sit.
+ * A live event's row in the same table: its own state rather than the job
+ * status, and — once it is over — the game record under it.
  *
  * Progress is counted in chunks against how many the window will produce,
- * because that is the only unit a live event has: there is no duration to
- * be a fraction of until the event has ended.
+ * because that is the only unit a live event has: there is no duration to be
+ * a fraction of until the event has ended. Which is also why the figure in
+ * the column is the analysis fill rather than the job's `progress`, which a
+ * live event never writes. A booked event that has not started gets a dash
+ * rather than 0%: it is not a run that has got nowhere, it is a run that has
+ * not begun, and the status and start time beside it already say so.
  */
 function liveJobRow(j) {
   const live = liveSummary(j);
@@ -3376,29 +3626,16 @@ function liveJobRow(j) {
     line = `${live.captured} ${t('live.chunksDone')} · ${live.moments} ${t('live.moments')}`;
   }
   if (live.restarts) line += ` · ${t('live.restarted')} ×${live.restarts}`;
-  return `
-      <div class="job">
-        <div class="job-top">
-          ${editableTitle(j.id, j.title || j.id, 'job-name')}
-          <div class="job-status" data-tone="${tone}">${esc(t(`live.${live.state}`) || live.state)}</div>
-        </div>
-        <div class="job-stage">${esc(line)}</div>
-        ${liveStrip(live)}
-        ${j.status === 'failed' && j.error ? `
-          <div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>` : ''}
-        ${live.state === 'complete' ? (game ? `
-          <div class="live-game">
-            <div class="moment-label">${esc(gameHeadline(game))}</div>
-            <div class="moment-meta">${esc([
-              game.competition || game.groundedCompetition,
-              game.venue || game.groundedVenue, game.mood,
-            ].filter(Boolean).join(' · ') || t('game.notIdentified'))}</div>
-            ${game.summary ? `<div class="game-summary">${esc(game.summary)}</div>` : ''}
-            <div class="moment-actions">
-              <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
-            </div>
-          </div>` : `
-          <div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
+  return jobGroup(`
+    <tr class="job-row">
+      <td class="job-cell-name">${editableTitle(j.id, j.title || j.id, 'job-name')}</td>
+      <td><span class="job-status" data-tone="${tone}">${
+        esc(t(`live.${live.state}`) || live.state)}</span></td>
+      <td class="job-stage">${esc(line)}</td>
+      <td class="job-cell-events">${eventsCell(j.id)}</td>
+      <td class="job-cell-progress">${
+        progressCell(j.id, live.state === 'live' ? liveStageFills(live).analysis : null)}</td>
+      <td class="job-cell-actions">
         <div class="job-actions">
           ${live.state === 'scheduled'
             ? `<button class="link-btn" data-edit-live="${esc(j.id)}">${esc(t('live.edit'))}</button>`
@@ -3409,8 +3646,25 @@ function liveJobRow(j) {
           <button class="link-btn" data-delete-job="${esc(j.id)}"
                   data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
-      </div>`;
+      </td>
+    </tr>
+    ${j.status === 'failed' && j.error
+      ? noteRow(`<div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>`) : ''}
+    ${live.state === 'complete' ? noteRow(game ? `
+      <div class="live-game">
+        <div class="moment-label">${esc(gameHeadline(game))}</div>
+        <div class="moment-meta">${esc([
+          game.competition || game.groundedCompetition,
+          game.venue || game.groundedVenue, game.mood,
+        ].filter(Boolean).join(' · ') || t('game.notIdentified'))}</div>
+        ${game.summary ? `<div class="game-summary">${esc(game.summary)}</div>` : ''}
+        <div class="moment-actions">
+          <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
+        </div>
+      </div>` : `<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
+    ${eventsNote(j.id)}`);
 }
+
 
 function liveStrip(live) {
   const fills = liveStageFills(live);
@@ -3433,6 +3687,67 @@ function liveStrip(live) {
       <div class="meter-pct">${Math.round(fills.analysis)}%</div>
     </div>`;
 }
+
+/* ──────────────────────────────────────────────────────── progress ── */
+
+/**
+ * The stages of one run, in a popup, because they are not worth a column.
+ *
+ * The strip and the meter used to be drawn on every row of the jobs card. They
+ * are the most detailed thing on that screen and the least often wanted: a
+ * desk holds twenty runs and at most one of them is being waited on. Here they
+ * are asked for, by the run they are about.
+ *
+ * The popup is repainted from `render()` rather than written once when it
+ * opens, so the bar moves while it is on screen — the jobs listener fires on
+ * every write the run makes, and that is the only reason to have a bar at all.
+ */
+function openProgress(jobId) {
+  state.progressJobId = jobId;
+  render();
+}
+
+function closeProgress() {
+  state.progressJobId = null;
+  $('progress').classList.add('hidden');
+}
+
+function renderProgress() {
+  const box = $('progress');
+  if (!box) return;
+  const job = state.jobs.find((j) => j.id === state.progressJobId);
+  // A job deleted while its progress was open. Closing beats leaving a dialog
+  // that describes a run nothing can answer for any more.
+  if (!job) {
+    box.classList.add('hidden');
+    return;
+  }
+  $('progress-title').textContent = job.title || job.source?.originalName || job.id;
+  $('progress-body').innerHTML = progressBody(job);
+  box.classList.remove('hidden');
+}
+
+/**
+ * What a run has done and is doing. A live event has chunks where an upload
+ * has stages, so each gets its own strip — `liveStrip` carries its own meter,
+ * an upload's is added here.
+ */
+function progressBody(job) {
+  if (job.kind === 'live') {
+    const live = liveSummary(job);
+    return `<div class="progress-state">${esc(t(`live.${live.state}`) || live.state)}</div>
+      ${liveStrip(live)}`;
+  }
+  const progress = Math.max(0, Math.min(100, job.progress || 0));
+  return `<div class="progress-state">${esc(job.status || t('jobs.unknown'))}${
+    job.stage ? ` · ${esc(t(`stage.${job.stage}`) || job.stage)}` : ''}</div>
+    ${stageStrip(job)}
+    <div class="meter-row">
+      <div class="meter meter-neutral"><i style="width:${progress}%"></i></div>
+      <div class="meter-pct">${Math.round(progress)}%</div>
+    </div>`;
+}
+
 
 /* ─────────────────────────────────────────────────────────── scope ── */
 
@@ -3846,40 +4161,23 @@ const animatedMsgs = new WeakSet();
 
 
 /**
- * Which event everything on screen is about, said in the two places someone
- * looks: at the top of the rail, and over the box they type the next question
- * into.
+ * What the next question will be about, above the box it is typed in.
  *
- * The rail is a list of conversations and the composer is a blank box, so
- * neither said which match the cards under them belong to — and the answer to
- * "show me the best moments" is a different answer for a different event. The
- * rail block opens the event's record, as its name suggests; with nothing
- * open it says so rather than disappearing, because an empty card and an
- * unopened event look identical from the outside.
+ * There was a "Now showing" panel at the top of the session rail saying the
+ * same thing. Two selected-looking things in one column is one too many — the
+ * rail already highlights the open session — so the event is named here only,
+ * where it qualifies the question rather than competing with the list.
  */
-function renderOpenEvent() {
+function renderComposerContext() {
   const game = state.game;
   const job = state.jobs.find((j) => j.id === state.jobId);
   const title = (game && gameHeadline(game)) || job?.title || '';
-  const meta = game
-    ? [game.discipline || game.sport, game.competition || game.groundedCompetition]
-      .filter(Boolean).join(' · ')
-    : (job?.sport || '');
-
-  const block = $('open-event');
-  if (block) {
-    block.dataset.open = String(Boolean(title));
-    block.disabled = !game;
-    $('open-event-label').textContent = title ? t('context.nowShowing') : t('context.noEvent');
-    $('open-event-title').textContent = title;
-    $('open-event-meta').textContent = title ? meta : '';
-  }
 
   const strip = $('composer-context');
   if (strip) {
     strip.hidden = !title;
     strip.innerHTML = title
-      ? `<span class="composer-context-label">${esc(t('context.asking'))}</span>
+      ? `<span class="composer-context-label">${esc(t('context.asking'))}:</span>
          <span class="composer-context-title">${esc(title)}</span>`
       : '';
   }
@@ -3888,7 +4186,8 @@ function renderOpenEvent() {
 
 function render() {
   renderSessions();
-  renderOpenEvent();
+  renderComposerContext();
+  renderProgress();
   $('transcript').innerHTML = currentTurn(state.msgs).map(([m, i]) => {
     const agent = m.who === 'agent';
     const fresh = agent && !animatedMsgs.has(m);
@@ -4353,7 +4652,26 @@ function attachCards(index, question) {
   // once it has been chosen.
   const card = chooseCard(question);
 
-  if (card === 'desk-moments' && !gameNamedIn(question)) {
+  const soleEvent = card === 'desk-moments' && !gameNamedIn(question)
+    ? soleEventInContext() : null;
+
+  if (soleEvent && hasRides(soleEvent)) {
+    // "The best moments" with nothing named is a question about the desk —
+    // unless the desk is one competition day, where it is a question about
+    // that day, and a day is read by who rode. Answering it with a ranked grid
+    // of two hundred tiles from forty rounds is the list nobody reads down
+    // that the board exists to replace, and it arrives by a different route
+    // than every other question about the same event, so the same ask gives
+    // two different screens depending on the words used to make it.
+    msg.showMoments = true;
+    msg.sort = 'score';
+    msg.jobId = soleEvent.jobId || soleEvent.id;
+    // The class, not the recording: a day that crossed several is several
+    // events, and this one is the event in context.
+    if (msg.jobId !== state.jobId || (soleEvent.id || soleEvent.jobId) !== state.gameId) {
+      selectJob(msg.jobId, soleEvent.id || soleEvent.jobId);
+    }
+  } else if (card === 'desk-moments' && !gameNamedIn(question)) {
     // The ranked shortlist with no match named is a question about the desk.
     msg.showDeskMoments = true;
     msg.searchResults = null;
@@ -4899,7 +5217,8 @@ document.addEventListener('click', (event) => {
     + '[data-detail-act],[data-trim],[data-trim-reset],[data-publish-to],'
     + '[data-edit-live],[data-cancel-edit-live],'
     + '[data-youtube-act],'
-    + '[data-ride-tab],[data-type-menu],[data-type-pick]');
+    + '[data-ride-tab],[data-type-menu],[data-type-pick],[data-progress],'
+    + '[data-job-events]');
 
   // An open moment-type menu closes on any click outside its own filter. Its
   // toggle used to be the only way out, and a menu only its own button can
@@ -4975,9 +5294,24 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.details) { openDetails(hit.dataset.details); return; }
   if (hit.dataset.gameDetails) { openGameDetails(state.game); return; }
   if (hit.dataset.openGame) {
-    openGameDetails(state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame));
+    const game = state.games.find((g) => (g.id || g.jobId) === hit.dataset.openGame)
+      || state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame);
+    // Opening an event opens it: its rides, its moments and its record are the
+    // class's, not the whole recording's.
+    if (game && ((game.jobId || game.id) !== state.jobId || (game.id || game.jobId) !== state.gameId)) {
+      selectJob(game.jobId || game.id, game.id || game.jobId);
+    }
+    openGameDetails(game);
     return;
   }
+  if (hit.dataset.jobEvents) {
+    const jobId = hit.dataset.jobEvents;
+    if (state.jobEvents.has(jobId)) state.jobEvents.delete(jobId);
+    else state.jobEvents.add(jobId);
+    render();
+    return;
+  }
+  if (hit.dataset.progress) { openProgress(hit.dataset.progress); return; }
   if (hit.dataset.registerGcs) { registerFromStorage(); return; }
   if ('scopePick' in hit.dataset || 'scopeSport' in hit.dataset || 'scopeDisc' in hit.dataset
       || 'scopeGame' in hit.dataset || 'scopeDone' in hit.dataset || 'scopeBack' in hit.dataset
@@ -5285,6 +5619,10 @@ $('close-details')?.addEventListener('click', closeDetails);
 // Clicking the backdrop closes; clicking the card must not.
 $('details')?.addEventListener('click', (event) => {
   if (event.target.id === 'details') closeDetails();
+});
+$('close-progress')?.addEventListener('click', closeProgress);
+$('progress')?.addEventListener('click', (event) => {
+  if (event.target.id === 'progress') closeProgress();
 });
 $('sign-out')?.addEventListener('click', signOutNow);
 $('account-menu').addEventListener('click', () => toggleAccountMenu(false));

@@ -73,6 +73,15 @@ def _ride_out(ride: dict[str, Any]) -> dict[str, Any]:
             "judgeMarks": list(ride.get("judge_marks") or []),
             "totalPct": ride.get("total_pct"),
             "groundedTotalPct": ride.get("grounded_total_pct"),
+            # The rest of what the results page says, where the class was read
+            # from one: each judge's own percentage by the letter they sat at,
+            # and the technical and artistic halves of a freestyle. Kept apart
+            # from the observed marks above — a broadcast shows five numbers
+            # for five seconds and a results page is the record.
+            "groundedJudgeMarks": dict(ride.get("grounded_judge_marks") or {}),
+            "groundedTechnicalPct": ride.get("grounded_technical_pct"),
+            "groundedArtisticPct": ride.get("grounded_artistic_pct"),
+            "startTime": ride.get("start_time", "") or "",
             # The published placing when grounding found one, else what the
             # screen showed at the time.
             "place": place if place is not None else ride.get("rank"),

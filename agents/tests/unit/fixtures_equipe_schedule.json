@@ -1,0 +1,90 @@
+{
+ "id": 82348,
+ "name": "LeMieux National Dressage Championships 2026",
+ "start_on": "2026-09-10",
+ "end_on": "2026-09-13",
+ "discipline": "dressage",
+ "venue_country": "GBR",
+ "meeting_classes": [
+  {
+   "id": 1278770,
+   "name": "D&H GOLD INTER I CHAMPIONSHIP - FEI Intermediate I 2009 (update 2026)",
+   "start_at": "2026-09-11 08:05:00 +0100",
+   "display_time": "08:05",
+   "date": "2026-09-11",
+   "discipline": "dressage",
+   "position": 0,
+   "status": "elite"
+  },
+  {
+   "id": 1284035,
+   "name": "Inter I Freestyle declarations",
+   "start_at": "2026-09-11 07:56:00 +0100",
+   "display_time": "07:56",
+   "date": "2026-09-11",
+   "discipline": "list",
+   "position": 1,
+   "status": "elite"
+  },
+  {
+   "id": 1278771,
+   "name": "FAIRFAX SADDLES PSG FREESTYLE GOLD CHAMPIONSHIP - FEI Young Rider/PSG Freestyle 2009 (update 2022)",
+   "start_at": "2026-09-11 15:20:00 +0100",
+   "display_time": "15:20",
+   "date": "2026-09-11",
+   "discipline": "dressage",
+   "position": 2,
+   "status": "elite"
+  },
+  {
+   "id": 1278772,
+   "name": "Fairfax Saddles Prix St Georges Supreme Champion 2025",
+   "start_at": "2026-09-11 00:00:00 +0100",
+   "display_time": null,
+   "date": "2026-09-11",
+   "discipline": "score_summary",
+   "position": 3,
+   "status": "elite"
+  },
+  {
+   "id": 1278773,
+   "name": "KBIS BRITISH DRESSAGE YOUNG HORSES 4YR OLD - National Test for 4yr old 2018",
+   "start_at": "2026-09-11 08:00:00 +0100",
+   "display_time": "08:00",
+   "date": "2026-09-11",
+   "discipline": "dressage",
+   "position": 13,
+   "status": "elite"
+  },
+  {
+   "id": 1278774,
+   "name": "BETTALIFE NOVICE GOLD CHAMPIONSHIP - Novice 6 (2024)",
+   "start_at": "2026-09-11 10:15:00 +0100",
+   "display_time": "10:15",
+   "date": "2026-09-11",
+   "discipline": "dressage",
+   "position": 14,
+   "status": "elite"
+  },
+  {
+   "id": 1278775,
+   "name": "TOPSPEC MEDIUM SILVER CHAMPIONSHIP - Medium 6 (2024)",
+   "start_at": "2026-09-11 07:50:00 +0100",
+   "display_time": "07:50",
+   "date": "2026-09-11",
+   "discipline": "dressage",
+   "position": 15,
+   "status": "elite"
+  },
+  {
+   "id": 1278777,
+   "name": "FAIRFAX SADDLES PRIX ST.GEORGE SILVER CHAMPIONSHIP - FEI Prix St. Georges 2009 (update 2026)",
+   "start_at": "2026-09-11 14:00:00 +0100",
+   "display_time": "14:00",
+   "date": "2026-09-11",
+   "discipline": "dressage",
+   "position": 16,
+   "status": "elite"
+  }
+ ]
+}

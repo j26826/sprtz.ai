@@ -51,6 +51,24 @@ export function groupByRide(event, moments, { filtered = false } = {}) {
 
 
 /**
+ * Whether a game record is a competition day — a thing ridden in rounds.
+ *
+ * This is the desk's test for "is this equestrian", and deliberately not the
+ * sport name. What the board needs is rounds to put on its rail, and `rides`
+ * is exactly the record of those: no other sport writes them, an equestrian
+ * day that has not produced any yet has nothing to put on a rail anyway, and
+ * a second sport judged in rounds would work the day it was added rather than
+ * the day somebody remembered to add its name to a list in the browser.
+ *
+ * Same reasoning as the filters above: the vocabulary is the record's, never
+ * a copy of the taxonomy kept here.
+ */
+export function hasRides(game) {
+  return Array.isArray(game?.rides) && game.rides.length > 0;
+}
+
+
+/**
  * Letters and digits only, accents folded, so "Lumière" typed as "lumiere"
  * still finds the horse and an apostrophe cannot split a name from itself.
  */

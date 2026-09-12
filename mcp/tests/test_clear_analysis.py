@@ -29,6 +29,7 @@ def job():
     game.get.return_value.exists = False
     with patch.object(store, "job_ref", return_value=ref), \
          patch.object(store, "game_ref", return_value=game), \
+         patch.object(store, "game_docs", return_value=[]), \
          patch.object(store, "_delete_collection", return_value=0):
         yield ref
 

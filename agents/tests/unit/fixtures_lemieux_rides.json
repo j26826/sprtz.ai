@@ -1,0 +1,173 @@
+{
+ "recorded_from": "2026-09-11T12:23:53+00:00",
+ "rides": [
+  {
+   "order": 1,
+   "start_sec": 0.0,
+   "rider": "Alexander Harrison",
+   "horse": "Ventura",
+   "scoreboard": "Alexander Harrison\nVentura"
+  },
+  {
+   "order": 2,
+   "start_sec": 600.0,
+   "rider": "Michael Eilberg",
+   "horse": "EDH Nanouk",
+   "scoreboard": "E 62.941 (33) H 65.294 (24) C 64.265 (32) M 63.676 (29) B 62.941 (33) Total 63.823 Rank 32"
+  },
+  {
+   "order": 3,
+   "start_sec": 805.0,
+   "rider": "Jody Haswell",
+   "horse": "valentinio",
+   "scoreboard": "null"
+  },
+  {
+   "order": 4,
+   "start_sec": 1263.0,
+   "rider": "Bryony Goodwin",
+   "horse": "Sheepcote Just Daisy",
+   "scoreboard": "(223) Bryony Goodwin Sheepcote Just Da... Total -26.7"
+  },
+  {
+   "order": 5,
+   "start_sec": 1680.0,
+   "rider": "Becky Edwards",
+   "horse": "Laerke Stensvang",
+   "scoreboard": "null"
+  },
+  {
+   "order": 6,
+   "start_sec": 2115.0,
+   "rider": "Sue Carson",
+   "horse": "SCS Lumiere KH",
+   "scoreboard": "214) Sue Carson\nSCS Lumiere KH\nTotal -45.00"
+  },
+  {
+   "order": 7,
+   "start_sec": 3269.0,
+   "rider": "Olivia Oakeley",
+   "horse": "Nulli Secundus 11",
+   "scoreboard": "Olivia Oakeley\nNulli Secundus 11"
+  },
+  {
+   "order": 8,
+   "start_sec": 3786.7,
+   "rider": "Elder Klatzko",
+   "horse": "Hawtins Fiorino",
+   "scoreboard": "Elder Klatzko Hawtins Fiorino"
+  },
+  {
+   "order": 9,
+   "start_sec": 4259.7,
+   "rider": "Fiona Brennan",
+   "horse": "Leroy",
+   "scoreboard": "Fiona Brennan\nLeroy"
+  },
+  {
+   "order": 10,
+   "start_sec": 4666.7,
+   "rider": "Gracie Catling",
+   "horse": "Fraithwens Wytske fan ter Lune",
+   "scoreboard": "Gracie Catling Fraithwens Wytske fan ter Lune"
+  },
+  {
+   "order": 11,
+   "start_sec": 5021.7,
+   "rider": "Ben Martin",
+   "horse": "Jacko B",
+   "scoreboard": "Ben Martin Jacko B"
+  },
+  {
+   "order": 12,
+   "start_sec": 6244.6,
+   "rider": "Fenella Quinn",
+   "horse": "Kintyre",
+   "scoreboard": "(254) Fenella Quinn Kintyre Total"
+  },
+  {
+   "order": 13,
+   "start_sec": 6751.6,
+   "rider": "Davy Harvey",
+   "horse": "Benefit",
+   "scoreboard": "Davy Harvey Benefit"
+  },
+  {
+   "order": 14,
+   "start_sec": 7096.6,
+   "rider": "Kimberley Alice Siddorn",
+   "horse": "Dexterity",
+   "scoreboard": "(568) Kimberley Alice Si... Dexterity Total -45.00"
+  },
+  {
+   "order": 15,
+   "start_sec": 7517.6,
+   "rider": "Sue Carson",
+   "horse": "SCS Lumiere KH",
+   "scoreboard": "(141) Sue Carson\nSCS Lumiere KH\nTotal -43.1"
+  },
+  {
+   "order": 16,
+   "start_sec": 7901.6,
+   "rider": "Lucy Palmer",
+   "horse": "La Vida Loca",
+   "scoreboard": "(158) Lucy Palmer La Vida Loca"
+  },
+  {
+   "order": 17,
+   "start_sec": 8412.6,
+   "rider": "Dannie Morgan",
+   "horse": "Fever Tree",
+   "scoreboard": "Dannie Morgan / Fever Tree | Total -45.00"
+  },
+  {
+   "order": 18,
+   "start_sec": 9771.6,
+   "rider": "Sara-Jane Lanning",
+   "horse": "Hawtins Lirica",
+   "scoreboard": "(325) Sara-Jane Lanning Hawtins Lirica E H C M B Total -44.6"
+  },
+  {
+   "order": 19,
+   "start_sec": 10243.6,
+   "rider": "Matt Frost",
+   "horse": "Lenika",
+   "scoreboard": "Matt Frost Lenika Total -45.00"
+  },
+  {
+   "order": 20,
+   "start_sec": 10601.6,
+   "rider": "Claire Abel",
+   "horse": "GF Sezuki",
+   "scoreboard": "Claire Abel GF Sezuki Total -45.00"
+  },
+  {
+   "order": 21,
+   "start_sec": 11071.6,
+   "rider": "Bryony Goodwin",
+   "horse": "Krack DE",
+   "scoreboard": "(526) Bryony Goodwin Krack DE Total -44.4"
+  },
+  {
+   "order": 22,
+   "start_sec": 12631.4,
+   "rider": "",
+   "horse": "",
+   "scoreboard": "FAIRFAX SADDLES Prix St Georges Freestyle Gold Champion 2024"
+  },
+  {
+   "order": 23,
+   "start_sec": 12905.4,
+   "rider": "Matt Frost",
+   "horse": "Lenika",
+   "scoreboard": "Fairfax Saddles Prix St Georges S...\n(419) Matt Frost\nLenika\nOwner Keeva Dedicoat"
+  },
+  {
+   "order": 24,
+   "start_sec": 12906.4,
+   "rider": "Danny Morgan",
+   "horse": "David Stone Foundation",
+   "scoreboard": "Fairfax Saddles PSG FS Gold\n(118) Danny Morgan\nDavid Stone Foundation\nOwner David Stone Foundation"
+  }
+ ]
+}

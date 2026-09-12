@@ -85,14 +85,16 @@ input, button, textarea { font-family: var(--font-body); }
   min-width: 0;
 }
 
-/* The Arenos lockup (notag, horizontal) is a wide mark — artwork bounds
-   815.912 x 211, roughly 3.87:1 — sitting in a 232px rail rather than a
-   full-width header. At 35px tall it wants about 136px of width, and the rail
-   leaves 172px once its 13px padding, the 8px gap and the 26px plus button are
-   taken out, so it clears the control beside it. object-fit keeps the ratio;
-   the cap is what stops a wider lockup from ever reaching the button. */
+/* The full horizontal lockup, tagline and all — artwork bounds 819.358 x 211,
+   roughly 3.88:1 — sitting in a 232px rail rather than a full-width header.
+   The rail leaves 172px once its 13px padding, the 8px gap and the 26px plus
+   button are taken out; at 42px tall this wants about 163px, so it clears the
+   control beside it. Taller than the untagged cut used to be at 35px because
+   there is a second line of type in it now, and a tagline set too small is
+   worse than no tagline. object-fit keeps the ratio; the cap is what stops a
+   wider lockup from ever reaching the button. */
 .brand-logo {
-  height: 35px;
+  height: 42px;
   width: auto;
   max-width: 172px;
   object-fit: contain;
@@ -867,6 +869,124 @@ button.tile:hover { border-color: var(--color-accent); }
   color: var(--color-neutral-600);
 }
 
+/* Jobs
+
+   The runs on the desk, as a table. These rules were deleted wholesale by the
+   edit that withdrew clip generation — the Jobs block sat next to the
+   reel's and went with it — so the card has been rendering as unstyled divs
+   since. They are restored here in the shape the table needs.
+
+   A table is the one place in this app that may scroll sideways: five columns
+   of a run do not fold into 400px, and stacking them would put us back where
+   we started. The wrapper scrolls, the page never does. */
+
+/* Still the row shape of the activity feed and of every card's empty state,
+   which are lists of one thing rather than tables. */
+.job { padding: 11px 12px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
+.job:last-child { border-bottom: 0; }
+.job-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+
+.job-table-wrap { overflow-x: auto; }
+
+.job-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.job-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+  white-space: nowrap;
+}
+
+.job-table td { padding: 9px 12px; vertical-align: top; }
+
+/* The line falls between jobs, never inside one. A run can be three rows — the
+   re-analyse form above it, an error under it — and a rule through the middle
+   of that would cut the message off the run it is about. Each job is its own
+   tbody, so "between jobs" is something the markup states rather than
+   something these rules have to infer from adjacency. */
+.job-group + .job-group > tr:first-child > td {
+  border-top: var(--rule-hair) solid var(--color-neutral-300);
+}
+/* A note under its own row is a continuation of it, so it opens with no gap.
+   One that opens a job — the re-analyse form — keeps its padding. */
+.job-row + .job-note > td { padding-top: 0; }
+
+.job-cell-name { min-width: 180px; }
+.job-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+
+.job-status {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-neutral-600);
+}
+.job-status[data-tone="running"] { color: var(--color-neutral-800); }
+.job-status[data-tone="failed"] { color: var(--color-accent-2); }
+
+.job-stage {
+  font-size: 11px;
+  color: var(--color-neutral-700);
+  line-height: 1.4;
+  min-width: 160px;
+}
+
+/* The events a recording produced, listed under it. A disclosure rather than
+   a popup: the next thing done with this list is opening one of them, and a
+   dialog that has to be dismissed first is in the way of that. */
+.job-cell-events { white-space: nowrap; }
+.job-events { padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.job-events-list { display: grid; gap: 8px; padding: 2px 0 4px; }
+.job-event-name { padding: 0; font-size: 12px; font-weight: 700; text-align: left; }
+.job-event-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-neutral-700);
+  margin-top: 2px;
+}
+
+/* The figure is the control. Underlined so a number in a table reads as
+   something to press rather than as data, and mono like every other figure. */
+.job-cell-progress { white-space: nowrap; }
+.job-progress { padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.job-pct { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.job-pct-none { color: var(--color-neutral-500); }
+
+.job-cell-actions { width: 1%; }
+.job-actions { display: flex; gap: 10px; align-items: baseline; white-space: nowrap; }
+
+.job-error {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 7px;
+  border-left: var(--rule) solid var(--color-accent-2);
+  background: var(--color-accent-2-100);
+  padding: 8px 10px;
+}
+.job-error p { font-size: 11px; line-height: 1.45; color: var(--color-accent-2-900); flex: 1; margin: 0; }
+
+/* The progress popup: a small dialog, not the player's full-viewport one. It
+   holds four stage meters and a bar, and a dialog sized to the screen for that
+   would be mostly empty. */
+.progress-body { padding: 14px 16px 20px; }
+.progress-state {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
 /* Progress */
 
 .meter { flex: 1; height: 4px; background: var(--color-neutral-300); }
@@ -1121,8 +1241,10 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 0 var(--space-4);
-  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  /* Room for the tagline cut to breathe. The plus button stays on its
+     centre line. */
+  min-height: 66px;
   border-bottom: var(--rule-hair) solid var(--color-neutral-300);
 }
 
@@ -1462,6 +1584,25 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
    Close. The title gives way rather than the buttons wrapping: a head that
    reflows as the title changes length moves the buttons under the cursor. */
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; padding-right: 12px; }
+
+/* The head is a title and its actions, not a toolbar: at the page's default
+   button size they crowded the title. One compact size for all of them. */
+.modal-head .btn-primary,
+.modal-head .btn-quiet,
+.modal-head .btn-ghost {
+  padding: 3px 10px;
+  font-size: 11.5px;
+}
+
+/* One width, but only where there is a set to be equal to. On the player the
+   head carries Download, Publish and Close and three lengths of word read as
+   three sizes of button; on the event record Close stands alone, and padding
+   it out to match buttons that are not there is just a wide Close. */
+.modal-head:has(#details-actions button) .btn-primary,
+.modal-head:has(#details-actions button) .btn-quiet,
+.modal-head:has(#details-actions button) .btn-ghost {
+  min-width: 74px;
+}
 #details .modal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .publish-panel { padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 6px; }
@@ -1940,17 +2081,21 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 /* Forty rides is a scroller, not a taller card: the rail is navigation, and a
    card that grows with the class buries the conversation it sits in. It runs
-   the full height of the pane beside it rather than stopping at its own
-   content — a rail half the height of what it controls reads as a list that
-   ended, and the empty ground under it belonged to nothing. `height: 100%`
-   with `min-height: 0` is what lets the tabs scroll inside a stretched grid
-   item; without the second, the rail grows instead of scrolling. */
+   the full height of the pane beside it and no further — a rail half the
+   height of what it controls reads as a list that ended, and one taller than
+   the moments it selects makes the board a different size for every rider.
+   The pane decides, because the pane is what is being read.
+
+   `height: 0` with `min-height: 100%` is what makes that true: a grid item
+   with a real height takes part in deciding the row's, so a class of forty
+   would stretch the board to forty rows and scroll nothing. At zero it takes
+   no part, and the minimum then stretches it to whatever the moments came
+   to. */
 .ride-rail {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  max-height: none;
+  height: 0;
+  min-height: 100%;
   padding: var(--space-3) var(--space-2) var(--space-4);
   background: var(--color-bg);
   border-right: var(--rule-hair) solid var(--color-rule);
@@ -2046,6 +2191,17 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .ride-tab[aria-selected="true"] .ride-found { color: var(--color-accent-700); }
 
 .ride-pane { min-width: 0; padding: 14px 20px 22px; }
+
+/* Four across, so a page of twelve is three rows exactly. The shared
+   `.tile-row` fills by width instead, which on a wide window fitted five and
+   on a narrow one three — and the board's height then changed with the window
+   rather than with what was in it, which is what the rail is measured
+   against. Under 900px it goes back to filling, because four across a half
+   card is four thumbnails nobody can see. */
+.ride-pane .tile-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+  .ride-pane .tile-row { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
 
 /* Who, how it scored, and the way into the whole ride. Wrapping rather than
    three fixed columns: the pane is half a card on a narrow window, and a grid
@@ -2215,9 +2371,15 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   cursor: pointer;
 }
 .seg-btn:hover { color: var(--color-text); }
+/* Which one is on has to survive a glance. A neutral-200 fill against a
+   neutral ground was a shade apart from the unselected pair, so the control
+   read as two labels rather than as a choice already made. This is the chip's
+   own selected language — accent edge, accent tint, accent text — reused
+   rather than a fourth way of saying the same thing. */
 .seg-btn[aria-pressed="true"] {
-  background: var(--color-neutral-200);
-  color: var(--color-text);
+  background: var(--color-accent-100);
+  box-shadow: inset 0 0 0 var(--rule-hair) var(--color-accent);
+  color: var(--color-accent-900);
   font-weight: 500;
 }
 
@@ -2481,60 +2643,26 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .rides-loading-board { grid-template-columns: 1fr; }
 }
 
-/* ── What is open ──────────────────────────────────────────────────────────
-   The rail is a list of conversations; this is the event under all of them,
-   marked by the accent down its inside edge — the same bar the open session
-   wears, because both answer "what am I looking at". It opens the event's
-   record, and greys out when there is no event to open. */
-.open-event {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  margin: 0 0 var(--space-3);
-  padding: 9px 12px 10px;
-  text-align: left;
-  background: var(--color-neutral-200);
-  border: var(--rule-hair) solid var(--color-rule);
-  border-left: 2px solid var(--color-accent);
-  color: var(--color-text);
-  font-family: var(--font-body);
-  cursor: pointer;
-}
-.open-event[data-open="false"] { border-left-color: var(--color-neutral-500); }
-.open-event:hover:not(:disabled) { border-color: var(--color-accent); border-left-color: var(--color-accent); }
-.open-event:disabled { cursor: default; }
-.open-event-label {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-accent-700);
-}
-.open-event[data-open="false"] .open-event-label { color: var(--color-neutral-600); }
-.open-event-title {
-  font-size: 12.5px;
-  font-weight: 700;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-.open-event-meta {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--color-neutral-700);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.open-event-meta:empty, .open-event-title:empty { display: none; }
-
 /* The same answer over the box the next question is typed into. One line,
-   quiet: it qualifies the question rather than competing with it. */
+   quiet: it qualifies the question rather than competing with it.
+
+   Aligned to the box below it, not to the card: the composer keeps a 48px
+   gutter and this had 2px of its own, so the label started forty-odd pixels to
+   the left of the box it is about and read as a stray line rather than as a
+   label on it. The gutter is the composer's own at every width — two numbers
+   that have to match, and they are set together here and in `.composer-inner`
+   because nothing else can keep them in step. */
 .composer-context {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  padding: 0 2px 6px;
+  /* Five above, six below: the line needs air off the transcript's last card
+     more than it needs it off the box, which it belongs to. */
+  padding: 5px 48px 6px;
   min-width: 0;
+}
+@media (max-width: 900px) {
+  .composer-context { padding-left: 20px; padding-right: 20px; }
 }
 .composer-context-label {
   font-family: var(--font-mono);

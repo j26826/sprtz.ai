@@ -29,7 +29,7 @@ export const THEMES = {
    */
   'arenos-dark': {
     name: 'Arenos Dark',
-    logo: '/assets/arenos-lockup-notag-on-dark.svg',
+    logo: '/assets/arenos-lockup-tagline-on-dark.svg',
     logoSignin: '/assets/arenos-lockup-tagline-on-dark.svg',
     tokens: {},
   },
@@ -49,7 +49,7 @@ export const THEMES = {
    */
   'arenos-light': {
     name: 'Arenos Light',
-    logo: '/assets/arenos-lockup-notag-on-light.svg',
+    logo: '/assets/arenos-lockup-tagline-on-light.svg',
     logoSignin: '/assets/arenos-lockup-tagline-on-light.svg',
     tokens: {
       '--color-bg': '#F6F4EF',
