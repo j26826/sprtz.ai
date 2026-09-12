@@ -1048,7 +1048,6 @@ function momentTile(m, opts = {}) {
 
   return `
     <div class="tile">
-      <span class="tile-beta" aria-hidden="true"><span>${esc(t('preview.badge'))}</span></span>
       <button class="thumb" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-play="${esc(m.momentId)}"`}
               title="${esc(t('moment.play'))}" aria-label="${esc(`${t('moment.play')}: ${m.summary || kind}`)}"
               ${m.thumbUri && !state.thumbs.urls[m.momentId]
@@ -1057,6 +1056,7 @@ function momentTile(m, opts = {}) {
         ${state.thumbs.urls[m.momentId]
           ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
           : '<span class="thumb-stripes"></span>'}
+        <span class="tile-beta" aria-hidden="true"><span>${esc(t('preview.badge'))}</span></span>
         <span class="thumb-play" aria-hidden="true"></span>
         <span class="thumb-clock">${clock(m.startSec)}</span>
       </button>
