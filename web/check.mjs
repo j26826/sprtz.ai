@@ -283,6 +283,41 @@ for (const sheet of ['src/app.css', 'src/ds/styles.css']) {
   }
 }
 
+/* ── every design token a stylesheet reads is a token something defines ───── */
+
+// A `var(--x)` with no fallback, where --x is defined nowhere, does not fall
+// back to a default: it makes the whole declaration invalid and the browser
+// throws the property away. `padding: 8px 13px var(--space-5)` cost the reel
+// editor *all* of its padding, in every direction, because the scale runs
+// 3/5/8/13/21/34 as --space-1,2,3,4,6,8 and has no 5. Nothing failed, nothing
+// logged; the panel simply sat against the window edge.
+//
+// A token set behind a theme or a media query still counts as defined —
+// applyTheme writes the overlay onto the root at runtime, so what matters is
+// that the name exists somewhere, not which block it sits in.
+{
+  const sheets = ['src/app.css', 'src/ds/styles.css'];
+  const defined = new Set();
+  const bodies = [];
+  for (const sheet of sheets) {
+    const css = read(sheet).replace(/\/\*[\s\S]*?\*\//g, ' ');
+    bodies.push([sheet, css]);
+    for (const [, name] of css.matchAll(/(--[A-Za-z0-9-]+)\s*:/g)) defined.add(name);
+  }
+  // settings.js carries the light theme's overlay, applied onto the root.
+  for (const [, name] of read('src/settings.js').matchAll(/'(--[A-Za-z0-9-]+)'\s*:/g)) {
+    defined.add(name);
+  }
+
+  for (const [sheet, css] of bodies) {
+    for (const [, name, fallback] of css.matchAll(/var\(\s*(--[A-Za-z0-9-]+)\s*(,)?/g)) {
+      if (fallback || defined.has(name)) continue;
+      fail(`${sheet} reads ${name}, which nothing defines and which has no `
+        + 'fallback — the whole declaration is dropped');
+    }
+  }
+}
+
 if (failures.length) {
   console.error(`web/check.mjs found ${failures.length} problem(s):`);
   for (const message of failures) console.error(`  - ${message}`);

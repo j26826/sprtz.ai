@@ -2057,8 +2057,10 @@ function trimStrip({ startMs, endMs, detectedStartMs, detectedEndMs, thumb, scop
                     aria-label="${esc(t('reel.later'))}">+</button>
           </span>`).join('')}
         <span class="trim-ranges">
-          <span>${esc(t('trim.detected'))} <b>${esc(msClock(detectedEndMs - detectedStartMs))}</b></span>
-          <span>${esc(t('trim.trimmed'))} <b class="trim-len">${esc(msClock(endMs - startMs))}</b></span>
+          <span><span class="k">${esc(t('trim.detected'))}</span>
+            <b>${esc(msClock(detectedEndMs - detectedStartMs))}</b></span>
+          <span><span class="k">${esc(t('trim.trimmed'))}</span>
+            <b>${esc(msClock(endMs - startMs))}</b></span>
         </span>
         ${moved ? `<button class="link-btn trim-reset" data-${
     scope === 'cut' ? `reel-trim-reset="${index}"` : 'trim-reset'}>${

@@ -2833,27 +2833,43 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   display: grid;
   place-items: center;
   padding: 0;
-  border: var(--rule-hair) solid var(--color-neutral-500);
   border-radius: var(--radius-sm);
-  /* Over a picture, not over the card: it needs its own ground or it is
-     legible on a dark frame and invisible on a bright one. */
-  background: rgba(17, 17, 17, 0.55);
+  /* The same two literals the play button on this same frame uses, and for
+     the same reason: a thumbnail is dark under either theme, so a control on
+     it takes the video's ground rather than the page's. The first version
+     used --color-neutral-500 here, which is a theme grey over a photograph —
+     it read as a smudge on the picture rather than as a control. */
+  background: rgba(0, 0, 0, 0.45);
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
   cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
 }
+/* A drawn tick, not a filled box. It is invisible until the tile is hovered
+   or picked: an empty box on every tile is a page of empty boxes, and the
+   ring alone is enough to say "there is something to press here". */
 .tile-pick > span {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  background: transparent;
+  width: 9px;
+  height: 5px;
+  margin-top: -2px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg);
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
-.tile-pick:hover { border-color: var(--color-accent); }
+.tile:hover .tile-pick > span,
+.tile-pick:focus-visible > span { opacity: 0.55; }
 .tile-pick[aria-pressed="true"] {
   background: var(--color-accent);
   border-color: var(--color-accent);
 }
 .tile-pick[aria-pressed="true"] > span {
+  opacity: 1;
   /* Ink on amber, never white. */
-  background: var(--color-on-accent);
+  border-color: var(--color-on-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-pick, .tile-pick > span { transition: none; }
 }
 .tile[aria-current="true"] { border-color: var(--color-accent); }
 
@@ -2873,8 +2889,10 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-size: 11px;
   color: var(--color-neutral-700);
 }
+/* The Build button beside it is already the amber on this bar; a second one
+   two words away is amber competing with itself. */
 .reel-bar[data-picked="true"] .reel-bar-count {
-  color: var(--color-accent-700);
+  color: var(--color-text);
   font-weight: 500;
 }
 .reel-bar-actions { display: flex; gap: var(--space-2); margin-left: auto; }
@@ -2908,7 +2926,11 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 .reel-stage, .reel-cuts { min-height: 0; overflow-y: auto; }
 .reel-cuts { border-left: var(--rule-hair) solid var(--color-rule); padding: var(--space-3); }
-.reel-under { padding: var(--space-3) var(--space-4) var(--space-5); }
+/* The trim strip, the reel's name and the shape panel all sit in here, and
+   all of them were flush against the window edge: this padding named
+   --space-5, which the scale does not have (3, 5, 8, 13, 21, 34 are
+   --space-1,2,3,4,6,8), and one invalid value voids the whole declaration. */
+.reel-under { padding: var(--space-4) var(--space-6) var(--space-6); }
 
 .reel-meta { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
 .reel-meta-facts {
@@ -2918,7 +2940,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-size: 11px;
   color: var(--color-neutral-700);
 }
-.reel-len { color: var(--color-accent-700); }
+.reel-len { color: var(--color-neutral-800); }
 
 .reel-cuts-head {
   display: flex;
@@ -3001,6 +3023,8 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   color: var(--color-neutral-700);
   margin-right: var(--space-2);
 }
+/* Ready is the one state worth the accent here: it is the difference between
+   a reel you can cut shapes from and one you cannot. */
 .reel-render-state[data-state="ready"] { color: var(--color-accent-700); }
 
 @media (max-width: 900px) {
@@ -3123,31 +3147,45 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   min-width: 68px;
   text-align: center;
 }
+/* The two readings as a pair, label over value, so the numbers line up under
+   each other and can be compared at a glance — which is the whole reason both
+   are shown. They were on one line at different widths, so they could not be.
+   Both values take the same colour: they are the same kind of reading, and
+   colouring one of them amber said "changed" in a second, quieter voice than
+   the Reset link and the row's own mark already say it. */
 .trim-ranges {
-  display: inline-flex;
-  gap: var(--space-3);
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 0 var(--space-4);
   white-space: nowrap;
-  font-size: 11px;
+}
+.trim-ranges > span { display: grid; gap: 2px; }
+.trim-ranges .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--color-neutral-600);
 }
-.trim-ranges > span { display: inline-flex; gap: 5px; }
 .trim-ranges b {
   font-family: var(--font-mono);
+  font-size: 11.5px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--color-neutral-800);
 }
-.trim-len { color: var(--color-accent-700) !important; }
 .trim-reset { margin-left: auto; }
 
 /* The strip's head carries the nudge step, since that is the fine end of the
    same control the handles are the coarse end of. */
 .trim-card-head-right { display: inline-flex; align-items: center; gap: var(--space-3); }
+/* A reading, not an action: the mono says it is measured, and the colour is
+   the same as every other measured thing on the panel. */
 .reel-cuts-total {
   font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--color-accent-700);
+  color: var(--color-neutral-800);
 }
 /* A row says it was trimmed; the strip above says by how much. */
 .reel-edge-trimmed {
@@ -3155,7 +3193,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--color-accent-700);
+  color: var(--color-neutral-700);
 }
 
 /* ── Cutting the reel to another shape ────────────────────────────────────
@@ -3225,7 +3263,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-family: var(--font-mono);
   font-size: 10px;
   padding: 2px 7px;
-  border: var(--rule-hair) solid var(--color-accent-300);
+  border: var(--rule-hair) solid var(--color-rule);
   border-radius: var(--radius-sm);
-  color: var(--color-accent-700);
+  color: var(--color-neutral-700);
 }
