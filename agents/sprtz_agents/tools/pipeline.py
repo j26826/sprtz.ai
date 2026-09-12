@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import re
 import time
 from typing import Any
 
@@ -1077,7 +1078,12 @@ def _classes_for(job: dict, game: GameDetails, context_urls: list[str],
         arena = arena or str(job.get("arena") or "")
         show, classes = equipe.find_classes(
             job=job, context_urls=context_urls or [], arena=arena,
-            competition=game.competition or game.title, discipline=game.discipline)
+            # What this recording already worked out, when it has. After a
+            # split `competition` is the class's name rather than the show's,
+            # so searching on it finds nothing at all.
+            show_id=int(getattr(game, "show_id", 0) or 0),
+            competition=game.show_title or game.competition or game.title,
+            discipline=game.discipline)
         if show is not None and not arena:
             guess = equipe.pick_arena(show, equipe.local_day(equipe.recording_started(job), show),
                                       rides)
@@ -1404,6 +1410,31 @@ async def _store_classes(job_id: str, game: GameDetails, runs: list[Any],
                 classes=len(runs))
 
 
+_CAMEL = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _snake_keys(record: dict[str, Any]) -> dict[str, Any]:
+    """A stored game record's keys as the schema spells them.
+
+    The catalog hands a game back in the shape the *document* is in — camelCase,
+    `homeTeam` and `showId` and `disciplineConfidence` — and `GameDetails` is
+    snake_case and ignores what it does not recognise. So validating one
+    against the other silently kept the single-word fields and dropped every
+    other: a re-split rebuilt the record without its teams, its final score,
+    its grounded values or the id of the show it belongs to, and nothing said
+    so because pydantic's job here is to fill in defaults.
+
+    Both spellings are kept, since a caller that already speaks snake_case is
+    unharmed by the camelCase twin sitting beside it.
+    """
+    out = dict(record)
+    for key, value in record.items():
+        snake = _CAMEL.sub("_", key).lower()
+        if snake != key and snake not in out:
+            out[snake] = value
+    return out
+
+
 async def split_event_classes(job_id: str, arena: str = "") -> dict:
     """Split a recording that was stored as one event into the classes it held.
 
@@ -1450,7 +1481,7 @@ async def split_event_classes(job_id: str, arena: str = "") -> dict:
         "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
 
     game = GameDetails.model_validate({
-        **{k: v for k, v in found.items() if k not in ("status", "type")},
+        **_snake_keys({k: v for k, v in found.items() if k not in ("status", "type")}),
         "job_id": job_id,
         "rides": rides.get("rides") or [],
     })

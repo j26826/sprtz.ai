@@ -201,3 +201,85 @@ class TestMatchingARider:
         assert not equipe._same_person("Greg Sims", "Greg Simmons")
         assert not equipe._same_person("Laura Tomlinson", "Laura Thomlinson")
         assert not equipe._same_person("", "Greg Sims")
+
+
+class TestASplitCanBeRunTwice:
+    """Splitting writes each class's own name over the recording's competition.
+
+    That is right — the event *is* the class now — but it means a second split
+    searched a thousand shows for "D&H INTER I SILVER CHAMPIONSHIP" and found
+    none, because that is a class and the list is of shows. So the first split
+    worked and every one after it quietly changed nothing, reporting that the
+    show could not be found on a timetable whose id the record was carrying.
+    """
+
+    def _transport(self, seen):
+        def get(url, timeout=20):
+            seen.append(url)
+            if "/schedule" in url:
+                return SCHEDULE
+            raise AssertionError(f"the show list should not be needed: {url}")
+        return get
+
+    def test_the_stored_show_id_is_used_and_nothing_is_searched(self):
+        seen = []
+        job = {"live": {"eventStart": "2026-09-12T07:13:00+00:00"}}
+        show, classes = equipe.find_classes(
+            job=job, context_urls=[], show_id=82348, arena=CAMERA,
+            # What a record carries after one split: a class, not a show.
+            competition="D&H INTER I SILVER CHAMPIONSHIP - FEI Intermediate I 2009",
+            get=self._transport(seen))
+        assert show is not None and show.show_id == 82348
+        assert [c.class_id for c in classes] == [1278778, 1278779, 1278780]
+        assert all("/schedule" in url for url in seen), seen
+
+    def test_a_class_name_finds_no_show_at_all(self):
+        # Why the stored id has to win: this is the search the second split was
+        # doing, and there is no show by that name because it is not a show.
+        shows = equipe.parse_shows([
+            {"id": 82348, "name": "LeMieux National Dressage Championships 2026",
+             "start_on": "2026-09-10", "end_on": "2026-09-13"},
+        ])
+        assert equipe.pick_show(
+            shows, on="2026-09-12", discipline="Dressage",
+            name_hint="D&H INTER I SILVER CHAMPIONSHIP - FEI Intermediate I 2009") is None
+        # The show's own name still finds it, which is what a first split has.
+        assert equipe.pick_show(
+            shows, on="2026-09-12", discipline="Dressage",
+            name_hint="LeMieux National Dressage Championships") is not None
+
+
+class TestTheRecordReachesTheSchema:
+    """The catalog hands a game back in the document's shape, not the schema's.
+
+    camelCase against a snake_case model that ignores what it does not know, so
+    validating one against the other kept the single-word fields and dropped
+    every other. A re-split rebuilt the record without its teams, its final
+    score, its grounded values or the id of the show it belongs to — and
+    nothing said so, because filling in defaults is what pydantic is for.
+    """
+
+    def test_every_camel_case_field_survives(self):
+        from sprtz_agents.schemas import GameDetails
+        from sprtz_agents.tools.pipeline import _snake_keys
+
+        stored = {
+            "jobId": "x", "sport": "equestrian", "showId": 82348,
+            "showTitle": "LeMieux National Dressage Championships",
+            "homeTeam": "A", "awayTeam": "B", "finalScore": "1-0",
+            "disciplineConfidence": 0.9, "groundedVenue": "Somerford Park Farm",
+            "classNo": "13", "testName": "Grand Prix", "resultsFinal": True,
+        }
+        game = GameDetails.model_validate({**_snake_keys(stored), "job_id": "x", "rides": []})
+        assert game.show_id == 82348
+        assert game.show_title == "LeMieux National Dressage Championships"
+        assert (game.home_team, game.away_team, game.final_score) == ("A", "B", "1-0")
+        assert game.discipline_confidence == 0.9
+        assert game.grounded_venue == "Somerford Park Farm"
+        assert (game.class_no, game.test_name, game.results_final) == ("13", "Grand Prix", True)
+
+    def test_a_caller_already_speaking_snake_case_is_unharmed(self):
+        from sprtz_agents.tools.pipeline import _snake_keys
+        assert _snake_keys({"show_id": 1})["show_id"] == 1
+        # The camelCase twin never overwrites a value that is already there.
+        assert _snake_keys({"show_id": 1, "showId": 2})["show_id"] == 1

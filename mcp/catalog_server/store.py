@@ -489,6 +489,11 @@ def _game_out(data: dict[str, Any]) -> dict[str, Any]:
         "testName": data.get("testName", ""),
         "resultsFinal": data.get("resultsFinal", False),
         "showTitle": data.get("showTitle", ""),
+        # The show this recording was settled as, so a reader does not have to
+        # search a thousand of them for it again. Splitting writes each class's
+        # own name over `competition`, which leaves the name useless as a
+        # search term afterwards and this id as the only way back.
+        "showId": data.get("showId", 0),
         "showUrl": data.get("showUrl", ""),
         "equipeUrl": data.get("equipeUrl", ""),
         "judges": data.get("judges", []),
