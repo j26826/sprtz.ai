@@ -184,20 +184,33 @@ def _first_sheet(sheets: Any) -> dict:
 
 
 def parse_time(value: Any) -> datetime.datetime | None:
-    """Equipe's times, which carry a zone: "2026-09-11 15:20:00 +0100"."""
+    """Equipe's times, which carry a zone: "2026-09-11 15:20:00 +0100".
+
+    **The offset is kept, not normalised away.** An aware datetime is the same
+    instant however it is written, so every comparison and every subtraction
+    below is unaffected — but the zone it was written in is the show's own, and
+    that is the only thing that can say which *day* a class is on. This used to
+    convert to UTC on the way in, and a competition day is local: a class at
+    00:30 BST is 23:30 UTC the day before, so a recording that starts then is
+    of tomorrow's classes by the timetable and yesterday's by the clock we had
+    kept. `show_offset` reads the zone back off these times.
+
+    A time with no offset at all is taken as UTC, which is what our own
+    timestamps are.
+    """
     if not value:
         return None
     text = str(value).strip()
     for shape in ("%Y-%m-%d %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M %z"):
         try:
-            return datetime.datetime.strptime(text, shape).astimezone(datetime.UTC)
+            return datetime.datetime.strptime(text, shape)
         except ValueError:
             continue
     try:
         parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return parsed.astimezone(datetime.UTC) if parsed.tzinfo else parsed.replace(tzinfo=datetime.UTC)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.UTC)
 
 
 # What a timetable abbreviates and a broadcast spells out, or the other way
@@ -315,15 +328,97 @@ def _covers(show: Show, day: str) -> bool:
     return bool(start and end and start <= day <= end)
 
 
-def classes_on(show: Show, day: str) -> list[ShowClass]:
-    """The show's classes for one day, in the order they were due to run."""
-    if not day:
-        return list(show.classes)
-    return [c for c in show.classes if (c.date or "") == day or _same_day(c.start_at, day)]
+def show_offset(show: Show) -> datetime.timezone:
+    """The clock the show keeps, taken from the times it publishes.
+
+    Equipe stamps every class with an explicit offset — "2026-09-12 07:53:00
+    +0100" — so the show tells us its own zone and there is no need for a
+    timezone database or a guess from the country. A show with no timed class
+    at all keeps UTC, which changes nothing for it.
+
+    It matters because a competition day is a *local* day. A class at 00:30 BST
+    is 23:30 UTC the day before, and a recording that starts then is of
+    tomorrow's classes by the timetable and yesterday's by a UTC clock.
+    """
+    for c in show.classes:
+        if c.start_at and c.start_at.utcoffset() is not None:
+            return c.start_at.tzinfo  # type: ignore[return-value]
+    return datetime.UTC
 
 
-def _same_day(at: datetime.datetime | None, day: str) -> bool:
-    return bool(at) and at.date().isoformat() == day
+def local_day(at: datetime.datetime | None, show: Show) -> str:
+    """The show's own date for an instant, as Equipe dates its days."""
+    if not at:
+        return ""
+    return at.astimezone(show_offset(show)).date().isoformat()
+
+
+def classes_on(show: Show, day: str, arena: str = "") -> list[ShowClass]:
+    """The show's classes for one day and one arena, in the order they ran.
+
+    **The arena is not a detail, it is the whole candidate set.** A
+    championship runs several rings at once — LeMieux ran three — and a fixed
+    camera is pointed at exactly one of them. Handed every class of the day,
+    the clock rule below places each ride under whichever class started most
+    recently *anywhere on the showground*, which on 12 September filed
+    thirty-one of thirty-six rides from the LeMieux Arena under two Vector
+    Arena classes. The rule is sound; it was being asked a question about a
+    ring it had not been told about.
+
+    An empty arena means every ring, which is right for a one-ring show and for
+    a caller that has no idea — but `assign_classes` should be given one ring's
+    classes or the clock is meaningless.
+
+    The day is compared in the show's own clock on both sides. `date` comes
+    from the API as a local date and `start_at` was converted to UTC on the way
+    in, so comparing one against a UTC day and the other against a local one —
+    which is what this did — is two different questions joined by `or`.
+    """
+    picked = list(show.classes)
+    if day:
+        picked = [c for c in picked
+                  if (c.date or "") == day or local_day(c.start_at, show) == day]
+    if arena:
+        picked = [c for c in picked if same_arena(c.arena, arena)]
+    return picked
+
+
+# An arena name is two or three words and one of them is the ring's own
+# ("LeMieux Arena", "Vector Arena"). Someone naming it will type that word and
+# not always the rest, so a name that contains the other is the same ring —
+# and the fuzzy bar is only there for a typo, not to bridge two real rings.
+ARENA_MATCH = 0.82
+
+
+def same_arena(left: str, right: str) -> bool:
+    """Whether two arena names mean the same ring.
+
+    Lenient about the word "arena" and about which half was typed, strict about
+    everything else: filing a day under the wrong ring is the failure this
+    whole argument exists to stop, so "Vector" must never answer for "Kudos".
+    """
+    a, b = normalise(left), normalise(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    # Whole-word containment, so "lemieux" finds "lemieux arena" but "vector"
+    # cannot find "vectra" by being a prefix of it.
+    if f" {a} " in f" {b} " or f" {b} " in f" {a} ":
+        return True
+    return same_name(left, right) >= ARENA_MATCH
+
+
+def arenas_on(show: Show, day: str) -> list[str]:
+    """The rings this show ran on one day, in the order they first appear.
+
+    What an editor picks from when they say which one the camera is on.
+    """
+    seen: list[str] = []
+    for c in classes_on(show, day):
+        if c.arena and c.arena not in seen:
+            seen.append(c.arena)
+    return seen
 
 
 # --- Fetching -----------------------------------------------------------------
@@ -521,13 +616,19 @@ def day_of(job: dict, started: datetime.datetime | None) -> str:
 
 
 def find_classes(*, job: dict, context_urls: list[str], competition: str = "",
-                 discipline: str = "", get=None) -> tuple[Show | None, list[ShowClass]]:
+                 discipline: str = "", arena: str = "",
+                 get=None) -> tuple[Show | None, list[ShowClass]]:
     """The show this recording is of, and the classes it ran that day.
 
     An editor's own link is the strongest signal and costs one request; without
     one, the day and the name read off the screen choose between the shows that
     ran. Either can come back with nothing, and nothing is a perfectly good
     answer: the recording then stays one event, as it was before any of this.
+
+    `arena` narrows the classes to the one ring the camera is on, and at a
+    championship that is not optional — see `classes_on`. Empty means every
+    ring, which is right for a one-ring show; the caller is expected to have
+    asked `pick_arena` first when nobody named one.
     """
     started = recording_started(job)
     day = day_of(job, started)
@@ -547,7 +648,46 @@ def find_classes(*, job: dict, context_urls: list[str], competition: str = "",
     show = fetch_schedule(show_id, get=get)
     if show is None:
         return None, []
-    return show, classes_on(show, day)
+    # Now that the show's own clock is known, ask again which day this is. The
+    # day above was UTC, which is all that was available to choose a show by
+    # and is good enough for that — a show spans days. A class does not.
+    if started:
+        day = local_day(started, show) or day
+    return show, classes_on(show, day, arena=arena)
+
+
+def pick_arena(show: Show, day: str, rides: list[dict]) -> str:
+    """Which ring a recording is of, read off what its scoreboards said.
+
+    The fallback for a recording nobody named a ring for. Every arena's classes
+    are scored against every ride's caption and the best total wins, so one
+    card naming one class decides nothing on its own but a day of them does.
+
+    Deliberately all-or-nothing: with no caption anywhere naming any class
+    there is no evidence, and the honest answer is no arena — which leaves the
+    day unsplit rather than split by a coin toss. A day filed as one event is
+    what it was before any of this existed and is recoverable in one tool call;
+    a day filed under the wrong ring looks finished and is not.
+    """
+    totals: dict[str, float] = {}
+    for arena in arenas_on(show, day):
+        here = classes_on(show, day, arena=arena)
+        best = 0.0
+        for ride in rides or []:
+            named, score = _class_named_in(ride, here)
+            if named is not None and score >= CAPTION_MATCH:
+                best += score
+        totals[arena] = best
+    ranked = sorted(totals.items(), key=lambda pair: pair[1], reverse=True)
+    if not ranked or ranked[0][1] <= 0:
+        return ""
+    # One ring has to beat the next by the same margin a caption needs to beat
+    # the clock, or two rings running near-identical classes — a Gold and a
+    # Silver of one championship, which is exactly what this show runs — would
+    # be decided by noise.
+    if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < CAPTION_MARGIN:
+        return ""
+    return ranked[0][0]
 
 
 # --- Results: what was actually scored ----------------------------------------

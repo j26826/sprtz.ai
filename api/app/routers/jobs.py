@@ -448,6 +448,15 @@ class LiveEventRequest(BaseModel):
     # scheduled end is the closer limit anyway.
     stall_minutes: float = Field(default=5, ge=1, le=240)
     context_urls: list[str] = Field(default_factory=list)
+    # Which ring the camera is on. A championship runs several at once and a
+    # fixed camera points at exactly one, so this is what decides which of the
+    # day's classes a recording can possibly hold — without it, rides get filed
+    # under classes in arenas the camera never saw. Free text matched against
+    # the names the show publishes, because an editor types "LeMieux" and the
+    # timetable says "LeMieux Arena". Empty means the scoreboards are asked
+    # instead, and a showground with several rings and no answer stays one
+    # event rather than being split by a guess.
+    arena: str = Field(default="", max_length=120)
 
     @field_validator("hls_url")
     @classmethod
@@ -509,6 +518,7 @@ async def create_live_event(
             "content_type": "application/vnd.apple.mpegurl",
             "metadata_language": body.metadata_language,
             "context_urls": body.context_urls,
+            "arena": body.arena,
             "kind": "live",
             "hls_url": body.hls_url,
             "event_start": body.event_start.isoformat(),
@@ -700,6 +710,7 @@ class LiveBookingRequest(BaseModel):
     metadata_language: str | None = Field(default=None, max_length=8)
     stall_minutes: float | None = Field(default=None, ge=1, le=240)
     context_urls: list[str] | None = None
+    arena: str | None = Field(default=None, max_length=120)
 
     @field_validator("hls_url")
     @classmethod
@@ -783,6 +794,8 @@ async def update_live_booking(
         changes["stall_minutes"] = body.stall_minutes
     if body.context_urls is not None:
         changes["context_urls"] = body.context_urls
+    if body.arena is not None:
+        changes["arena"] = body.arena
 
     result = await clients.call_mcp(
         "catalog", "update_live_booking", {"job_id": job_id, **changes})

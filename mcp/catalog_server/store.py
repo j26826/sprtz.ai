@@ -836,7 +836,8 @@ def rename_job(job_id: str, title: str) -> dict[str, Any]:
 def update_live_booking(job_id: str, event_start: str = "", event_end: str = "",
                         hls_url: str = "", title: str = "", sport: str = "",
                         metadata_language: str = "", stall_minutes: float = 0,
-                        context_urls: list[str] | None = None) -> dict[str, Any]:
+                        context_urls: list[str] | None = None,
+                        arena: str | None = None) -> dict[str, Any]:
     """Correct a live event that has not started yet.
 
     A booking is made hours ahead, and the window and the playlist URL are the
@@ -881,6 +882,8 @@ def update_live_booking(job_id: str, event_start: str = "", event_end: str = "",
         patch["live.stallMinutes"] = float(stall_minutes)
     if context_urls is not None:
         patch["contextUrls"] = list(context_urls)
+    if arena is not None:
+        patch["arena"] = arena
     if not patch:
         return {"job_id": job_id, "changed": []}
 
@@ -975,7 +978,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                kind: str = "upload", hls_url: str = "",
                event_start: str = "", event_end: str = "",
                chunk_sec: int = 0,
-               title_source: str = "derived",
+               title_source: str = "derived", arena: str = "",
                stall_minutes: float = 0) -> dict[str, Any]:
     """Open a job. Three kinds, told apart by where the video comes from.
 
@@ -1005,6 +1008,13 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         # grounding, not a fetch target: the Equipe pages it will usually name
         # are JavaScript shells, and what they steer is the search.
         "contextUrls": list(context_urls or []),
+        # Which ring the camera is on, when someone knew. A championship runs
+        # several at once and a fixed camera points at one, so this decides
+        # which of a day's classes the recording can possibly hold. Free text:
+        # it is matched against the names the show publishes rather than being
+        # one of them, because an editor types "LeMieux" and Equipe says
+        # "LeMieux Arena".
+        "arena": arena or "",
         "status": "scheduled" if kind == "live" else "uploaded",
         "stage": "live" if kind == "live" else "ingest",
         "progress": 0,

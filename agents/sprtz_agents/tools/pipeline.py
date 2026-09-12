@@ -1062,13 +1062,36 @@ def _classes_for(job: dict, game: GameDetails, context_urls: list[str]) -> list[
     of this, so nothing here is allowed to be fatal.
     """
     try:
+        rides = [dict(r) for r in game.rides]
+        # Which ring the camera is on. A championship runs several at once —
+        # LeMieux ran three — and the clock rule below places a ride under
+        # whichever class started most recently *anywhere on the showground*,
+        # so without this a fixed camera's rides are filed under classes in
+        # arenas it never pointed at. Thirty-one of thirty-six were, on the
+        # twelfth. What someone typed on the booking wins; failing that the
+        # scoreboards are asked, and failing that the day stays one event.
+        arena = str(job.get("arena") or "")
         show, classes = equipe.find_classes(
-            job=job, context_urls=context_urls or [],
+            job=job, context_urls=context_urls or [], arena=arena,
             competition=game.competition or game.title, discipline=game.discipline)
+        if show is not None and not arena:
+            guess = equipe.pick_arena(show, equipe.local_day(equipe.recording_started(job), show),
+                                      rides)
+            if guess:
+                logger.info("no arena on %s; the scoreboards say %s", job.get("job_id"), guess)
+                classes = equipe.classes_on(
+                    show, equipe.local_day(equipe.recording_started(job), show), arena=guess)
+            elif len({c.arena for c in classes if c.arena}) > 1:
+                # Several rings and nothing to choose between them. One event is
+                # recoverable in a tool call; a day filed under the wrong ring
+                # looks finished and is not.
+                logger.warning("%s ran across %d arenas and none was named; leaving it as one event",
+                               job.get("job_id"), len({c.arena for c in classes if c.arena}))
+                return []
         if not classes:
             return []
         runs = equipe.assign_classes(
-            [dict(r) for r in game.rides], classes,
+            rides, classes,
             recorded_from=equipe.recording_started(job))
         for run in runs:
             run.show = show

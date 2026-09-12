@@ -33,7 +33,8 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                metadata_language: str = "en", context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "", event_start: str = "",
                event_end: str = "", chunk_sec: int = 0,
-               title_source: str = "derived", stall_minutes: float = 0) -> dict:
+               title_source: str = "derived", arena: str = "",
+               stall_minutes: float = 0) -> dict:
     """Open a new analysis job for an uploaded video, an HLS URL, or a live event.
 
     Args:
@@ -56,6 +57,9 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         title_source: "editor" when a person typed the title, "derived" when it
             was taken off a filename or a URL. The editor's own name wins over
             the title the game record would compose for itself.
+        arena: Which ring the camera is on, for a showground that runs several
+            at once. Decides which of a day's classes the recording can hold;
+            empty asks the scoreboards instead.
         stall_minutes: For a live event, how long a stream that was flowing may
             produce nothing before the event is finished. 0 waits for event_end.
     """
@@ -64,7 +68,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
             job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
             content_type, metadata_language, context_urls or [],
             kind, hls_url, event_start, event_end, chunk_sec,
-            title_source=title_source, stall_minutes=stall_minutes)}
+            title_source=title_source, arena=arena, stall_minutes=stall_minutes)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
 
@@ -364,7 +368,8 @@ def list_moments(job_id: str, limit: int, min_score: float) -> dict:
 def update_live_booking(job_id: str, event_start: str = "", event_end: str = "",
                         hls_url: str = "", title: str = "", sport: str = "",
                         metadata_language: str = "", stall_minutes: float = 0,
-                        context_urls: list[str] | None = None) -> dict:
+                        context_urls: list[str] | None = None,
+                        arena: str | None = None) -> dict:
     """Change a live event's booking, before it starts.
 
     Args:
@@ -377,12 +382,13 @@ def update_live_booking(job_id: str, event_start: str = "", event_end: str = "",
         metadata_language: New metadata language, or empty to leave it.
         stall_minutes: New stall limit, or 0 to leave it.
         context_urls: Replacement context links, or null to leave them.
+        arena: New arena, or null to leave it. Empty string clears it.
     """
     try:
         return {"status": "success", **store.update_live_booking(
             job_id, event_start=event_start, event_end=event_end, hls_url=hls_url,
             title=title, sport=sport, metadata_language=metadata_language,
-            stall_minutes=stall_minutes, context_urls=context_urls)}
+            stall_minutes=stall_minutes, context_urls=context_urls, arena=arena)}
     except (KeyError, ValueError) as exc:
         return {"status": "error", "error": str(exc), "job_id": job_id}
     except Exception as exc:  # noqa: BLE001
