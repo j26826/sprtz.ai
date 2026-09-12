@@ -888,11 +888,20 @@ button.tile:hover { border-color: var(--color-accent); }
 
 .job-table-wrap { overflow-x: auto; }
 
+/* Each job is its own panel. The rows stay one table, so the columns still
+   line up down the page and the header still names them — but `separate`
+   collapsing with a vertical gap gives every job its own box, and a run with
+   an error or a list of events under it is visibly one thing rather than rows
+   that happen to be adjacent. A table cannot take a border on its row group in
+   any useful way, so the box is drawn on the cells: top and bottom on the
+   first and last row of the group, sides on the first and last cell of each. */
 .job-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0 10px;
   font-size: 12px;
 }
+.job-table thead th { padding-bottom: 0; }
 
 .job-table th {
   text-align: left;
@@ -909,14 +918,33 @@ button.tile:hover { border-color: var(--color-accent); }
 
 .job-table td { padding: 9px 12px; vertical-align: top; }
 
-/* The line falls between jobs, never inside one. A run can be three rows — the
-   re-analyse form above it, an error under it — and a rule through the middle
-   of that would cut the message off the run it is about. Each job is its own
-   tbody, so "between jobs" is something the markup states rather than
-   something these rules have to infer from adjacency. */
-.job-group + .job-group > tr:first-child > td {
+/* The panel itself. Each job is its own tbody, so "this job" is something the
+   markup states rather than something these rules have to infer from
+   adjacency — which matters because a run can be three rows and none of the
+   boundaries between them are a boundary between jobs. */
+.job-group > tr > td {
+  background: var(--color-neutral-100);
   border-top: var(--rule-hair) solid var(--color-neutral-300);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
 }
+/* Only the outside of the panel is drawn: the rows inside it are one job. */
+.job-group > tr:not(:first-child) > td { border-top: 0; }
+.job-group > tr:not(:last-child) > td { border-bottom: 0; }
+.job-group > tr > td:first-child {
+  border-left: var(--rule-hair) solid var(--color-neutral-300);
+  padding-left: 14px;
+}
+.job-group > tr > td:last-child {
+  border-right: var(--rule-hair) solid var(--color-neutral-300);
+  padding-right: 14px;
+}
+.job-group > tr:first-child > td:first-child { border-top-left-radius: var(--radius-lg); }
+.job-group > tr:first-child > td:last-child { border-top-right-radius: var(--radius-lg); }
+.job-group > tr:last-child > td:first-child { border-bottom-left-radius: var(--radius-lg); }
+.job-group > tr:last-child > td:last-child { border-bottom-right-radius: var(--radius-lg); }
+/* A note row's own cell spans the panel, so it needs both sides. */
+.job-note > td { border-left: var(--rule-hair) solid var(--color-neutral-300);
+  border-right: var(--rule-hair) solid var(--color-neutral-300); }
 /* A note under its own row is a continuation of it, so it opens with no gap.
    One that opens a job — the re-analyse form — keeps its padding. */
 .job-row + .job-note > td { padding-top: 0; }
