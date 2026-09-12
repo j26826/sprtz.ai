@@ -3831,10 +3831,18 @@ async function runResplit() {
     return;
   }
   const arena = open.arena.trim();
+  const jobId = open.jobId;
   closeResplit();
+  // `ask` sends the *open* job as `job_id`, and the API puts that ahead of the
+  // prose as `[job_id: …]` — a line the model follows over the sentence. So a
+  // button pressed on one row while another match was open acted on the open
+  // one: this split 4b0e98e0cdb4403b twice while naming a different recording,
+  // and reported success for it. Every other job button selects first; this is
+  // that same line, which it should have had from the start.
+  selectJob(jobId);
   ask(arena
-    ? t('resplit.ask').replace('{job}', open.jobId).replace('{arena}', arena)
-    : t('resplit.askNoArena').replace('{job}', open.jobId),
+    ? t('resplit.ask').replace('{job}', jobId).replace('{arena}', arena)
+    : t('resplit.askNoArena').replace('{job}', jobId),
   { showJobs: true });
 }
 
@@ -5030,6 +5038,10 @@ async function reanalyseWithContext(jobId) {
     return;
   }
   state.reanalyse = null;
+  // The context was patched onto `jobId` and the ask says "this job", which is
+  // whichever match is open — so re-analysing from a row while another was
+  // open would clear the open one's results instead. Same line, same reason.
+  selectJob(jobId);
   ask('Clear this job\'s previous results and analyse the match again.', { showJobs: true });
 }
 
