@@ -98,6 +98,10 @@ const state = {
     // What the match is called. Empty means "take it from the file or the
     // URL", which is what this did before there was anywhere to type one.
     title: '',
+    // Pages about this recording, as typed: one per line or space-separated.
+    // Held here rather than in the textarea, because render() rebuilds the
+    // panel on every job write and would otherwise empty it mid-booking.
+    contextUrls: '',
     src: 'file',              // 'file' | 'path' | 'stream' — one source, not three stacked
     hlsUrl: '',               // a VOD playlist to download
     live: { title: '', hlsUrl: '', start: '', end: '' },
@@ -1084,6 +1088,13 @@ function momentsCard(msg, index) {
   if (!found.list.length) return emptyCard(t('moments.none'));
 
   const event = eventFor(msg);
+  // One event selected, and it is a competition day: the board is the answer.
+  // A flat grid of two hundred tiles from forty rounds is a list nobody reads
+  // down; who rode is the first question asked of a day, and the board makes
+  // that the first axis. The narrowed list goes with it, so a question that
+  // asked for halts still gets halts — the board filters what it is given
+  // rather than reaching for the match's moments again.
+  if (event && oneEventSelected()) return ridesCard(msg, index, found.list);
   if (event) return rideGroupsCard(msg, index, found, event);
 
   const view = pageOf(found.list, msg.page);
@@ -1102,6 +1113,21 @@ function momentsCard(msg, index) {
 
 
 /**
+ * Whether the desk is on one event rather than a catalogue of them.
+ *
+ * The board answers for a single competition day; across several matches the
+ * first axis is the match, not the rider, and a rail of riders from four
+ * events is a rail of strangers. A session scoped to one game says this
+ * outright; a desk holding exactly one game says it by having nothing else.
+ */
+function oneEventSelected() {
+  const inScope = gamesInScope(state.scope, state.games);
+  if (inScope.length === 1) return true;
+  return !state.scope && state.games.length === 1;
+}
+
+
+/**
  * The open event's tree, when this message is about it and it has rides.
  *
  * Only for the open job: the tree is fetched for the match whose listeners are
@@ -1115,6 +1141,11 @@ function eventFor(msg) {
   return tree.event?.riders?.length ? tree.event : null;
 }
 
+
+// Moments per page inside one rider's pane. Twelve rather than the list's ten:
+// the pane is the width of the board and a row holds four, so twelve is three
+// full rows and ten leaves a ragged one.
+const RIDE_MOMENTS_PER_PAGE = 12;
 
 // Rides per page. A ride is a heading and a row of tiles, so a page of them is
 // already long; a class of forty is forty headings, which is what the pager is for.
@@ -1176,7 +1207,7 @@ function rideJobFor(question) {
  * `asked` only when there are rides to show — cardAnswersIt reads it, so the
  * agent's reply stays visible behind every empty state.
  */
-function ridesFor(msg) {
+function ridesFor(msg, narrowed = null) {
   const jobId = msg.jobId || state.jobId;
   // The tree is the open event's; an earlier answer about another event says
   // so rather than borrowing this one's rides.
@@ -1187,7 +1218,11 @@ function ridesFor(msg) {
   const tree = state.eventTree;
   if (!tree || tree.jobId !== jobId) return { empty: t('rides.loading'), loading: true };
 
-  const moments = selectMoments(state.moments, { sort: msg.sort }).list;
+  // What the question left, when it came through the moments card; the whole
+  // match when the board was asked for directly.
+  const moments = narrowed
+    ? selectMoments(narrowed, { sort: msg.sort }).list
+    : selectMoments(state.moments, { sort: msg.sort }).list;
   const all = groupByRide(tree.event, moments).filter((g) => g.ride);
   if (!all.length) return { empty: t('rides.none') };
   const asked = ridesAsked(all, msg.rideQuery || '');
@@ -1243,8 +1278,8 @@ function ridesLoading() {
  * The count is moments rather than rides, because the pane is what it
  * describes: this ride's visible moments against everything the event holds.
  */
-function ridesCard(msg, index) {
-  const found = ridesFor(msg);
+function ridesCard(msg, index, moments = null) {
+  const found = ridesFor(msg, moments);
   if (found.loading) return ridesLoading();
   if (!found.asked) {
     const note = found.unchecked
@@ -1474,7 +1509,7 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boar
     result.totalPct == null ? '' : `${Number(result.totalPct).toFixed(3)}%`,
     result.place == null ? '' : `${t('ride.place')} ${result.place}`,
   ].filter(Boolean).join(' · ');
-  const view = pageOf(moments, msg.page);
+  const view = pageOf(moments, msg.page, RIDE_MOMENTS_PER_PAGE);
 
   let body = `<div class="ride-group-empty">${esc(t('ride.none'))}</div>`;
   if (moments.length) {
@@ -1789,8 +1824,11 @@ function detailActions() {
   if (!p?.moment) return '';
   const busy = state.share?.status === 'sending';
   const publishing = state.share?.mode === 'publish';
+  // Both accent, and so is Close beside them in the markup: three buttons in
+  // three treatments read as three kinds of thing, and these are one kind —
+  // what you do with the moment you are looking at.
   return `
-    <button class="btn-outline detail-action" data-detail-act="download" ${
+    <button class="btn-accent detail-action" data-detail-act="download" ${
       state.share?.downloading ? 'disabled' : ''}>${
       esc(state.share?.downloading ? t('share.preparing') : t('share.download'))}</button>
     <button class="btn-accent detail-action" data-detail-act="publish"
@@ -2070,20 +2108,28 @@ function ridePanel(ride, p) {
     .filter(Boolean).join(' · ');
 
   const moments = ride.moments || [];
-  const chips = [
-    `<button class="range-chip" data-player-range="full" aria-pressed="${Boolean(p.full)}">
-       ${esc(t('player.fullRide'))} <span>${clock(ride.startSec)}</span></button>`,
+  // One control rather than a row of them. A round holds a dozen movements and
+  // a chip each was two lines of buttons above the video, pushing the picture
+  // down the screen on exactly the rides worth watching most — and the list
+  // rewrapped as the player moved through it, so the thing being aimed at
+  // changed position under the cursor. A select is one line whatever the
+  // count, and it says what is playing without being read across.
+  const picked = p.full ? 'full' : (p.moment?.momentId || '');
+  const options = [
+    `<option value="full" ${p.full ? 'selected' : ''}>${
+      esc(t('player.fullRide'))} · ${clock(ride.startSec)}–${clock(ride.endSec)}</option>`,
     ...moments.map((mo) => `
-     <button class="range-chip" data-player-range="${esc(mo.momentId)}"
-             aria-pressed="${!p.full && p.moment?.momentId === mo.momentId}">
-       ${esc(mo.label || mo.momentType || '')} <span>${clock(mo.startSec)}</span></button>`),
+      <option value="${esc(mo.momentId)}" ${picked === mo.momentId ? 'selected' : ''}>${
+      esc(mo.label || mo.momentType || '')} · ${clock(mo.startSec)}</option>`),
   ].join('');
 
   const incidents = moments.filter((mo) => mo.category === 'incident' || mo.requiresHumanReview);
-  // Above the player, the one thing that drives it: the chips that pick what
-  // is playing. They used to sit under the ride's score tiles, which put the
-  // controls for the video below the video and everything about it.
-  const over = panelSection(t('ride.momentsInRide'), `<div class="range-chips">${chips}</div>`);
+  // Above the player, the one thing that drives it. It used to sit under the
+  // ride's score tiles, which put the controls for the video below the video
+  // and everything about it.
+  const over = panelSection(t('ride.momentsInRide'), `
+    <select class="input range-select" data-player-pick
+            aria-label="${esc(t('ride.momentsInRide'))}">${options}</select>`);
 
   // Under it, the ride itself — who rode, what it scored and where the score
   // came from. Beside it, the material an editor reads rather than acts on.
@@ -2276,6 +2322,16 @@ function sportRow(u) {
 }
 
 
+/**
+ * Pages the editor says are about this recording, for grounding.
+ *
+ * Held on `state.upload` like every other field here, and for the reason the
+ * others are: render() rebuilds the panel on every Firestore write, and an
+ * analysis running elsewhere writes often. Typed links used to live only in
+ * the textarea, so the next write emptied it — and a registration that
+ * happened to follow one sent nothing, which is what "the context links are
+ * not persisted" was.
+ */
 function contextField(u) {
   return `
       <div class="ingest-field">
@@ -2873,6 +2929,12 @@ function openGameDetails(game) {
   // inherit that moment's video — playing, beside a record it has nothing to
   // do with.
   $('details-player').innerHTML = '';
+  // ...and nothing to download or publish either. The head's buttons act on
+  // the moment that is playing, and a game record is not one; left there they
+  // would cut whatever moment happened to be open before this.
+  const actions = $('details-actions');
+  if (actions) actions.innerHTML = '';
+  state.share = null;
   if (state.details) {
     state.details = null;
     state.playing = null;
@@ -4402,6 +4464,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
   u.file = null;
   u.name = '';
   u.title = '';
+  u.contextUrls = '';
   selectJob(job_id);
   playbackUrl = null;
   render();
@@ -4430,7 +4493,10 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
  * than held in state so a link typed after the file was chosen still goes.
  */
 function contextUrlList() {
-  const raw = document.querySelector('[data-context-urls]')?.value || '';
+  // The panel's own value, with the field as a fallback for the render that
+  // has not happened yet — a paste followed immediately by the button.
+  const raw = state.upload.contextUrls
+    || document.querySelector('[data-context-urls]')?.value || '';
   return [...new Set(raw.split(/\s+/).map((x) => x.trim()).filter(Boolean))].slice(0, 10);
 }
 
@@ -4491,6 +4557,7 @@ async function registerFromStorage() {
 
     u.gcsUri = '';
     u.title = '';
+    u.contextUrls = '';
     // Idle before the turn, for the same reason as the upload path.
     u.status = 'idle';
     u.stage = 'Handed to the agent';
@@ -4588,12 +4655,13 @@ async function scheduleLiveEvent() {
         event_start: startIso,
         event_end: new Date(l.end).toISOString(),
         metadata_language: getSettings().metadataLanguage,
-          title_source: l.title.trim() ? 'editor' : 'derived',
+        title_source: l.title.trim() ? 'editor' : 'derived',
         stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
       }),
     });
     u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.contextUrls = '';
     u.status = 'idle';
     selectJob(job.job_id);
     if (state.sessionKey) {
@@ -4983,6 +5051,12 @@ document.addEventListener('input', (event) => {
   // Only re-render when a button's enabled state or a validation message
   // actually changes; doing it on every keystroke would move the caret to
   // the end of the field.
+  if (el.matches('[data-context-urls]')) {
+    // No re-render: nothing on the panel depends on this, and rebuilding the
+    // textarea under a caret would move it to the end mid-paste.
+    u.contextUrls = el.value;
+    return;
+  }
   if (el.matches('[data-gcs-input]')) {
     const wasEmpty = !u.gcsUri;
     u.gcsUri = el.value;
@@ -5024,6 +5098,10 @@ document.addEventListener('input', (event) => {
 
 
 document.addEventListener('change', (event) => {
+  if (event.target.matches?.('[data-player-pick]')) {
+    setPlayerRange(event.target.value);
+    return;
+  }
   if (event.target.matches?.('[data-share-field]')) {
     if (state.share) state.share[event.target.dataset.shareField] = event.target.value;
     return;
