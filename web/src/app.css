@@ -1004,6 +1004,26 @@ button.tile:hover { border-color: var(--color-accent); }
 }
 .job-error p { font-size: 11px; line-height: 1.45; color: var(--color-accent-2-900); flex: 1; margin: 0; }
 
+/* The re-split dialog. It opens showing what the recording holds now, because
+   this is a correction and the first thing anybody needs is what is wrong. */
+.resplit-body { padding: 4px 16px 18px; }
+.resplit-current {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--color-neutral-100);
+  border-left: var(--rule) solid var(--color-neutral-500);
+}
+.resplit-class { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
+.resplit-class-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.resplit-class-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-neutral-700);
+  white-space: nowrap;
+}
+
 /* The progress popup: a small dialog, not the player's full-viewport one. It
    holds four stage meters and a bar, and a dialog sized to the screen for that
    would be mostly empty. */

@@ -1382,6 +1382,22 @@ async def _store_classes(job_id: str, game: GameDetails, runs: list[Any],
     # desk would show the day twice once it finished — once whole, once in
     # pieces — and a search would answer with both.
     await mcp_client.call_tool("catalog", "delete_game", {"job_id": job_id})
+
+    # And so does any class this recording used to be filed under and no longer
+    # is. A split can be run again — a ring named that was not known the first
+    # time, a timetable that has since been corrected — and upserting the new
+    # classes leaves the old ones sitting there: events with rides and moments
+    # that this recording did not contain, still on the desk, still answering
+    # searches, and unreachable from the job they claim to belong to. The first
+    # re-split of the twelfth would have left two Vector Arena classes behind.
+    kept = {str(run.show_class.class_id) for run in runs}
+    existing = await mcp_client.call_tool("catalog", "list_games", {"job_id": job_id})
+    for record in existing.get("games") or []:
+        class_id = str(record.get("classId") or "")
+        if class_id and class_id not in kept:
+            logger.info("dropping %s, which %s no longer holds", class_id, job_id)
+            await mcp_client.call_tool(
+                "catalog", "delete_game", {"job_id": job_id, "class_id": class_id})
     names = ", ".join(run.show_class.name for run in runs)
     await _emit(job_id, "analysis",
                 f"This recording covered {len(runs)} classes, saved as separate events: {names}.",
