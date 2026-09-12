@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, Field, field_validator
-
-Platform = Literal["tiktok", "instagram", "youtube"]
 
 
 class SegmentPlan(BaseModel):
@@ -647,24 +643,3 @@ class GameDetails(BaseModel):
             "matchDate": self.match_date,
             "groundingSources": self.grounding_sources,
         }
-
-
-class ClipSuggestion(BaseModel):
-    """A publishable short-form cut derived from a moment."""
-
-    clip_id: str
-    job_id: str
-    moment_id: str
-    start_sec: float
-    end_sec: float
-    duration_sec: float
-    aspect: Literal["9:16", "1:1", "16:9"] = "9:16"
-    platforms: list[Platform] = Field(default_factory=lambda: ["tiktok", "instagram", "youtube"])
-    hook_text: str = Field(description="Large on-screen text for the first second.")
-    title: str
-    captions: dict[str, str] = Field(
-        default_factory=dict, description="Platform code -> caption copy."
-    )
-    hashtags: list[str] = Field(default_factory=list)
-    score: float
-    rationale: str = Field(description="Why this cut was chosen, for the editor to review.")

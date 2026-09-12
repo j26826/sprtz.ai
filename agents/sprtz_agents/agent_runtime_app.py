@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 class Feedback(BaseModel):
-    """Editor feedback on a suggested clip, logged for the quality flywheel."""
+    """Editor feedback on a moment, logged for the quality flywheel."""
 
     job_id: str
-    clip_id: str | None = None
+    moment_id: str | None = None
     score: float = Field(ge=0.0, le=1.0)
-    action: str = Field(description="What the editor did: kept, discarded, re-cut, published.")
+    action: str = Field(description="What the editor did: kept, discarded, downloaded, published.")
     comment: str = ""
     log_type: str = "feedback"
     service_name: str = "sprtz-producer"
@@ -47,8 +47,8 @@ class SprtzAgentApp(AdkApp):
     def register_feedback(self, feedback: dict[str, Any]) -> None:
         """Record what the editor did with a suggestion.
 
-        Which clips get discarded is the strongest available signal on whether
-        the scoring priors in the sport profile are right.
+        Which moments get discarded is the strongest available signal on
+        whether the scoring priors in the sport profile are right.
         """
         payload = Feedback.model_validate(feedback)
         self._logger.log_struct(payload.model_dump(), severity="INFO")

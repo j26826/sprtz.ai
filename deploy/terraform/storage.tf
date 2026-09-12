@@ -37,7 +37,7 @@ resource "google_storage_bucket" "uploads" {
   depends_on = [google_project_service.services]
 }
 
-# Derived media: proxies, sampled frames, extracted audio, rendered clips.
+# Derived media: proxies, sampled frames, extracted audio, rendered cuts.
 resource "google_storage_bucket" "media" {
   name                        = "${local.prefix}-media-${random_id.bucket_suffix.hex}"
   project                     = var.project_id

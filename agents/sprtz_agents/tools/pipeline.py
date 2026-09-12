@@ -27,7 +27,6 @@ from sprtz_agents.tools.analysis import (
     plan_segments,
     resolve_team_names,
 )
-from sprtz_agents.tools.clips import build_clip_suggestions
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +65,12 @@ STAGE_SPANS: dict[str, tuple[int, int]] = {
     "ingest": (0, 10),
     "transcode": (10, 20),
     "analysis": (20, 80),
-    "clips": (80, 95),
-    "captions": (95, 100),
+    # Finishing a run is a read and a status write, so its band is wide only
+    # because the bar has to arrive at 100 somewhere. It used to be the clip
+    # and caption stages' 80-100; clip generation is gone and the band stayed
+    # rather than letting the analysis claim a share of the bar it does not
+    # spend.
+    "finalize": (80, 100),
 }
 STAGE_ORDER = tuple(STAGE_SPANS)
 
@@ -398,7 +401,7 @@ async def _mux_audio(job_id: str, gcs_uri: str, audio_playlist_url: str,
 
     Returns the muxed object, or None when the recording stays as it was.
     Silent is a warning rather than a failure — the analysis, the preview and
-    the clips all still work, without sound — and the feed says so.
+    the stills all still work, without sound — and the feed says so.
     """
     await _emit(job_id, "ingest", "Adding the audio rendition to the recording.")
     started = await mcp_client.call_tool("media", "mux_audio", {
@@ -515,8 +518,8 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     """Encode the uploaded video to a 480p HLS preview behind the CDN.
 
     This is what the editor actually plays. Reviewing a key moment is a seek
-    within this one stream, so no per-clip render is needed to watch a
-    suggestion — and 480p is enough to judge one. Independent of the analysis,
+    within this one stream, so nothing has to be rendered to watch a
+    moment — and 480p is enough to judge one. Independent of the analysis,
     so the two run concurrently.
 
     The encode runs on Transcoder API and takes minutes on a full match, so this
@@ -727,7 +730,7 @@ async def analyze_match(job_id: str, tool_context: ToolContext, sport: str = "")
     gcs_uri = (job.get("source") or {}).get("gcsUri")
     # What the model reads. For an HLS source that is the 1 fps proxy the
     # download produced — the picture it samples anyway at a fraction of the
-    # bytes. Thumbnails and clips still come from the source, which is why
+    # bytes. Thumbnails still come from the source, which is why
     # this is a second variable rather than a replacement.
     analysis_uri = (job.get("source") or {}).get("analysisUri") or gcs_uri
     duration = float((job.get("media") or {}).get("durationSec") or 0.0)
@@ -1286,94 +1289,6 @@ async def _persist_moments(job_id: str, moments: list[Moment], batch_size: int =
     return saved
 
 
-@stage("clips", skip_if_failed=True)
-async def propose_clips(
-    job_id: str,
-    max_clips: int,
-    min_score: float,
-    tool_context: ToolContext,
-) -> dict:
-    """Turn the saved key moments into publishable short-form clip suggestions.
-
-    Picks the highest scoring moments, sets in and out points with the right
-    lead-in and follow-through for each moment type, and saves one suggestion per
-    clip. Captions are written separately by the caption stage.
-
-    Skipped entirely when the match was registered with clips turned off: a
-    competition day is hundreds of moments, and an editor who wants the log
-    does not want twenty suggestions and a Gemini call each for their copy.
-
-    Args:
-        job_id: Identifier of the job.
-        max_clips: How many suggestions to produce.
-        min_score: Lowest highlight score worth suggesting, between 0 and 1.
-
-    Returns:
-        dict listing the clips that were created.
-    """
-    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
-    if not job.get("makeClips", True):
-        await _emit(job_id, "clips",
-                    "Clips were not asked for on this match; the moments are the result.")
-        return {"status": "skipped", "job_id": job_id, "clips": [],
-                "reason": "clips were not requested for this match"}
-    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
-    sport = job.get("sport") or "handball"
-    duration = float((job.get("media") or {}).get("durationSec") or 0.0)
-
-    listing = await mcp_client.call_tool(
-        "catalog",
-        "list_moments",
-        {"job_id": job_id, "min_score": min_score, "limit": max(max_clips * 3, 60)},
-    )
-    raw = listing.get("moments", [])
-    if not raw:
-        return {
-            "status": "empty",
-            "job_id": job_id,
-            "message": f"No moments at or above a score of {min_score}.",
-        }
-
-    moments = [Moment.model_validate(m) for m in raw]
-    clips = build_clip_suggestions(
-        moments, sport=sport, job_id=job_id, max_clips=max_clips, video_duration_sec=duration
-    )
-
-    await mcp_client.call_tool(
-        "catalog",
-        "upsert_clips",
-        {"job_id": job_id, "clips": [c.model_dump() for c in clips]},
-    )
-    await _emit(job_id, "clips", f"Proposed {len(clips)} clips.", clips=len(clips))
-    await mcp_client.call_tool(
-        "catalog", "update_job_status",
-        {"job_id": job_id, "status": "clips_ready", "stage": "captions",
-         "progress": stage_progress("clips", 1.0)}
-    )
-
-    tool_context.state["clip_count"] = len(clips)
-
-    return {
-        "status": "success",
-        "job_id": job_id,
-        "clips_created": len(clips),
-        "clips": [
-            {
-                "clip_id": c.clip_id,
-                "moment_id": c.moment_id,
-                "start_sec": c.start_sec,
-                "end_sec": c.end_sec,
-                "duration_sec": c.duration_sec,
-                "title": c.title,
-                "hook_text": c.hook_text,
-                "score": c.score,
-                "rationale": c.rationale,
-            }
-            for c in clips
-        ],
-    }
-
-
 async def search_moments(job_id: str, query: str, limit: int,
                          sport: str = "", job_ids: str = "") -> dict:
     """Find moments by meaning rather than by type.
@@ -1447,8 +1362,7 @@ async def reanalyse_job(job_id: str) -> dict:
         return result
     await _emit(job_id, "ingest", "Cleared the previous analysis; starting again.")
     return {"status": "success", "job_id": job_id, "cleared": True,
-            "moments_removed": result.get("moments", 0),
-            "clips_removed": result.get("clips", 0)}
+            "moments_removed": result.get("moments", 0)}
 
 
 # A run whose last write is older than this is dead, and how many times the
@@ -1539,7 +1453,7 @@ async def cancel_job(job_id: str) -> dict:
 
 
 async def delete_job(job_id: str) -> dict:
-    """Delete a job entirely: the video, the moments, the clips and the game record.
+    """Delete a job entirely: the video, the moments and the game record.
 
     This cannot be undone and the uploaded video goes with it, so confirm with
     the editor before calling it unless they have already been explicit.
@@ -1586,7 +1500,6 @@ async def delete_job(job_id: str) -> dict:
         "source_deleted": media.get("source_deleted", False),
         "hls_objects_removed": media.get("hls_objects", 0),
         "moments_removed": removed.get("moments", 0),
-        "clips_removed": removed.get("clips", 0),
         "game_removed": bool(removed.get("game", 0)),
     }
 
@@ -1888,7 +1801,7 @@ async def list_rides(
 
     An equestrian recording is a day of rounds rather than one contest, so this
     is the list an editor actually works from: who rode, when, and what they
-    scored. Use it for "clip the tests that scored over 75", "show me Becky
+    scored. Use it for "the tests that scored over 75", "show me Becky
     Moody's round", or just to see the running order.
 
     Args:
@@ -1949,7 +1862,7 @@ def _brief_moments(moments: list[dict], limit: int) -> list[dict]:
 
     The tree carries every field of every moment; a day of forty rides would
     put all of it in the model's context. The id is kept so a follow-up can
-    fetch or clip the moment itself.
+    fetch the moment itself.
     """
     ranked = sorted(moments, key=lambda m: float(m.get("highlightScore") or 0.0), reverse=True)
     out = []
@@ -1973,7 +1886,7 @@ async def get_event(job_id: str, riders: str = "", max_moments_per_ride: int = 5
     the arena.
 
     Use it for "what did Keller do in the freestyle?", "each rider's best
-    moments", or "which rounds had nothing worth clipping". For the running
+    moments", or "which rounds had nothing worth showing". For the running
     order and scores alone, `list_rides` is lighter; for every moment in match
     order, `list_action_plays`.
 
@@ -2097,10 +2010,9 @@ async def get_job_summary(job_id: str) -> dict:
     Returns:
         dict describing the job.
     """
-    job, moments, clips = await asyncio.gather(
+    job, moments = await asyncio.gather(
         mcp_client.call_tool("catalog", "get_job", {"job_id": job_id}),
         mcp_client.call_tool("catalog", "list_moments", {"job_id": job_id, "limit": 20, "min_score": 0.0}),
-        mcp_client.call_tool("catalog", "list_clips", {"job_id": job_id, "limit": 50}),
     )
     top = moments.get("moments", [])
     # A job still analysing has written no moments yet — they land when every
@@ -2118,7 +2030,6 @@ async def get_job_summary(job_id: str) -> dict:
         "job": job,
         "top_moments": top,
         "note": note,
-        "clips": clips.get("clips", []),
     }
 
 
@@ -2153,182 +2064,42 @@ def describe_taxonomy(sport: str) -> dict:
     }
 
 
-async def list_clips_for_copywriting(job_id: str) -> dict:
-    """List the clips on a job that still need caption copy written.
-
-    Args:
-        job_id: Identifier of the job.
-
-    Returns:
-        dict with one entry per clip, including the moment it came from so the
-        copy can describe what actually happens.
-    """
-    listing = await mcp_client.call_tool("catalog", "list_clips", {"job_id": job_id, "limit": 100})
-    clips = listing.get("clips", [])
-    pending = [c for c in clips if not (c.get("captions") or {})]
-
-    moments = await mcp_client.call_tool(
-        "catalog", "list_moments", {"job_id": job_id, "limit": 200, "min_score": 0.0}
-    )
-    by_id = {m["moment_id"]: m for m in moments.get("moments", [])}
-
-    return {
-        "status": "success",
-        "job_id": job_id,
-        "pending": len(pending),
-        "clips": [
-            {
-                "clip_id": c["clip_id"],
-                "start_sec": c["start_sec"],
-                "end_sec": c["end_sec"],
-                "duration_sec": c["duration_sec"],
-                "score": c.get("score"),
-                "moment_type": by_id.get(c.get("moment_id"), {}).get("moment_type"),
-                "label": by_id.get(c.get("moment_id"), {}).get("label"),
-                "description": by_id.get(c.get("moment_id"), {}).get("description"),
-                "scoreboard": by_id.get(c.get("moment_id"), {}).get("scoreboard"),
-                "is_goal": by_id.get(c.get("moment_id"), {}).get("is_goal", False),
-            }
-            for c in pending
-        ],
-    }
-
-
-async def save_clip_copy(
-    job_id: str,
-    clip_id: str,
-    title: str,
-    hook_text: str,
-    caption_tiktok: str,
-    caption_instagram: str,
-    caption_youtube: str,
-    hashtags: list[str],
-) -> dict:
-    """Save the published copy for one clip.
-
-    Args:
-        job_id: Identifier of the job.
-        clip_id: Identifier of the clip being written.
-        title: Short title shown in the editor and used as the YouTube Shorts title.
-        hook_text: Large on-screen text for the first second. Six words at most.
-        caption_tiktok: TikTok caption.
-        caption_instagram: Instagram Reels caption.
-        caption_youtube: YouTube Shorts description.
-        hashtags: Hashtags without the leading hash, most relevant first.
-
-    Returns:
-        dict confirming the save.
-    """
-    return await mcp_client.call_tool(
-        "catalog",
-        "update_clip",
-        {
-            "job_id": job_id,
-            "clip_id": clip_id,
-            "patch": {
-                "title": title,
-                "hookText": hook_text,
-                "captions": {
-                    "tiktok": caption_tiktok,
-                    "instagram": caption_instagram,
-                    "youtube": caption_youtube,
-                },
-                "hashtags": hashtags,
-            },
-        },
-    )
-
-
-@stage("captions", skip_if_failed=True)
+@stage("finalize", skip_if_failed=True)
 async def finalize_job(job_id: str) -> dict:
-    """Check every clip is publishable and mark the job ready for export.
+    """Close the run out on what the analysis found.
 
     Args:
         job_id: Identifier of the job.
 
     Returns:
-        dict with the job's final state and any clips that were held back.
+        dict with the job's final state and how many moments it holds.
     """
-    listing = await mcp_client.call_tool("catalog", "list_clips", {"job_id": job_id, "limit": 200})
-    clips = listing.get("clips", [])
-
-    problems: list[dict] = []
-    for clip in clips:
-        issues = []
-        duration = float(clip.get("duration_sec") or 0)
-        if duration < 5:
-            issues.append("shorter than 5s — below every platform's floor")
-        if duration > 180:
-            issues.append("longer than 3 minutes — exceeds the Shorts limit")
-        if not (clip.get("captions") or {}):
-            issues.append("no caption copy")
-        if not clip.get("hookText"):
-            issues.append("no on-screen hook")
-        if issues:
-            problems.append({"clip_id": clip.get("clip_id"), "issues": issues})
-
-    ready = len(clips) - len(problems)
-    status = "ready" if ready else "needs_attention"
-
-    # Nothing at all is a different outcome from nothing publishable. A run
-    # whose analysis never happened finished every later stage successfully and
-    # reported "0 of 0 clips ready", which reads as a match with no highlights
-    # in it rather than as an analysis that did not run.
     job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
     counts = job.get("counts") or {}
     analysed = int(counts.get("moments") or 0)
 
-    # No clips because none were asked for is a finished run, not an empty
-    # one: the moments are what this match was analysed for.
-    if not job.get("makeClips", True):
-        await mcp_client.call_tool("catalog", "update_job_status", {
-            "job_id": job_id,
-            "status": "ready" if analysed else "needs_attention",
-            "stage": "complete", "progress": 100,
-        })
-        await _emit(job_id, "publish",
-                    f"{analysed} moments found. Clips were not asked for on this match.",
-                    level="info" if analysed else "warning", moments=analysed)
-        return {"status": "success", "job_id": job_id,
-                "job_status": "ready" if analysed else "needs_attention",
-                "clips_total": 0, "clips_ready": 0, "clips_with_problems": [],
-                "moments": analysed, "clips_requested": False}
-
-    if not clips and not analysed:
+    # A run that found nothing is not a finished run. Reporting it as ready
+    # reads as a quiet match, and it is far more often an analysis that never
+    # produced anything — which needs someone to look at it.
+    if not analysed:
         reason = (
-            "The analysis stage produced no moments, so there was nothing to cut. "
-            "Re-run it; if it happens again the segment analysis is failing rather "
-            "than the match being quiet."
+            "The analysis stage produced no moments. Re-run it; if it happens "
+            "again the segment analysis is failing rather than the match being "
+            "quiet."
         )
         await mcp_client.call_tool("catalog", "update_job_status", {
             "job_id": job_id, "status": "failed", "stage": "complete",
             "progress": 100, "error": reason,
         })
-        await _emit(job_id, "publish", reason, level="error")
-        return {"status": "error", "job_id": job_id, "error": reason,
-                "clips": 0, "moments": 0}
-    # The run is over either way, so the bar is full either way — a job that
-    # needs attention is finished, not stuck at 95%.
+        await _emit(job_id, "finalize", reason, level="error")
+        return {"status": "error", "job_id": job_id, "error": reason, "moments": 0}
 
     await mcp_client.call_tool(
         "catalog",
         "update_job_status",
-        {"job_id": job_id, "status": status, "stage": "complete", "progress": 100},
+        {"job_id": job_id, "status": "ready", "stage": "complete", "progress": 100},
     )
-    await _emit(
-        job_id,
-        "publish",
-        f"{ready} of {len(clips)} clips ready to publish.",
-        level="info" if not problems else "warning",
-        ready=ready,
-        held_back=len(problems),
-    )
+    await _emit(job_id, "finalize", f"{analysed} moments found.", moments=analysed)
 
-    return {
-        "status": "success",
-        "job_id": job_id,
-        "job_status": status,
-        "clips_total": len(clips),
-        "clips_ready": ready,
-        "clips_with_problems": problems,
-    }
+    return {"status": "success", "job_id": job_id, "job_status": "ready",
+            "moments": analysed}

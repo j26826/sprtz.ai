@@ -107,7 +107,7 @@ resource "google_cloud_run_v2_service" "mcp_media" {
     service_account = google_service_account.mcp_media.email
     # One heavy job per instance. Packaging a match now runs on Transcoder API
     # and no video passes through here, so this no longer guards against the
-    # OOM that set it — but probes, clip cuts and reframes are still ffmpeg,
+    # OOM that set it — but probes, stills and moment cuts are still ffmpeg,
     # and their working set is a whole container's business.
     max_instance_request_concurrency = 1
     timeout                          = "3600s"

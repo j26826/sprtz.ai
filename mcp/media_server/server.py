@@ -8,9 +8,9 @@ Two kinds of work live here and they run in different places. Packaging a match
 for playback is a Transcoder API job: it reads the source from GCS and writes
 the HLS package to GCS without a byte passing through this container, which is
 what makes a real 480p encode possible at all. Everything else — probing an
-upload to decide whether it is a video, one poster frame, the short per-clip
-cuts and reframes an editor drives — is still ffmpeg here, because each reads a
-few megabytes over a range request and finishes in seconds.
+upload to decide whether it is a video, one poster frame, the short cuts an
+editor downloads or publishes — is still ffmpeg here, because each reads a few
+megabytes over a range request and finishes in seconds.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ REMUX_JOB = os.environ.get("REMUX_JOB", "")
 LIVE_CAPTURE_JOB = os.environ.get("LIVE_CAPTURE_JOB", "")
 LIVE_CHUNK_SECONDS = int(os.environ.get("LIVE_CHUNK_SECONDS", "300") or 300)
 # Cloud Run's writable filesystem is memory-backed, so scratch is only ever
-# used for small artefacts: playlists in flight, thumbnails, rendered clips.
+# used for small artefacts: playlists in flight, thumbnails, rendered cuts.
 # Multi-gigabyte sources are read over HTTPS and never land here.
 SCRATCH = Path(os.environ.get("SCRATCH_DIR", "/tmp/scratch"))
 
@@ -587,16 +587,17 @@ def delete_moment_thumbnails(job_id: str) -> dict:
 
 
 @mcp.tool
-def cut_clip(gcs_uri: str, job_id: str, clip_id: str, start_sec: float, end_sec: float) -> dict:
-    """Render one clip out of the source video as a standalone MP4.
+def cut_moment(gcs_uri: str, job_id: str, moment_id: str, start_sec: float,
+               end_sec: float) -> dict:
+    """Render one moment out of the source video as a standalone MP4.
 
-    Only needed for export — reviewing a suggestion in the editor seeks the HLS
-    stream instead.
+    This is what a download is. Watching a moment in the editor seeks the HLS
+    stream instead, so nothing renders until someone asks for the file itself.
 
     Args:
         gcs_uri: gs:// URI of the source video.
-        job_id: Job the clip belongs to.
-        clip_id: Identifier for the clip.
+        job_id: Job the moment belongs to.
+        moment_id: Identifier for the moment.
         start_sec: In point in seconds.
         end_sec: Out point in seconds.
     """
@@ -605,85 +606,26 @@ def cut_clip(gcs_uri: str, job_id: str, clip_id: str, start_sec: float, end_sec:
 
     work = _scratch()
     try:
-        out = work / f"{clip_id}.mp4"
-        # -ss over HTTPS is a range seek: a 30-second clip out of a three-hour
+        out = work / f"{moment_id}.mp4"
+        # -ss over HTTPS is a range seek: a 30-second cut out of a three-hour
         # match reads megabytes, not the whole object.
         ffmpeg_ops.cut(gcs.https_url(gcs_uri), out, start_sec, end_sec,
                        bearer_token=gcs.bearer_token())
 
-        dest = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/clips/{clip_id}.mp4"
+        dest = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/downloads/{moment_id}.mp4"
         gcs.upload(out, dest)
-
-        thumb = work / f"{clip_id}.jpg"
-        ffmpeg_ops.thumbnail(out, thumb, at_sec=min(1.0, (end_sec - start_sec) / 2))
-        thumb_uri = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/clips/{clip_id}.jpg"
-        gcs.upload(thumb, thumb_uri)
 
         return {
             "status": "success",
-            "clip_id": clip_id,
+            "moment_id": moment_id,
             "output_uri": dest,
-            "thumbnail_uri": thumb_uri,
+            "bytes": out.stat().st_size,
             "duration_sec": round(end_sec - start_sec, 2),
         }
     except Exception as exc:  # noqa: BLE001
-        logger.exception("cut_clip failed for %s", clip_id)
-        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "clip_id": clip_id}
-    finally:
-        _cleanup(work)
-
-
-@mcp.tool
-def reframe_vertical(clip_uri: str, job_id: str, clip_id: str, aspect: str) -> dict:
-    """Reframe a rendered clip to a vertical aspect for short-form publishing.
-
-    Args:
-        clip_uri: gs:// URI of the rendered clip.
-        job_id: Job the clip belongs to.
-        clip_id: Identifier for the clip.
-        aspect: Target aspect, "9:16" or "1:1".
-    """
-    if aspect not in {"9:16", "1:1"}:
-        return {"status": "error", "error": "aspect must be '9:16' or '1:1'."}
-
-    work = _scratch()
-    try:
-        source = work / "clip.mp4"
-        gcs.download(clip_uri, source)
-        out = work / f"{clip_id}_vertical.mp4"
-        ffmpeg_ops.reframe(source, out, aspect=aspect)
-        dest = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/clips/{clip_id}_{aspect.replace(':', 'x')}.mp4"
-        gcs.upload(out, dest)
-        return {"status": "success", "clip_id": clip_id, "output_uri": dest, "aspect": aspect}
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("reframe_vertical failed for %s", clip_id)
-        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "clip_id": clip_id}
-    finally:
-        _cleanup(work)
-
-
-@mcp.tool
-def burn_captions(clip_uri: str, job_id: str, clip_id: str, hook_text: str) -> dict:
-    """Burn the on-screen hook text over the opening of a clip.
-
-    Args:
-        clip_uri: gs:// URI of the rendered clip.
-        job_id: Job the clip belongs to.
-        clip_id: Identifier for the clip.
-        hook_text: Text to burn in.
-    """
-    work = _scratch()
-    try:
-        source = work / "clip.mp4"
-        gcs.download(clip_uri, source)
-        out = work / f"{clip_id}_captioned.mp4"
-        ffmpeg_ops.burn_text(source, out, hook_text)
-        dest = f"gs://{MEDIA_BUCKET}/jobs/{job_id}/clips/{clip_id}_captioned.mp4"
-        gcs.upload(out, dest)
-        return {"status": "success", "clip_id": clip_id, "output_uri": dest}
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("burn_captions failed for %s", clip_id)
-        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "clip_id": clip_id}
+        logger.exception("cut_moment failed for %s", moment_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}",
+                "moment_id": moment_id}
     finally:
         _cleanup(work)
 
@@ -965,7 +907,7 @@ def compose_live_source(job_id: str, chunk_uris: list[str]) -> dict:
     """Join a live event's chunks into one object the rest of the pipeline can use.
 
     A live event has no source video: it has a row of five-minute chunks, and
-    every stage after the analysis — packaging for playback, cutting a clip,
+    every stage after the analysis — packaging for playback, cutting a moment,
     a still from the source rather than from a proxy — wants one file. GCS
     composes them server-side in the bucket they already live in, so no bytes
     pass through here and a twelve-hour event costs a few API calls.

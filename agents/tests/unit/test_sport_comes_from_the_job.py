@@ -9,7 +9,7 @@ nothing. The reason is in the run's own log:
 `analyze_match` took the sport as a required argument. With one sport
 registered a model could guess it safely; with two it correctly stopped
 guessing and asked — in a SequentialAgent, unattended, with nobody to answer.
-The stage then produced no tool call, and clips, captions and publish all ran
+The stage then produced no tool call, and every later stage ran
 successfully on zero moments and marked the job finished.
 
 Two things follow. A stored fact must be read from where it is stored, and a
@@ -102,14 +102,12 @@ class TestTheInstructionsForbidAsking:
 
 class TestARunThatAnalysedNothingIsNotComplete:
     @pytest.mark.asyncio
-    async def test_no_clips_and_no_moments_is_a_failure(self):
+    async def test_no_moments_is_a_failure(self):
         updates: list[dict] = []
 
         async def call(server, tool, args=None):
-            if tool == "list_clips":
-                return {"status": "success", "clips": []}
             if tool == "get_job":
-                return {"status": "success", "counts": {"moments": 0, "clips": 0}}
+                return {"status": "success", "counts": {"moments": 0}}
             if tool == "update_job_status":
                 updates.append(args)
             return {"status": "success"}
@@ -122,23 +120,22 @@ class TestARunThatAnalysedNothingIsNotComplete:
         assert "produced no moments" in updates[-1]["error"]
 
     @pytest.mark.asyncio
-    async def test_moments_but_no_clips_still_only_needs_attention(self):
-        # A quiet match is a real outcome. Only nothing at all is a failure.
+    async def test_moments_finish_the_run_as_ready(self):
         updates: list[dict] = []
 
         async def call(server, tool, args=None):
-            if tool == "list_clips":
-                return {"status": "success", "clips": []}
             if tool == "get_job":
-                return {"status": "success", "counts": {"moments": 40, "clips": 0}}
+                return {"status": "success", "counts": {"moments": 40}}
             if tool == "update_job_status":
                 updates.append(args)
             return {"status": "success"}
 
         with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)):
-            await pipeline.finalize_job("job-1")
+            result = await pipeline.finalize_job("job-1")
 
-        assert updates[-1]["status"] == "needs_attention"
+        assert result["moments"] == 40
+        assert updates[-1]["status"] == "ready"
+        assert updates[-1]["progress"] == 100
 
 
 class _Context:

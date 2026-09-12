@@ -4,7 +4,7 @@ Packaging a match for playback used to live here and now runs on Transcoder API
 instead — that job wrote gigabytes of segments through a filesystem that is
 really RAM, and it killed the container. What is left is the work ffmpeg is
 still the right tool for here: probing an upload to decide whether it is a video
-at all, one poster frame, and the short per-clip operations an editor drives,
+at all, one poster frame, and the short per-moment cuts an editor drives,
 all of which read a few megabytes over a range request and finish in seconds.
 """
 
@@ -194,9 +194,9 @@ def cut(source: str | Path, dest: Path, start_sec: float, end_sec: float,
     """Extract [start, end) from a local file or an HTTPS URL. Re-encodes by default.
 
     Stream copy is much faster but can only cut on a keyframe, which drifts the
-    in-point by up to the GOP length — visible and wrong when the clip is built
+    in-point by up to the GOP length — visible and wrong when the cut is built
     around a specific frame. With a URL source, -ss becomes a range seek, so a
-    30-second clip out of a 3 GB match reads megabytes, not gigabytes.
+    30-second cut out of a 3 GB match reads megabytes, not gigabytes.
     """
     duration = max(0.0, end_sec - start_sec)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -210,32 +210,6 @@ def cut(source: str | Path, dest: Path, start_sec: float, end_sec: float,
     else:
         cmd += ["-c", "copy"]
     cmd += ["-movflags", "+faststart", str(dest)]
-    _run(cmd)
-
-
-def reframe(source: Path, dest: Path, aspect: str = "9:16", blur_pad: bool = True) -> None:
-    """Reframe to a vertical aspect.
-
-    Centre-crops to the target aspect over a blurred, filled background so a
-    wide court shot still reads on a phone instead of becoming letterboxed.
-    """
-    w, h = (1080, 1920) if aspect == "9:16" else (1080, 1080)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    if blur_pad:
-        vf = (
-            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h},boxblur=luma_radius=40:luma_power=2[bg];"
-            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
-        )
-        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source), "-filter_complex", vf]
-    else:
-        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source), "-vf", vf]
-
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(dest)]
     _run(cmd)
 
 
@@ -302,19 +276,6 @@ def still_frame(source: str | Path, dest: Path, at_sec: float, width: int = 320,
         "-ss", f"{at_sec:.3f}", "-i", src,
         "-frames:v", "1", "-vf", f"scale={width}:-2", str(dest),
     ], timeout=300)
-
-
-def burn_text(source: Path, dest: Path, text: str, duration_sec: float = 1.5) -> None:
-    """Burn a hook line over the opening of a clip."""
-    safe = text.replace("\\", "\\\\").replace(":", r"\:").replace("'", r"\'")
-    vf = (
-        f"drawtext=text='{safe}':fontsize=h/14:fontcolor=white:borderw=4:bordercolor=black@0.8:"
-        f"x=(w-text_w)/2:y=h*0.12:enable='lt(t,{duration_sec})'"
-    )
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    _run(["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING, "-i", str(source), "-vf", vf,
-          "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-          "-c:a", "copy", "-movflags", "+faststart", str(dest)])
 
 
 def validate(info: dict, *, declared_content_type: str = "") -> list[str]:

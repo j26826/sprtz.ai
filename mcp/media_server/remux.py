@@ -3,7 +3,7 @@
 JW Player and Unified Streaming publish video-only variants and put the audio
 in an ``EXT-X-MEDIA`` group of its own. The download tool muxes that into a
 CMAF recording as it goes, and for MPEG-TS it does not — the recording lands
-silent, and so do the analysis, the preview and every clip cut from it.
+silent, and so do the analysis, the preview and every cut taken from it.
 
 This is the other half, as a Cloud Run Job on the media image: fetch the
 audio playlist and its segments (small — a hundred kilobits a second, so a

@@ -45,5 +45,5 @@ class TestClearAnalysis:
         assert patch_written["status"] == "uploaded"
         assert patch_written["stage"] == "ingest"
         assert patch_written["progress"] == 0
-        assert patch_written["counts"] == {"moments": 0, "clips": 0}
+        assert patch_written["counts"] == {"moments": 0}
         assert patch_written["error"] is None

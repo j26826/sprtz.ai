@@ -40,7 +40,7 @@ export const FILTER_NOISE = new Set([
   'and', 'or', 'for', 'from', 'with', 'that', 'this', 'these', 'those',
   'what', 'which', 'where', 'who', 'when', 'how', 'was', 'were', 'are', 'is',
   'moment', 'moments', 'clip', 'clips', 'play', 'plays', 'video', 'videos',
-  'game', 'games', 'match', 'matches', 'reel', 'highlight', 'highlights',
+  'game', 'games', 'match', 'matches', 'highlight', 'highlights',
   'best', 'good', 'great', 'top', 'key', 'main', 'important', 'interesting',
   'exciting', 'strongest', 'biggest',
   'sort', 'order', 'time', 'score', 'rank', 'ranked', 'chronological',

@@ -121,8 +121,8 @@ def pick_variant(variants: list[Variant]) -> Variant | None:
     """The highest-bandwidth rendition, the same rule the downloader applies.
 
     The analysis samples one frame a second at 480p, so a lower rung would do
-    for it — but the same capture is also what the clips are cut from, and a
-    clip cut from the lowest rung is a clip nobody publishes.
+    for it — but the same capture is also what a download is cut from, and a
+    cut taken from the lowest rung is one nobody publishes.
     """
     return max(variants, key=lambda v: v.bandwidth) if variants else None
 

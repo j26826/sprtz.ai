@@ -146,7 +146,7 @@ class TestAFailedRunStops:
     async def test_a_later_stage_skips_a_job_that_already_failed(self):
         ran = []
 
-        @pipeline.stage("clips", skip_if_failed=True)
+        @pipeline.stage("finalize", skip_if_failed=True)
         async def later(job_id: str) -> dict:
             ran.append(job_id)
             return {"status": "success"}
@@ -184,7 +184,7 @@ class TestAFailedRunStops:
 
     @pytest.mark.asyncio
     async def test_a_running_job_goes_through(self):
-        @pipeline.stage("clips", skip_if_failed=True)
+        @pipeline.stage("finalize", skip_if_failed=True)
         async def later(job_id: str) -> dict:
             return {"status": "success", "ran": True}
 
@@ -204,7 +204,7 @@ class TestAFailedRunStops:
         from pathlib import Path
 
         src = Path(pipeline.__file__).read_text()
-        for name in ("analysis", "clips"):
+        for name in ("analysis", "finalize"):
             assert f'@stage("{name}", skip_if_failed=True)' in src, name
         assert '@stage("ingest")\nasync def inspect_source' in src
         # Playback is also a tool the editor calls on its own, on a job whose

@@ -308,24 +308,6 @@ button.tile:hover { border-color: var(--color-accent); }
   background: color-mix(in srgb, var(--color-rule) 22%, transparent);
 }
 
-/* In the reel. Amber on the picture rather than a word beneath it: the tile is
-   narrow, and this is the one fact about a moment that is worth reading at a
-   glance across a whole row. Ink on the fill, never white. */
-.tile-star {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  z-index: 1;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  color: var(--color-on-accent, #111);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 /* Which game a tile is from, when the grid spans the desk. Mono and small,
    in the accent-700 ramp — the same treatment as a search result's game line,
    because it is the same fact. */
@@ -918,143 +900,6 @@ button.tile:hover { border-color: var(--color-accent); }
   font-variant-numeric: tabular-nums;
   color: var(--color-neutral-700);
 }
-
-/* Reel */
-
-.reel-bars { display: flex; height: 30px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
-.reel-bar { border-right: var(--rule-hair) solid var(--color-bg); flex-basis: 0; }
-
-.clip-row {
-  display: grid;
-  grid-template-columns: 20px 1fr auto auto;
-  gap: 10px;
-  align-items: center;
-  padding: 9px 12px;
-  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
-}
-
-.clip-n {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-neutral-600);
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-mono);
-}
-
-.clip-label { font-size: 12px; font-weight: 700; line-height: 1.25; min-width: 0; }
-
-.stepper { display: flex; align-items: center; gap: 6px; }
-
-.step-btn {
-  border: var(--rule-hair) solid var(--color-neutral-400);
-  background: transparent;
-  color: var(--color-text);
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  line-height: 1;
-}
-.step-btn:hover { border-color: var(--color-accent); }
-
-.step-val {
-  font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  min-width: 38px;
-  text-align: center;
-  font-family: var(--font-mono);
-}
-
-.link-btn {
-  border: 0;
-  background: transparent;
-  color: var(--color-neutral-600);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 4px 2px;
-}
-.link-btn:hover { color: var(--color-accent); }
-
-.panel-actions { display: flex; gap: 8px; padding: 11px 12px; flex-wrap: wrap; }
-
-/* Jobs */
-
-.job { padding: 11px 12px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
-.job:last-child { border-bottom: 0; }
-
-.job-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
-.job-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
-
-.job-status {
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--color-neutral-600);
-}
-.job-status[data-tone="running"] { color: var(--color-neutral-800); }
-.job-status[data-tone="failed"] { color: var(--color-accent-2); }
-
-.job-stage { font-size: 11px; color: var(--color-neutral-700); margin-top: 4px; line-height: 1.4; }
-
-.job-error {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin-top: 7px;
-  border-left: var(--rule) solid var(--color-accent-2);
-  background: var(--color-accent-2-100);
-  padding: 8px 10px;
-}
-.job-error p { font-size: 11px; line-height: 1.45; color: var(--color-accent-2-900); flex: 1; margin: 0; }
-
-/* Publish */
-
-.platform {
-  width: 100%;
-  text-align: left;
-  display: grid;
-  grid-template-columns: 18px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  border: 0;
-  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
-  background: transparent;
-  color: var(--color-text);
-  padding: 11px 12px;
-  cursor: pointer;
-}
-.platform:hover { background: var(--color-accent-100); }
-.platform[aria-pressed="true"] { background: var(--color-accent-100); }
-
-.checkmark { width: 14px; height: 14px; border: var(--rule) solid var(--color-neutral-600); }
-.platform[aria-pressed="true"] .checkmark { border-color: var(--color-accent); background: var(--color-accent); }
-
-.platform-name { font-size: 12.5px; font-weight: 700; }
-.platform-spec { font-size: 10.5px; color: var(--color-neutral-700); margin-top: 2px; }
-
-.platform-state {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-neutral-600);
-}
-
-.caption-box {
-  width: 100%;
-  border: var(--rule-hair) solid var(--color-neutral-400);
-  background: var(--color-neutral-100);
-  padding: 9px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  outline: 0;
-  resize: vertical;
-  color: var(--color-text);
-}
-.caption-box:focus-visible { border-color: var(--color-accent); }
 
 /* Composer */
 
@@ -2290,12 +2135,9 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .chip,
 .link-btn,
 .file-label,
-.platform,
 .session,
 .thumb,
 .dz-thumb,
-.step-btn,
-.caption-box,
 .composer-input,
 .header-select {
   border-radius: var(--radius-md);
@@ -2304,9 +2146,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .meter,
 .meter i,
 .stage-meter,
-.stage-meter i,
-.reel-bar,
-.checkmark {
+.stage-meter i {
   border-radius: var(--radius-sm);
 }
 

@@ -5,8 +5,8 @@
  * mcp/catalog_server/event_tree.py): which ride each moment belongs to is
  * decided there, once, for every reader. What is left here is applying that to
  * the list the editor is actually looking at — the live moments, already
- * filtered and sorted — so the tiles keep their live state (thumbnail, reel
- * star) and the order the editor chose.
+ * filtered and sorted — so the tiles keep their live state (their thumbnail)
+ * and the order the editor chose.
  *
  * A group is one ride: a rider on one horse.
  *

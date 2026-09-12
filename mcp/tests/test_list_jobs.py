@@ -31,7 +31,7 @@ def _snapshot(job_id: str, status: str, **extra):
         "stage": "analysis",
         "progress": 40,
         "error": None,
-        "counts": {"moments": 3, "clips": 1},
+        "counts": {"moments": 3},
         "createdAt": datetime(2026, 9, 1, 12, 0, tzinfo=UTC),
         **extra,
     }
@@ -150,7 +150,7 @@ class TestSummary:
         assert job["title"] == "Match a"
         assert job["status"] == "analyzing"
         assert job["stage"] == "analysis"
-        assert job["counts"] == {"moments": 3, "clips": 1}
+        assert job["counts"] == {"moments": 3}
 
     def test_timestamps_are_json_safe(self, query_with):
         _, patched = query_with([_snapshot("a", "ready")])

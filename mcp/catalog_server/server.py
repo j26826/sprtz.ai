@@ -32,7 +32,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                original_name: str, size_bytes: int, content_type: str = "",
                metadata_language: str = "en", context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "", event_start: str = "",
-               event_end: str = "", chunk_sec: int = 0, make_clips: bool = True,
+               event_end: str = "", chunk_sec: int = 0,
                title_source: str = "derived", stall_minutes: float = 0) -> dict:
     """Open a new analysis job for an uploaded video, an HLS URL, or a live event.
 
@@ -49,8 +49,6 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         context_urls: Pages the editor says are about this recording, for grounding.
         kind: "upload", "hls" (a playlist to download first) or "live" (a
             playlist to record between two times).
-        make_clips: Whether to cut clips and write their copy after the
-            analysis. False analyses the match and stops at the moments.
         hls_url: The playlist URL, for hls and live.
         event_start: ISO 8601 start of a live event.
         event_end: ISO 8601 end of a live event.
@@ -65,7 +63,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         return {"status": "success", **store.create_job(
             job_id, owner_uid, title, sport, gcs_uri, original_name, size_bytes,
             content_type, metadata_language, context_urls or [],
-            kind, hls_url, event_start, event_end, chunk_sec, make_clips=make_clips,
+            kind, hls_url, event_start, event_end, chunk_sec,
             title_source=title_source, stall_minutes=stall_minutes)}
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, job_id=job_id)
@@ -110,7 +108,7 @@ def update_job_status(job_id: str, status: str, stage: str = "", error: str = ""
 
     Args:
         job_id: Identifier of the job.
-        status: New status, e.g. uploaded, transcoding, analyzing, analyzed, clips_ready, ready, failed.
+        status: New status, e.g. uploaded, transcoding, analyzing, analyzed, ready, failed.
         stage: Current pipeline stage. Empty string leaves it unchanged.
         error: Failure message. Empty string leaves it unchanged.
         progress: Percent complete 0-100. Pass -1 to leave unchanged.
@@ -130,7 +128,7 @@ def update_job_status(job_id: str, status: str, stage: str = "", error: str = ""
 def delete_job(job_id: str) -> dict:
     """Delete a job and every record hanging off it.
 
-    Removes the moments, clips, events and the game record as well as the job
+    Removes the moments, events and the game record as well as the job
     itself. The source video is the media server's to delete.
 
     Args:
@@ -144,7 +142,7 @@ def delete_job(job_id: str) -> dict:
 
 @mcp.tool
 def clear_analysis(job_id: str) -> dict:
-    """Drop a job's moments, clips and game record so it can be analysed again.
+    """Drop a job's moments and game record so it can be analysed again.
 
     Args:
         job_id: Job to reset.
@@ -516,71 +514,6 @@ def knn_search_moments(query: str, job_id: str, limit: int, owner_uid: str = "",
         }
     except Exception as exc:  # noqa: BLE001
         return _fail(exc, query=query, job_id=job_id)
-
-
-@mcp.tool
-def upsert_clips(job_id: str, clips: list[dict]) -> dict:
-    """Save suggested clips for a job.
-
-    Args:
-        job_id: Identifier of the job.
-        clips: Clip suggestion records.
-    """
-    try:
-        return {"status": "success", "job_id": job_id, "saved": store.upsert_clips(job_id, clips)}
-    except Exception as exc:  # noqa: BLE001
-        return _fail(exc, job_id=job_id)
-
-
-@mcp.tool
-def list_clips(job_id: str, limit: int) -> dict:
-    """List a job's suggested clips, highest scoring first.
-
-    Args:
-        job_id: Identifier of the job.
-        limit: Maximum number to return.
-    """
-    try:
-        return {"status": "success", "job_id": job_id, "clips": store.list_clips(job_id, limit)}
-    except Exception as exc:  # noqa: BLE001
-        return _fail(exc, job_id=job_id)
-
-
-@mcp.tool
-def delete_clip(job_id: str, clip_id: str) -> dict:
-    """Remove a clip from the reel, leaving the moment it was cut from in place.
-
-    Args:
-        job_id: Job the clip belongs to.
-        clip_id: Clip to remove.
-    """
-    try:
-        return {"status": "success", **store.delete_clip(job_id, clip_id)}
-    except Exception as exc:  # noqa: BLE001
-        return _fail(exc, job_id=job_id, clip_id=clip_id)
-
-
-@mcp.tool
-def update_clip(job_id: str, clip_id: str, patch: dict) -> dict:
-    """Apply a partial update to one clip.
-
-    Derived fields such as score and momentId are rejected and reported back
-    rather than written.
-
-    Args:
-        job_id: Identifier of the job.
-        clip_id: Identifier of the clip.
-        patch: Fields to change.
-    """
-    try:
-        return store.update_clip(job_id, clip_id, patch)
-    except Exception as exc:  # noqa: BLE001
-        return _fail(exc, job_id=job_id, clip_id=clip_id)
-
-
-@mcp.custom_route("/healthz", methods=["GET"])
-async def healthz(_: Request) -> JSONResponse:
-    return JSONResponse({"status": "ok", "service": "mcp-catalog"})
 
 
 @mcp.tool

@@ -1,8 +1,8 @@
 """Sportscut root agent.
 
 `sprtz_producer` is what the editor talks to. It answers questions about a job,
-searches the match semantically, adjusts clips, and hands a full run to the
-deterministic `analysis_pipeline` when there is a new video to work through.
+searches the match semantically, and hands a full run to the deterministic
+`analysis_pipeline` when there is a new video to work through.
 
 The pipeline is a SequentialAgent rather than something the root agent
 improvises, because each stage owns a Firestore status transition the UI renders
@@ -26,11 +26,9 @@ from sprtz_agents.config import get_settings
 from sprtz_agents.sports import list_sports
 from sprtz_agents.sub_agents.stages import (
     analysis_agent,
-    caption_agent,
-    clip_agent,
+    finalize_agent,
     ingest_agent,
     live_event_agent,
-    publish_agent,
     transcode_agent,
 )
 from sprtz_agents.tools import mcp_client, pipeline
@@ -66,23 +64,20 @@ analysis_pipeline = SequentialAgent(
     name="analysis_pipeline",
     description=(
         "Runs a complete analysis of one uploaded match: ingest, then playback "
-        "packaging and segmented video analysis together, then clip selection, "
-        "copywriting, and final validation."
+        "packaging and segmented video analysis together, then a finish that "
+        "closes the job out on what was found."
     ),
     sub_agents=[
         ingest_agent,
         prepare_and_analyze,
-        clip_agent,
-        caption_agent,
-        publish_agent,
+        finalize_agent,
     ],
 )
 
 
 _ROOT_INSTRUCTION = f"""
 You are Sportscut, the analyst inside the Sportscut editor. Editors bring you a full
-match and leave with a set of vertical clips ready for TikTok, Instagram Reels
-and YouTube Shorts.
+match and leave with every moment worth publishing found, timed and described.
 
 You currently cover: {", ".join(list_sports())}.
 
@@ -177,14 +172,14 @@ earlier turns:
   played, the competition, the venue, the final score, how it felt. `find_games`
   when they are looking for *which* match rather than something inside one.
 - `list_rides` for an equestrian competition day, which is a sequence of rounds
-  rather than one contest. It answers "who rode", "clip the tests over 75%" and
+  rather than one contest. It answers "who rode", "the tests over 75%" and
   "find me these riders". A ride whose `score_check` says mismatch has a total
   that does not equal the mean of its own displayed judge marks — say so rather
   than repeating the number.
 - `get_event` for what happened **inside** each round of an equestrian day:
   every ride with its moments under it. It answers "what did Keller do in the
   freestyle", "each rider's best moments" and "which rounds had nothing worth
-  clipping". Moments outside every round come back separately; mention them
+  showing". Moments outside every round come back separately; mention them
   rather than leaving them out.
 - `list_action_plays` for the structured log of a match — every moment with its
   category, class, result, participant and MM:SS offsets. This is the export
@@ -249,21 +244,18 @@ two apart precisely so you can.
   moments leaves the desk showing "No games yet" beside hundreds of
   detections; this rebuilds the record without re-analysing anything. It is
   also how a live event gets its full record before the event ends.
-- **Delete**: `delete_job` removes the video, the moments, the clips and the game
+- **Delete**: `delete_job` removes the video, the moments and the game
   record, and cannot be undone. Confirm with the editor before calling it unless
   they have already said plainly that they want it gone.
 
-# Adjusting the work
+# Cutting and publishing
 
-The editor is in charge of the final cut. When they ask for a change:
-- Re-cutting a clip's timing, reframing it, or rendering a preview: use the media
-  tools directly on that clip.
-- More clips, or a different threshold: re-run `propose_clips` with the values
-  they asked for.
-- New copy for a clip: write it and save it with `save_clip_copy`.
-- Taking a clip out of the reel: `delete_clip`. The moment stays — a clip is a
-  suggestion about a moment, and rejecting the suggestion does not mean the play
-  did not happen. Say that if they sound like they meant to lose both.
+There is no clip generation on this desk at the moment: it is being rebuilt.
+A moment is downloaded or published from the player, by the editor, one at a
+time — not by you. If they ask for a reel, a montage, vertical versions or
+captions, say that clip generation is being reworked and is not available, and
+offer what is here: finding the moments, and the download and publish buttons
+in the player.
 
 # The screen is showing them the list
 
@@ -322,8 +314,6 @@ def _build_tools() -> list:
         pipeline.prepare_playback,
         pipeline.generate_thumbnails,
         pipeline.search_moments,
-        pipeline.propose_clips,
-        pipeline.save_clip_copy,
         pipeline.describe_taxonomy,
     ]
 
@@ -360,8 +350,8 @@ root_agent = Agent(
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
     description=(
-        "Sports video analyst that finds key moments in a match and turns them into "
-        "short-form clips for TikTok, Instagram Reels and YouTube Shorts."
+        "Sports video analyst that finds the key moments in a match and describes "
+        "what happens in each of them."
     ),
     instruction=_ROOT_INSTRUCTION,
     tools=_build_tools(),

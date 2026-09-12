@@ -81,8 +81,10 @@ describe('the rest of the cards', () => {
     'use last nights upload': 'ingest',
     "what's still processing?": 'jobs',
     'did any job fail': 'jobs',
-    'prepare publish': 'publish',
-    'cut all of these into clips': 'reel',
+    // Clip generation is being rebuilt: a question about cutting has no card
+    // of its own any more, and the moments are the honest answer to it.
+    'cut all of these into clips': 'moments',
+    'prepare publish': 'moments',
     'what happened during the analysis': 'activity',
   });
 });
@@ -180,8 +182,9 @@ describe('rides', () => {
     'riders over 72 percent': 'rides',
     'show the moments from the ride for Anna Berger': 'rides',
     'rides in every event': 'rides',
-    // Doing something with a ride is still that action.
-    'cut a 30 second short of the ride for Anna Berger': 'reel',
-    'publish the ride for Anna Berger': 'publish',
+    // Cutting or publishing one is a question about that ride now that
+    // neither has a card of its own.
+    'cut a 30 second short of the ride for Anna Berger': 'rides',
+    'publish the ride for Anna Berger': 'rides',
   });
 });

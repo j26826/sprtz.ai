@@ -125,41 +125,6 @@ resource "google_firestore_index" "games_knn" {
   }
 }
 
-# "More clips like this" across a user's whole library.
-resource "google_firestore_index" "clips_knn" {
-  project     = var.project_id
-  database    = google_firestore_database.default.name
-  collection  = "clips"
-  query_scope = "COLLECTION_GROUP"
-
-  fields {
-    field_path = "ownerUid"
-    order      = "ASCENDING"
-  }
-
-  fields {
-    field_path = "embedding"
-    vector_config {
-      dimension = var.embedding_dimensions
-      flat {}
-    }
-  }
-
-  # Firestore appends __name__ to the index it actually creates, so the remote
-  # object is [ownerUid, __name__, embedding] while this config declares
-  # [ownerUid, embedding]. The provider reads that as a field change, which
-  # forces replacement — and the replacement's create fails with 409 because
-  # the equivalent index already exists, so every subsequent apply retries the
-  # same doomed replace. The definition below is what created the index; it is
-  # the normalisation that differs, not the intent.
-  #
-  # Change the vector definition by deleting the index and re-applying, not by
-  # editing in place.
-  lifecycle {
-    ignore_changes = [fields]
-  }
-}
-
 # --- Composite indexes for the UI's realtime queries --------------------------
 resource "google_firestore_index" "jobs_by_owner_recent" {
   project    = var.project_id
@@ -190,23 +155,6 @@ resource "google_firestore_index" "moments_by_score" {
 
   fields {
     field_path = "highlightScore"
-    order      = "DESCENDING"
-  }
-}
-
-resource "google_firestore_index" "clips_by_score" {
-  project     = var.project_id
-  database    = google_firestore_database.default.name
-  collection  = "clips"
-  query_scope = "COLLECTION_GROUP"
-
-  fields {
-    field_path = "jobId"
-    order      = "ASCENDING"
-  }
-
-  fields {
-    field_path = "score"
     order      = "DESCENDING"
   }
 }
