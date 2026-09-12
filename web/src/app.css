@@ -283,37 +283,35 @@ input, button, textarea { font-family: var(--font-body); }
    every tile of a page. Hidden from assistive tech on the tile — a screen
    reader reading "beta" before every one of two hundred moments is noise; the
    list's own head is where that belongs. */
+/* A banner across the top of the frame rather than a corner ribbon: it is a
+   statement about the moment, and a line reads as one where a diagonal reads
+   as a sticker. Full width, so the words sit level with everything else on
+   the card. */
 .tile-beta {
   position: absolute;
   top: 0;
   left: 0;
-  width: 78px;
-  height: 78px;
+  right: 0;
   overflow: hidden;
   pointer-events: none;
   z-index: 2;
-  /* The tile rounds and this sits in the corner it rounds, so it carries the
-     same radius: without it the ribbon's square corner pokes out past the
+  /* The tile rounds and this sits along the edge it rounds, so it carries the
+     same radius: without it the banner's square corners poke out past the
      card's curve. Same rule as everywhere else here — a container that rounds
      also clips. */
-  border-top-left-radius: var(--radius-lg);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .tile-beta > span {
-  position: absolute;
-  top: 15px;
-  left: -28px;
-  width: 116px;
-  transform: rotate(-45deg);
+  display: block;
   background: var(--color-accent);
   /* Ink on amber, never white: amber as a fill is about 1.9:1 against white. */
   color: var(--color-on-accent);
-  font-size: 7.5px;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   text-align: center;
-  padding: 2px 0;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  padding: 3px 6px;
 }
 
 .tile {
