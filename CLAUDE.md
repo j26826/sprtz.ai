@@ -1195,6 +1195,15 @@ A moment row and a game row are the same shape on purpose: a headline worth
 reading, the facts that qualify it underneath, and everything else in a shared
 popup.
 
+**Every moment tile is marked Beta**, as a ribbon across its top-left corner.
+The classification is untuned — see Known gaps — and a result that looks like a
+finished product invites an editor to publish it without checking. A ribbon
+rather than a pill because a pill either covers the picture, where it hides a
+play, or joins the text, where it pushes a line down on every tile of a page;
+the corner is the one place a badge costs nothing. It carries the tile's own
+radius, since a container that rounds also clips, and it is `aria-hidden`: a
+screen reader saying "beta" before each of two hundred moments is noise.
+
 **A moment tile has no buttons.** The frame carries a play button and the
 whole frame opens the moment in the player, where its record, its ride and the
 two ways out of it are; the foot shows the moment's type and its confidence (a
