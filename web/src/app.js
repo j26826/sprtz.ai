@@ -43,7 +43,7 @@ import {
   shortClock, trim, widen,
 } from './player.js';
 import {
-  countTypesIn, filterByTypes, groupByRide, momentTypesIn,
+  countTypesIn, filterByTypes, groupByRide, hasRides, momentTypesIn,
   rideNamedIn, rideRank, ridesAsked, sortRideGroups,
 } from './ridegroups.js';
 import {
@@ -1161,17 +1161,22 @@ function momentsCard(msg, index) {
 
 
 /**
- * Whether the desk is on one event rather than a catalogue of them.
+ * The one event the desk is on, or null when it is on a catalogue of them.
  *
  * The board answers for a single competition day; across several matches the
  * first axis is the match, not the rider, and a rail of riders from four
  * events is a rail of strangers. A session scoped to one game says this
  * outright; a desk holding exactly one game says it by having nothing else.
  */
-function oneEventSelected() {
+function soleEventInContext() {
   const inScope = gamesInScope(state.scope, state.games);
-  if (inScope.length === 1) return true;
-  return !state.scope && state.games.length === 1;
+  if (inScope.length === 1) return inScope[0];
+  if (!state.scope && state.games.length === 1) return state.games[0];
+  return null;
+}
+
+function oneEventSelected() {
+  return Boolean(soleEventInContext());
 }
 
 
@@ -1235,7 +1240,6 @@ function rideGroupsCard(msg, index, found, event) {
  */
 function rideJobFor(question) {
   const idOf = (g) => g.jobId || g.id;
-  const hasRides = (g) => Array.isArray(g.rides) && g.rides.length > 0;
   const named = gameNamedIn(question);
   if (named && hasRides(named)) return idOf(named);
 
@@ -4563,7 +4567,26 @@ function attachCards(index, question) {
   // once it has been chosen.
   const card = chooseCard(question);
 
-  if (card === 'desk-moments' && !gameNamedIn(question)) {
+  const soleEvent = card === 'desk-moments' && !gameNamedIn(question)
+    ? soleEventInContext() : null;
+
+  if (soleEvent && hasRides(soleEvent)) {
+    // "The best moments" with nothing named is a question about the desk —
+    // unless the desk is one competition day, where it is a question about
+    // that day, and a day is read by who rode. Answering it with a ranked grid
+    // of two hundred tiles from forty rounds is the list nobody reads down
+    // that the board exists to replace, and it arrives by a different route
+    // than every other question about the same event, so the same ask gives
+    // two different screens depending on the words used to make it.
+    msg.showMoments = true;
+    msg.sort = 'score';
+    msg.jobId = soleEvent.jobId || soleEvent.id;
+    // The class, not the recording: a day that crossed several is several
+    // events, and this one is the event in context.
+    if (msg.jobId !== state.jobId || (soleEvent.id || soleEvent.jobId) !== state.gameId) {
+      selectJob(msg.jobId, soleEvent.id || soleEvent.jobId);
+    }
+  } else if (card === 'desk-moments' && !gameNamedIn(question)) {
     // The ranked shortlist with no match named is a question about the desk.
     msg.showDeskMoments = true;
     msg.searchResults = null;
