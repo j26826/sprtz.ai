@@ -2313,7 +2313,7 @@ function publishPanel() {
 
       ${status === 'error' ? `<div class="share-error">${esc(share.error || '')}</div>` : ''}
       ${status === 'done' ? `<div class="share-done">${esc(t('share.published'))}
-        <a class="link-btn" href="${esc(share.url)}" target="_blank"
+        <a class="share-link" href="${esc(share.url)}" target="_blank"
            rel="noopener noreferrer">${esc(share.url)}</a></div>` : ''}
       ${over ? `<div class="share-error">${esc(t('share.tooLong'))}</div>` : ''}
     </div>`;
@@ -5368,7 +5368,7 @@ function reelPublishPanel(reel) {
 
       ${status === 'error' ? `<div class="share-error">${esc(pub.error || '')}</div>` : ''}
       ${done.url ? `<div class="share-done">${esc(t('share.published'))}
-        <a class="link-btn" href="${esc(done.url)}" target="_blank"
+        <a class="share-link" href="${esc(done.url)}" target="_blank"
            rel="noopener noreferrer">${esc(done.url)}</a></div>` : ''}
     </div>`;
 }
