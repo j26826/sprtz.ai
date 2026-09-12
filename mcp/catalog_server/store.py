@@ -1172,9 +1172,18 @@ def finish_live_chunk(job_id: str, index: int, moments: int = 0, error: str = ""
     _chunk_ref(job_id, index).update(patch)
     from google.cloud import firestore
 
+    # The moments are **not** counted here. `upsert_moments` already added them
+    # when it wrote them, and the tick always writes a chunk's moments before it
+    # marks the chunk analysed — so counting the same moments again on the way
+    # past made every live event's total exactly twice what was stored. It was
+    # invisible because nothing compares the two: 1206 moments against 603
+    # documents reads as a busy day, and the desk, the agent and the finish
+    # message all quote the counter.
+    #
+    # The write that knows how many landed is the one that does the landing.
+    # This one only knows what it was told.
     job_ref(job_id).update({
         "live.chunksAnalysed": firestore.Increment(1),
-        "counts.moments": firestore.Increment(int(moments)),
         "updatedAt": now(),
     })
     return {"job_id": job_id, "index": int(index), **patch}
