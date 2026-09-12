@@ -895,6 +895,206 @@ async def moment_thumbnails(
     }
 
 
+# How far a trim may run past the moment's own in and out points, and how long
+# the result may be. A publish preview exists so an editor can breathe a second
+# either side of a play — not so "this moment" can become half the match under
+# a moment's name. Both are clamps rather than refusals: a slider dragged to its
+# end should stop, not fail.
+_TRIM_SLACK_SEC = 120.0
+_MAX_CUT_SEC = 600.0
+# A cut is rendered on demand and read once; a day is long enough to keep the
+# link usable and short enough that a leaked URL stops working.
+_DOWNLOAD_TTL = datetime.timedelta(hours=24)
+
+
+class CutRequest(BaseModel):
+    """A trim around one moment, in seconds into the match.
+
+    Absent means the moment's own times. The browser sends what the player is
+    showing, so what comes back is what was being watched.
+    """
+
+    start_sec: float | None = Field(default=None, ge=0)
+    end_sec: float | None = Field(default=None, ge=0)
+
+
+class PublishYouTubeRequest(CutRequest):
+    """What to publish, and how it should read on the channel."""
+
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=5000)
+    privacy: Literal["private", "unlisted", "public"] = "private"
+    tags: list[str] = Field(default_factory=list, max_length=15)
+
+
+async def _cut_range(job_id: str, moment_id: str, body: CutRequest) -> tuple[dict, float, float]:
+    """Resolve a requested trim against the moment on record.
+
+    Returns the moment and the in and out points to cut, clamped to within
+    `_TRIM_SLACK_SEC` of the moment and `_MAX_CUT_SEC` long.
+    """
+    if not _MOMENT_ID.match(moment_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such moment.")
+
+    found = await clients.call_mcp(
+        "catalog", "get_moment", {"job_id": job_id, "moment_id": moment_id}
+    )
+    moment = found.get("moment") if found.get("status") == "success" else None
+    if not moment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such moment.")
+
+    own_start = float(moment.get("start_sec") or 0.0)
+    own_end = float(moment.get("end_sec") or 0.0)
+    start = own_start if body.start_sec is None else float(body.start_sec)
+    end = own_end if body.end_sec is None else float(body.end_sec)
+
+    start = max(0.0, min(start, max(0.0, own_start - _TRIM_SLACK_SEC) + 2 * _TRIM_SLACK_SEC))
+    start = max(max(0.0, own_start - _TRIM_SLACK_SEC), min(start, own_end))
+    end = min(own_end + _TRIM_SLACK_SEC, max(end, own_start))
+    if end <= start:
+        end = start + 1.0
+    end = min(end, start + _MAX_CUT_SEC)
+    return moment, round(start, 3), round(end, 3)
+
+
+async def _render_cut(job_id: str, moment_id: str, job: dict, start: float, end: float) -> str:
+    """Cut the range out of the source and return the object's gs:// URI."""
+    source = (job.get("source") or {}).get("gcsUri") or ""
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            # A live event has chunks rather than a source until something joins
+            # them, and that is a button the editor already has.
+            detail="This match has no source video yet. Prepare playback first.",
+        )
+
+    cut = await clients.call_mcp("media", "cut_moment", {
+        "gcs_uri": source,
+        "job_id": job_id,
+        "moment_id": moment_id,
+        "start_sec": start,
+        "end_sec": end,
+    })
+    if cut.get("status") != "success" or not cut.get("output_uri"):
+        logger.error("cut_moment failed for %s/%s: %s", job_id, moment_id, cut.get("error"))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=cut.get("error") or "Could not cut this moment.",
+        )
+    return cut["output_uri"]
+
+
+@router.post("/{job_id}/moments/{moment_id}/download")
+async def download_moment(
+    job_id: str,
+    moment_id: str,
+    body: CutRequest,
+    user: CallerIdentity = Depends(current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Render one moment as an MP4 and hand back a signed URL for it.
+
+    Signed rather than served through this API: the file is tens of megabytes
+    and proxying it would hold a request open for the whole transfer, on a
+    service whose other job is streaming an agent's reply.
+    """
+    job = await _load_job(job_id, user)
+    if not settings.media_bucket:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Media storage is not configured.",
+        )
+
+    moment, start, end = await _cut_range(job_id, moment_id, body)
+    await _render_cut(job_id, moment_id, job, start, end)
+
+    name = f"jobs/{job_id}/downloads/{moment_id}.mp4"
+    blob = _storage_client().bucket(settings.media_bucket).blob(name)
+    token = _signing_token()
+
+    def sign() -> str:
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=_DOWNLOAD_TTL,
+            method="GET",
+            service_account_email=settings.signer_service_account or None,
+            access_token=token,
+            # Without this the browser opens the MP4 in a tab: the object's own
+            # content type says video, and a link that plays is not a download.
+            response_disposition=f'attachment; filename="{_download_name(job, moment)}"',
+        )
+
+    try:
+        url = await run_in_threadpool(sign)
+    except Exception as exc:
+        logger.exception("could not sign a download URL for %s/%s", job_id, moment_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not sign the download URL.",
+        ) from exc
+
+    return {
+        "job_id": job_id,
+        "moment_id": moment_id,
+        "url": url,
+        "filename": _download_name(job, moment),
+        "start_sec": start,
+        "end_sec": end,
+        "expires_at": datetime.datetime.now(datetime.UTC) + _DOWNLOAD_TTL,
+    }
+
+
+def _download_name(job: dict, moment: dict) -> str:
+    """A filename someone can find again in their downloads folder.
+
+    The match, the moment and its timecode — not the moment id, which is a hex
+    string that says nothing once the file is on a desktop.
+    """
+    parts = [job.get("title") or "match", moment.get("label") or moment.get("moment_type") or "moment"]
+    at = int(float(moment.get("start_sec") or 0))
+    parts.append(f"{at // 60:02d}m{at % 60:02d}s")
+    safe = re.sub(r"[^A-Za-z0-9]+", "-", " ".join(str(p) for p in parts)).strip("-")
+    return f"{safe[:120] or 'moment'}.mp4"
+
+
+@router.post("/{job_id}/moments/{moment_id}/publish/youtube")
+async def publish_moment_to_youtube(
+    job_id: str,
+    moment_id: str,
+    body: PublishYouTubeRequest,
+    user: CallerIdentity = Depends(current_user),
+) -> dict:
+    """Cut one moment and upload it to the configured YouTube channel."""
+    job = await _load_job(job_id, user)
+    _, start, end = await _cut_range(job_id, moment_id, body)
+    output = await _render_cut(job_id, moment_id, job, start, end)
+
+    result = await clients.call_mcp("media", "publish_youtube", {
+        "clip_uri": output,
+        "title": body.title,
+        "description": body.description,
+        "privacy": body.privacy,
+        "tags": body.tags,
+    })
+    if result.get("status") != "success":
+        # The reason is the editor's to act on — a revoked refresh token, a
+        # channel over its daily quota — so it travels rather than being
+        # flattened into "upload failed".
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.get("error") or "YouTube would not accept the upload.",
+        )
+    return {
+        "job_id": job_id,
+        "moment_id": moment_id,
+        "video_id": result.get("video_id"),
+        "url": result.get("url"),
+        "privacy": result.get("privacy"),
+        "start_sec": start,
+        "end_sec": end,
+    }
+
+
 class LibrarySearchRequest(BaseModel):
     """A search across every game on the desk, optionally narrowed."""
     query: str = Field(min_length=1, max_length=500)

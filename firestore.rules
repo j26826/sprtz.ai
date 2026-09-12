@@ -31,7 +31,7 @@ service cloud.firestore {
       allow update: if isSignedIn()
         && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['displayName', 'defaultPlatforms', 'updatedAt']);
+             .hasOnly(['displayName', 'updatedAt']);
       allow create, delete: if false;
     }
 
@@ -71,7 +71,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Anything not matched above is denied.
+    // Anything not matched above is denied — and `config`, which holds the
+    // YouTube refresh token, is deliberately not matched anywhere: it is a
+    // standing permission to post to someone's channel, read by the API and
+    // the media service with admin credentials and by nothing in a browser.
     match /{document=**} {
       allow read, write: if false;
     }

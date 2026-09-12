@@ -1242,6 +1242,58 @@ def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> 
     return plays
 
 
+# --- Deployment configuration -------------------------------------------------
+#
+# One document per integration under `config`, written from the editor's
+# settings panel through the API. It holds secrets — a YouTube refresh token is
+# a standing permission to post to someone's channel — so nothing here is ever
+# projected into an agent's context or returned to the browser whole; the API
+# says whether a field is set, never what it is.
+
+CONFIG_COLLECTION = "config"
+
+
+def get_config(name: str) -> dict[str, Any]:
+    """Read one configuration document, empty when it has never been written."""
+    doc = db().collection(CONFIG_COLLECTION).document(name).get()
+    return doc.to_dict() or {} if doc.exists else {}
+
+
+def set_config(name: str, values: dict[str, Any]) -> dict[str, Any]:
+    """Merge fields into one configuration document.
+
+    A merge rather than a replace so connecting a channel does not clear the
+    client it was connected with, and an empty string is a real value — that is
+    how a field is cleared.
+    """
+    payload = {**values, "updatedAt": now()}
+    db().collection(CONFIG_COLLECTION).document(name).set(payload, merge=True)
+    return {"name": name, "fields": sorted(values)}
+
+
+def clear_config(name: str, fields: list[str]) -> dict[str, Any]:
+    """Blank the named fields, leaving the rest of the document alone."""
+    if not fields:
+        return {"name": name, "cleared": []}
+    payload: dict[str, Any] = {f: "" for f in fields}
+    payload["updatedAt"] = now()
+    db().collection(CONFIG_COLLECTION).document(name).set(payload, merge=True)
+    return {"name": name, "cleared": sorted(fields)}
+
+
+def get_moment(job_id: str, moment_id: str) -> dict[str, Any] | None:
+    """One moment, by id. None when the job does not hold it.
+
+    Downloading or publishing a moment starts from its in and out points, and
+    those come from the record rather than from whoever asked. A caller may
+    trim around them — that is what the publish preview does — but the record
+    is what the trim is bounded against, so "this moment" cannot become an
+    hour of the match under a moment's name.
+    """
+    doc = job_ref(job_id).collection("moments").document(moment_id).get()
+    return _moment_out(doc.to_dict()) if doc.exists else None
+
+
 def list_moments(job_id: str, limit: int = 100, min_score: float = 0.0) -> list[dict[str, Any]]:
     from google.cloud import firestore
 

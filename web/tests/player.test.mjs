@@ -1,8 +1,9 @@
-import { test } from 'node:test';
+import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  PREVIEW_PAD_SEC, SPEEDS, clampTo, nextSpeed, playRange, playerTimeline, rangeBand, shortClock, widen,
+  MAX_CUT_SEC, PREVIEW_PAD_SEC, SPEEDS, TRIM_SLACK_SEC, canTrim, clampTo, nextSpeed,
+  playRange, playerTimeline, rangeBand, shortClock, trim, widen,
 } from '../src/player.js';
 
 test('the player shows three seconds either side of the moment', () => {
@@ -66,4 +67,42 @@ test('the moment is marked where it sits on the ride', () => {
 test('nothing is marked when the range is the whole bar', () => {
   assert.equal(rangeBand({ start: 700, end: 1100 }, { start: 700, end: 1100 }), null);
   assert.equal(rangeBand({ start: 5, end: 5 }, { start: 5, end: 5 }), null);
+});
+
+
+describe('trimming a cut before it is published', () => {
+  const moment = { startSec: 600, endSec: 612 };
+
+  it('moves the end it was asked to move', () => {
+    const out = trim({ start: 600, end: 612 }, 'end', 2, { moment });
+    assert.deepEqual(out, { start: 600, end: 614 });
+  });
+
+  it('stops at the slack rather than refusing', () => {
+    // A button held at its limit should stop, not start failing.
+    const out = trim({ start: 600, end: 612 }, 'start', -9999, { moment });
+    assert.equal(out.start, 600 - TRIM_SLACK_SEC);
+  });
+
+  it('never lets an end cross its own start', () => {
+    const out = trim({ start: 600, end: 601 }, 'end', -50, { moment });
+    assert.ok(out.end > out.start);
+  });
+
+  it('keeps the cut inside the ceiling by giving way at the far end', () => {
+    const long = { startSec: 0, endSec: 3600 };
+    const out = trim({ start: 0, end: MAX_CUT_SEC }, 'end', 60, { moment: long });
+    assert.equal(out.end - out.start, MAX_CUT_SEC);
+  });
+
+  it('does not run past the match', () => {
+    const out = trim({ start: 600, end: 612 }, 'end', 100, { moment, duration: 650 });
+    assert.equal(out.end, 650);
+  });
+
+  it('says when a direction has nothing left to give', () => {
+    const at = { start: 600 - TRIM_SLACK_SEC, end: 612 };
+    assert.equal(canTrim(at, 'start', -1, { moment }), false);
+    assert.equal(canTrim(at, 'start', 1, { moment }), true);
+  });
 });

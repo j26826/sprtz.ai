@@ -1,8 +1,8 @@
 # Sportscut — Architecture
 
-Sportscut turns a long-form sports video into a ranked set of short-form clips ready
-for TikTok, Instagram Reels and YouTube Shorts. Everything runs on Google Cloud
-native services and is provisioned by Terraform.
+Sportscut turns a long-form sports video into a ranked set of the moments worth
+publishing, each one downloadable as an MP4 or publishable to a YouTube channel.
+Everything runs on Google Cloud native services and is provisioned by Terraform.
 
 ```
                          ┌──────────────────────────────────────┐
@@ -37,7 +37,7 @@ native services and is provisioned by Terraform.
    │                  │ HLS package            │
    │                  ▼                        ▼
    │        ┌────────────────────┐      Firestore (native mode)
-   │        │ GCS (hls bucket)   │      jobs · moments · clips · events
+   │        │ GCS (hls bucket)   │      jobs · moments · events · config
    │        └─────────┬──────────┘      + vector index (KNN, 768-d)
    │                  │                        │
    │                  ▼                        │
@@ -62,20 +62,20 @@ sprtz_producer  (LlmAgent — talks to the editor)
     ├── prepare_and_analyze  (ParallelAgent)
     │   ├── transcode_agent
     │   └── analysis_agent
-    ├── clip_agent
-    ├── caption_agent
-    └── publish_agent
+    └── finalize_agent
 ```
 
 | Agent | Responsibility |
 |---|---|
-| `sprtz_producer` | Talks to the editor. Answers questions about a job, searches the match semantically, adjusts clips, and delegates a full run to `analysis_pipeline`. |
+| `sprtz_producer` | Talks to the editor. Answers questions about a job, searches the match semantically, and delegates a full run to `analysis_pipeline`. |
 | `ingest_agent` | Probes the upload, records duration/fps/resolution/codec, works out the segment plan. |
 | `transcode_agent` | Packages the video into an HLS ladder behind the CDN so the editor can play it. |
 | `analysis_agent` | Runs the segmented Gemini 2.5 Flash pass over the whole match, merges the results, embeds and saves the moments. |
-| `clip_agent` | Turns moments into publishable cuts: in/out points per moment type, overlap resolution, 9:16 target. |
-| `caption_agent` | Per-platform copy — on-screen hook, title, TikTok/Instagram/YouTube captions, hashtags. |
-| `publish_agent` | Validates each clip against platform limits and closes the job out. |
+| `finalize_agent` | Closes the job out on what the analysis found: moments make it ready, none make it failed. |
+
+Clip generation — `clip_agent`, `caption_agent` and the publish-package stage —
+was withdrawn in September 2026 to be rebuilt. A moment now leaves the desk one
+at a time, downloaded or published from the player.
 
 ### Why transcode and analysis run together
 
@@ -192,7 +192,7 @@ memory-backed, and a three-hour match is a ~3 GB source plus a comparable HLS
 package — bigger than any sensible instance. So:
 
 - **Sources are read over HTTPS**, straight from GCS with a bearer token;
-  ffmpeg's `-ss` becomes a range seek, so cutting a 30-second clip out of a
+  ffmpeg's `-ss` becomes a range seek, so cutting a 30-second moment out of a
   3 GB match reads megabytes.
 - **Playback packaging runs on Transcoder API, off this service.** It reads the
   source from GCS and writes the HLS package to GCS itself, so no video byte
@@ -248,10 +248,9 @@ Two consequences are baked into the configuration:
 |---|---|
 | `probe_media` | Duration, resolution, fps, codecs. Reads the file header first, so a 3 GB match does not cross the wire just to read its duration. |
 | `transcode_hls` | The HLS ladder, uploaded to the CDN bucket. |
-| `cut_clip` | Render an in/out range to a standalone MP4 for export. |
-| `reframe_vertical` | 9:16 or 1:1 with a blurred fill, so a wide court shot still reads on a phone. |
-| `burn_captions` | Burn the on-screen hook over the opening second. |
-| `render_preview` | Quick proxy of a proposed cut. |
+| `cut_moment` | Render one moment's range to a standalone MP4, for a download or an upload. |
+| `publish_youtube` | Upload a rendered cut to the connected channel, resumably, with the credentials read from `config/youtube`. |
+| `render_preview` | Quick proxy of a range. |
 
 ### `mcp-catalog` — Firestore, embeddings and search
 
@@ -261,7 +260,7 @@ Two consequences are baked into the configuration:
 | `record_media_info` / `record_playback` | Probe results and the CDN playback URL. |
 | `emit_event` | Append to `jobs/{id}/events` — what the UI streams live. |
 | `upsert_moments` / `list_moments` | Moments. Embeddings are generated here so the vector width can never drift from the index. |
-| `upsert_clips` / `list_clips` / `update_clip` | Clip suggestions. `update_clip` rejects derived fields rather than writing them. |
+| `get_config` / `set_config` / `clear_config` | Deployment integrations, one document each under `config`. Never projected into an agent's context: `config/youtube` holds a refresh token. |
 | `knn_search_moments` | Vector retrieval plus Gemini reranking. |
 | `list_game_rides` | A competition day's rides as stored — one document read. `get_game` returns the game in the agents' summary shape, which leaves the rides out. |
 | `get_event_tree` | One event as event → rides (rider + horse) → moments, built from the game record's rides and each moment's ride; served at `GET /api/jobs/{id}/event`. |
@@ -300,7 +299,7 @@ jobs/{jobId}
   media:    { durationSec, fps, width, height, videoCodec, audioCodec,
               bitrate, segmentCount },
   playback: { hlsUrl, posterUrl, renditions[], segmentSeconds, readyAt },
-  counts:   { moments, clips },
+  counts:   { moments },
   error, createdAt, updatedAt
 
 jobs/{jobId}/events/{eventId}          # realtime agent activity feed
@@ -319,15 +318,17 @@ jobs/{jobId}/moments/{momentId}
   embedding: Vector(768),              # KNN index
   createdAt
 
-jobs/{jobId}/clips/{clipId}
-  momentId, startSec, endSec, durationSec, platforms[],
-  aspect, hookText, title, rationale,
-  captions: { tiktok, instagram, youtube },
-  hashtags[], status, renderUri, thumbnailUri, score
-
-renders/{renderId}
-  jobId, clipId, state, outputUri, requestedBy, startedAt, finishedAt
+config/youtube                         # the channel the desk publishes to
+  clientId, clientSecret,              # normally the deployment's instead
+  refreshToken, channelTitle, privacy, updatedAt
 ```
+
+`config` is denied to every client by `firestore.rules`' catch-all: a refresh
+token is a standing permission to post to someone's channel, and it is read
+only by the API and the media service, which hold admin credentials.
+
+Jobs analysed before September 2026 still carry a `clips` subcollection. Nothing
+writes or reads one; it is deleted with the job.
 
 `embedding` is indexed with a Firestore vector index (`COSINE`, 768 dims) so
 `knn_search_moments` is a single `find_nearest` query — no separate vector store.
@@ -336,7 +337,7 @@ renders/{renderId}
 
 The SPA holds three `onSnapshot` listeners per open job: the job document
 (status/progress), the `events` subcollection (agent activity feed), and the
-`clips` subcollection (suggestion grid). Agents write through `mcp-catalog`, so
+`moments` subcollection. Agents write through `mcp-catalog`, so
 the UI updates without any polling or websocket of our own.
 
 ## 6. Identity

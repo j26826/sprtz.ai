@@ -95,6 +95,23 @@ class Settings:
         default_factory=lambda: int(os.environ.get("LIVE_LEAD_SECONDS", "300"))
     )
 
+    # The OAuth client publishing to YouTube runs under. Terraform passes it
+    # here because it is a deployment fact rather than a per-user one; the
+    # channel that goes with it is connected in Settings and kept in Firestore.
+    # Google has no API that creates an OAuth client, so these are whatever a
+    # human made in the console once — see `youtube_oauth_client_id` in
+    # Terraform and the redirect URI it outputs.
+    youtube_client_id: str = field(default_factory=lambda: os.environ.get("YOUTUBE_CLIENT_ID", ""))
+    youtube_client_secret: str = field(
+        default_factory=lambda: os.environ.get("YOUTUBE_CLIENT_SECRET", "")
+    )
+    # Where Google sends the editor back to after they approve the channel.
+    # It has to match what is registered on the OAuth client exactly, so it is
+    # configuration rather than something derived from the request.
+    youtube_redirect_uri: str = field(
+        default_factory=lambda: os.environ.get("YOUTUBE_REDIRECT_URI", "")
+    )
+
     cdn_base_url: str = field(default_factory=lambda: os.environ.get("CDN_BASE_URL", "").rstrip("/"))
     cdn_signing_key: str = field(default_factory=lambda: os.environ.get("CDN_SIGNING_KEY", ""))
     cdn_signing_key_name: str = field(

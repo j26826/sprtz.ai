@@ -66,7 +66,7 @@ variable "analysis_model" {
   description = "Gemini model for the per-segment video analysis."
   # 2.5 Flash again: 3.6 Flash was tried on the equestrian footage and its
   # moments were judged less accurate on the desk. The reranker stays on 3.6.
-  default     = "gemini-2.5-flash"
+  default = "gemini-2.5-flash"
 }
 
 variable "analysis_location" {
@@ -175,7 +175,7 @@ variable "media_worker_cpu" {
 }
 
 variable "media_worker_memory" {
-  type        = string
+  type = string
   # The "1GiB per CPU" rule this used to state was the memory-to-CPU ratio
   # theory that a plain control deploy disproved; it is not a constraint.
   # Size this against one ffmpeg run instead, since concurrency is 1: the
@@ -187,7 +187,7 @@ variable "media_worker_memory" {
   # segments waiting to drain live in a filesystem that is really RAM. The
   # parallel drain is what fixes the race; this is the headroom for whatever
   # is still in flight while it runs.
-  default     = "4Gi"
+  default = "4Gi"
 }
 
 variable "video_retention_days" {
@@ -239,6 +239,29 @@ variable "supported_sports" {
     can run and nobody can select, which is how equestrian shipped invisible.
   EOT
   default     = ["handball", "equestrian"]
+}
+
+variable "youtube_oauth_client_id" {
+  description = <<-EOT
+    OAuth 2.0 Web client ID the desk publishes to YouTube with.
+
+    Create it once by hand — APIs & Services > Credentials > Create credentials
+    > OAuth client ID > Web application — because no Google API creates one:
+    the IAP OAuth Admin APIs that used to were shut down in March 2026. Register
+    the `youtube_redirect_uri` output as an authorised redirect URI on it, and
+    add the channel's owner as a test user while the consent screen is in
+    testing. Empty leaves publishing switched off, and the editor's settings
+    panel says so rather than offering a button that cannot work.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "youtube_oauth_client_secret" {
+  description = "Client secret for youtube_oauth_client_id. Stored in Secret Manager."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "google_oauth_client_id" {

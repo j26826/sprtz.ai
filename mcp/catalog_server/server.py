@@ -361,6 +361,65 @@ def list_moments(job_id: str, limit: int, min_score: float) -> dict:
 
 
 @mcp.tool
+def get_config(name: str) -> dict:
+    """Read one deployment configuration document, such as "youtube".
+
+    Args:
+        name: Which configuration to read.
+    """
+    try:
+        return {"status": "success", "name": name, "config": store.get_config(name)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, name=name)
+
+
+@mcp.tool
+def set_config(name: str, values: dict) -> dict:
+    """Merge fields into one deployment configuration document.
+
+    Args:
+        name: Which configuration to write.
+        values: Fields to set. Existing fields not named here are left alone.
+    """
+    try:
+        return {"status": "success", **store.set_config(name, values)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, name=name)
+
+
+@mcp.tool
+def clear_config(name: str, fields: list[str]) -> dict:
+    """Blank named fields of a configuration document.
+
+    Args:
+        name: Which configuration to write.
+        fields: Field names to clear.
+    """
+    try:
+        return {"status": "success", **store.clear_config(name, fields)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, name=name)
+
+
+@mcp.tool
+def get_moment(job_id: str, moment_id: str) -> dict:
+    """Read one moment by id.
+
+    Args:
+        job_id: Identifier of the job.
+        moment_id: Identifier of the moment.
+    """
+    try:
+        moment = store.get_moment(job_id, moment_id)
+        if moment is None:
+            return {"status": "error", "error": "No such moment.",
+                    "job_id": job_id, "moment_id": moment_id}
+        return {"status": "success", "moment": moment}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id, moment_id=moment_id)
+
+
+@mcp.tool
 def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> dict:
     """Every detected moment in a job as ActionPlay records, in match order.
 

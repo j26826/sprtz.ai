@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
-from app.routers import agent, jobs, live
+from app.routers import agent, integrations, jobs, live
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("sprtz-api")
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(jobs.router)
 app.include_router(agent.router)
 app.include_router(live.router)
+app.include_router(integrations.router)
 
 
 @app.get("/healthz", include_in_schema=False)

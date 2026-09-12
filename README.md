@@ -1,7 +1,9 @@
 # Sportscut
 
 An agentic SaaS that watches a full sports match and hands an editor a ranked set
-of short-form clips ready for TikTok, Instagram Reels and YouTube Shorts.
+of the moments worth publishing, each ready to download or put on a channel.
+(Clip generation — a reel of proposed cuts with copy for each — was withdrawn in
+September 2026 to be rebuilt.)
 
 Handball to start with. Everything sport-specific lives in one module, so adding
 a sport does not touch the agents, the tools or the UI.
@@ -24,12 +26,12 @@ Terraform + Cloud Build for everything else.
    concurrently, reading each range straight out of GCS.
 4. **Merge.** Per-segment detections become one absolute-timestamped timeline;
    anything a boundary caused to be reported twice is collapsed.
-5. **Score, cut, write.** Moments are ranked, embedded with `gemini-embedding-001`
-   for semantic search, cut into clips with per-moment-type lead-in and
-   follow-through, and given per-platform copy.
+5. **Score.** Moments are ranked and embedded with `gemini-embedding-001` for
+   semantic search, and a still is cut at each one's peak.
 6. **Review.** The editor watches one HLS stream. Clicking a moment seeks to its
-   in point and stops at its out point — nothing is rendered to review a
-   suggestion.
+   in point and stops at its out point — nothing is rendered to review one.
+7. **Take it off the desk.** Download the moment as an MP4, or publish it to the
+   connected YouTube channel, trimming and titling it first.
 
 Everything the agents write lands in Firestore, and the UI holds `onSnapshot`
 listeners on it, so the editor's screen updates as the analysis runs with no
@@ -57,11 +59,11 @@ earned it, a wing shot does not.
 agents/       ADK agents deployed to Vertex AI Agent Runtime
   sprtz_agents/
     agent.py            sprtz_producer + analysis_pipeline
-    sub_agents/         the five pipeline stages
+    sub_agents/         the four pipeline stages
     sports/             moment taxonomies + the Gemini prompt  ← add sports here
-    tools/              segmented analysis, clip planning, MCP access
+    tools/              segmented analysis, rides, MCP access
 mcp/          MCP tool servers (Cloud Run)
-  media_server/         ffmpeg: probe, HLS, cut, reframe, burn-in
+  media_server/         ffmpeg: probe, HLS, cut, stills; YouTube upload
   catalog_server/       Firestore, embeddings, KNN + Gemini rerank
 api/          FastAPI behind IAP: signed uploads, signed CDN URLs, agent proxy
 web/          The Sportscut editor SPA

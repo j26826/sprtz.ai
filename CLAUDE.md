@@ -1,7 +1,10 @@
 # Arenos — working notes
 
-An agentic SaaS that watches a full sports match and proposes short-form clips
-for TikTok, Instagram Reels and YouTube Shorts. Handball and equestrian today;
+An agentic SaaS that watches a full sports match and finds the moments worth
+publishing, which an editor then downloads or puts on a channel. Clip
+generation — a reel of proposed cuts with copy written for each — was withdrawn
+in September 2026 to be rebuilt, so what is here now is the finding and the two
+ways out of it. Handball and equestrian today;
 the sport taxonomy is pluggable. Rebranded from Sportscut onto the Arenos
 design system — see the Brand and UI sections below.
 
@@ -16,11 +19,11 @@ cost a debugging cycle.
 ```
 agents/      ADK agents on Vertex AI Agent Runtime (the product's brain)
   sprtz_agents/agent.py          sprtz_producer + analysis_pipeline
-  sprtz_agents/sub_agents/       the six pipeline stages
+  sprtz_agents/sub_agents/       the four pipeline stages
   sprtz_agents/sports/           moment taxonomies + Gemini prompt  ← add sports here
-  sprtz_agents/tools/            segmented analysis, clip planning, MCP access
+  sprtz_agents/tools/            segmented analysis, rides, MCP access
 mcp/         MCP tool servers (private Cloud Run)
-  media_server/                  Transcoder API for HLS; ffmpeg: probe, cut, reframe, burn-in
+  media_server/                  Transcoder API for HLS; ffmpeg: probe, cut, stills; YouTube upload
   catalog_server/                Firestore, embeddings, KNN + Gemini rerank
 api/         FastAPI behind IAP: signed uploads, signed CDN URLs, agent SSE proxy
 web/         Arenos editor SPA (chat-first, Arenos design system)
@@ -192,7 +195,7 @@ The object goes on the job *before* the proxy is attempted, and a proxy that
 fails is a warning: the analysis then cuts the source into windows as it does
 for an upload. The Transcoder service agent needs write on the media bucket
 for it (`transcoder_media_write`), the same minutes-in failure as the
-package's grants. Thumbnails and clips still read `source.gcsUri`; a still
+package's grants. Thumbnails and downloads still read `source.gcsUri`; a still
 from a 480p proxy is not a still.
 
 **A prefix of an MPEG-TS is a shorter file.** `probe_media` reads the first
@@ -222,7 +225,7 @@ disk and has one ffmpeg stream-copy video from the bucket and audio from
 disk into a new transport stream, piped straight back to the bucket — and
 polls `mux_status`, which hands over the muxed object and deletes the silent
 one. A mux that fails is a warning and the recording stays silent; the
-analysis, the preview and the clips all still run. The segment fetches retry
+analysis, the preview and the stills all still run. The segment fetches retry
 from two seconds doubling with jitter, on a keep-alive session per worker:
 the first real mux lost all of a three-thousand-segment fetch to one dropped
 CDN connection. A failed ffmpeg removes the empty object its upload had
@@ -319,7 +322,7 @@ are already in (`compose_live_source`, `gcs.compose`, the same rounds-of-32
 the recorder uses), so no bytes pass through the container and a twelve-hour
 event costs a few API calls. It runs on demand, which is what makes a long
 broadcast watchable before it ends, and again when the event finishes so
-clips and source-quality stills have a file to read. The muxed chunk wins
+downloads and source-quality stills have a file to read. The muxed chunk wins
 over the silent one where there is both.
 
 **A stream that stops ends the event.** Stalling is ordinary on a live stream
@@ -597,6 +600,10 @@ which is why the bar never moved. Stages now report through `_progress`, and
 actually takes: analysis is 20-80 because it is an hour of Gemini calls against
 minutes for everything else, and equal slices would park the bar mid-way for
 most of a run. The web `STAGES` table mirrors it; change one and change both.
+The last band, 80-100, belonged to the clip and caption stages and now belongs
+to `finalize`, which is a read and a status write — the bar has to arrive at
+100 somewhere, and giving that span to the analysis would claim time it does
+not spend.
 
 **The ingest panel is idle once the job exists, not once the turn ends.**
 Every registration path handed the job to the agent and then awaited `ask()`,
@@ -695,7 +702,7 @@ or cancelled.
 **Delete removes media first, then Firestore.** A failure after the media is gone
 leaves a job pointing at a missing video, which is recoverable; the other order
 leaves orphaned gigabytes nothing refers to. Firestore does not cascade, so
-moments, clips and events are deleted explicitly, and the `games` record is a
+moments and events are deleted explicitly, and the `games` record is a
 separate top-level document that an imagined cascade would miss entirely.
 
 **Re-analysing clears first.** Without `clear_analysis` the previous run's
@@ -822,8 +829,8 @@ is what replaces a timeline. **The player shows three seconds either side**
 of run-up by design and the out point is the end of the play, and the editor
 is judging the play in its context. The record keeps the moment's own times;
 only the playback is wider, clamped at zero and at the match's length. Every
-way into the player — the row's thumbnail, Details, the reel's Play with a
-clip's own trim — goes through `openDetails`, so the pad lives in one place.
+way into the player — the row's thumbnail and Details — goes through
+`openDetails`, so the pad lives in one place.
 
 ### Sessions
 
@@ -834,6 +841,19 @@ matters: persistence is set explicitly, a timer refreshes at 45 minutes, and
 **`api()` retries once on a 401 with a force-refreshed token**. The retry is
 what turns an expiry into a pause nobody notices; once only, because a second
 401 is a real authentication failure.
+
+**A session that has really ended signs out.** A 401 that survives the forced
+refresh, or a scheduled refresh Firebase refuses with an `auth/*` code, means
+the credential itself is gone — revoked, disabled, or the password changed on
+another device. The desk used to stay on screen under it with every card
+failing and nothing saying why; now it signs out, which paints the sign-in card
+and is the only way back. Once per expiry, however many requests fail together:
+a page mid-analysis has several in flight and each of them signing out would be
+several sign-outs and several re-renders. Only `auth/*` — a network blip is not
+an expiry, and the SDK recovers from one on its own. Signing out also closes
+the popups and clears the moments, the games and the open job: behind the
+sign-in card it is another person's desk, and a details popup left open would
+still be playing their match.
 
 Restoring a stored session is asynchronous and `onAuthStateChanged` fires `null`
 first, so the page paints nothing until auth resolves — otherwise every reload
@@ -972,17 +992,19 @@ are not running the same instruction.
 ### A session has a scope, and the opener asks for it
 
 Every new session opens with the same question — *what would you like to work
-on in this session?* — answered by three things this desk does: **add a new
-video**, **find moments**, **generate clips**. The first two links open a
-panel; the other two carry four ways of saying *which* matches: all of the
-catalogue, the recent event, one or more events, or across a sport and its
-disciplines.
+on in this session?* — answered by the two things this desk does: **add a new
+video** and **find moments**. The first's links open a panel; the second
+carries four ways of saying *which* matches: all of the catalogue, the recent
+event, one or more events, or across a sport and its disciplines. There was a
+third option, generate clips, over the same four scopes; it went with clip
+generation, because an opener offering a way into something that no longer runs
+is worse than an opener with two options.
 
-Adding a video carries a third: **Check status**, which swaps the stage strip
-in. It is local — the strip renders from the jobs listener, so asking the agent
+Adding a video carries a third link: **Check status**, which swaps the stage
+strip in. It is local — the strip renders from the jobs listener, so asking the agent
 what is running would be a round trip for something the client already holds,
 and on a desk mid-analysis the answer would arrive after the bar had moved. All
-three swap a card into the message that offered them and carry one Back, which
+of them swap a card into the message that offered them and carry one Back, which
 is offered only when the opener put the card there: a strip the editor asked
 for in words has no opener behind it, and a Back that restored a card nobody
 had seen would be a trapdoor rather than a way out.
@@ -1015,7 +1037,7 @@ dropped), so switching back is switching back rather than starting again; a
 session with no scope yet — one from before this existed — is asked on open.
 
 
-Moments, clips, events and the game record are all read through listeners
+Moments, events and the game record are all read through listeners
 `selectJob` opens, so with no job selected every one of those cards is empty
 however much has been analysed — and an empty card reads as "the analysis found
 nothing" rather than "no match is open". Decoupling sessions from jobs removed
@@ -1027,8 +1049,7 @@ never overrides a session that names its own.
 ### Adding a video, and booking one
 
 **Two panels, not two tabs of one.** A file is here now and a live event is a
-reservation; they share a sport, the context links and the clips question, and
-nothing else. Tabbing between them put a datetime picker one click from a drop
+reservation; they share a sport and the context links, and nothing else. Tabbing between them put a datetime picker one click from a drop
 zone and made the panel read as a single form with half its fields hidden.
 Which panel is on the message (`ingestKind`), so an ingest panel scrolled back
 to is the panel that was opened, and Back returns it to the opener that
@@ -1048,11 +1069,14 @@ match is registered so the next one does not inherit it.
 
 ### The cards
 
-Eight, each reachable from `attachCards` and each with an empty state:
+Six, each reachable from `attachCards` and each with an empty state:
 `ingestCard`, `jobsCard` (the stage strip), `gameCard`, `gamesCard`,
-`momentsCard`, `reelCard`, `publishCard`, `activityCard`. `showActivity` was
-never set by anything, so that card could not appear at all until this was
-audited — a renderer nobody routes to is dead code that looks alive.
+`momentsCard`, `activityCard`. `showActivity` was never set by anything, so
+that card could not appear at all until this was audited — a renderer nobody
+routes to is dead code that looks alive. `reelCard` and `publishCard` went with
+clip generation, and their routes in `cards.js` went with them: a question
+about cutting or posting now falls through to the moments, which is the honest
+answer while there is nothing that cuts.
 
 **No card returns an empty string.** Rendering nothing is indistinguishable from
 a card that failed to render, and the two have very different answers: "No
@@ -1151,8 +1175,8 @@ conversation. Ten a page, with the page held on the message so scrolling back to
 an earlier answer finds it where it was left. `pageOf` clamps out-of-range pages
 rather than rendering blank, and takes a page size — three when a game's record
 is open, because ten of those is a dozen rows each and a page nobody can see the
-end of is not a page. Jobs, the activity feed and the reel page too: fifty jobs
-and eighty events in one message bury the conversation as surely as two hundred
+end of is not a page. Jobs and the activity feed page too: fifty jobs and
+eighty events in one message bury the conversation as surely as two hundred
 moments did.
 
 ### The two detail widgets
@@ -1163,20 +1187,27 @@ popup.
 
 **A moment tile has no buttons.** The frame carries a play button and the
 whole frame opens the moment in the player, where its record, its ride and the
-reel sit; the foot shows the moment's type and its confidence (a mono
-percentage and a bar). Details and Add used to sit at the foot of every tile,
-and down a page of moments they were most of what the page said. Adding to the
-reel from a tile went with them: a single moment now goes in by asking the
-agent, or a whole list with its "Cut all of these".
+two ways out of it are; the foot shows the moment's type and its confidence (a
+mono percentage and a bar). Details and Add used to sit at the foot of every
+tile, and down a page of moments they were most of what the page said — and
+neither downloading nor publishing is a decision anyone makes without watching
+the thing first, which is why both live in the player instead.
 
 **The moment plays inside its own popup and nowhere else**, in the wider left
 column, autoplaying from the in point and stopping at the out point. The row's
-thumbnail opens it, and so does a clip's Play in the reel — that one passing
-the clip's own trim rather than the moment's. The row used to hold a player
+thumbnail opens it. The row used to hold a player
 slot of its own, which meant two elements carrying the same `data-slot` and the
-wrong one winning on document order; it also meant playing a clip from the reel
-did nothing at all unless that moment's row happened to be rendered somewhere
-to receive it. The video takes
+wrong one winning on document order; it also meant playing a moment from
+anywhere but its own row did nothing at all. **The popup is the whole
+viewport** — no backdrop margin, no card floating in the middle, `100dvh` —
+because a moment is judged by watching it and every pixel given back to the
+page behind was a pixel off the picture. The card is a column: a head that
+stays, and a split that scrolls inside its two halves rather than scrolling the
+card. Both the split and each column carry `min-height: 0`, or a grid child
+refuses to shrink below its content and the dialog quietly grows past the
+viewport. In that layout the video takes the height it is given rather than an
+aspect ratio (`object-fit: contain`, letterboxed); stacked under 760px it goes
+back to 16:9 and the column scrolls as one. The video takes
 the larger share of the split: the record beside it is a two-column table of
 short values that reads fine narrow, while a 16:9 frame squeezed to half a
 dialog is the thing someone opened the popup to look at. Opening the details of a play is the point
@@ -1189,6 +1220,89 @@ because the transcript's carries the same moment id and comes first in document
 order. What differs is that a moment has
 a thumbnail to play and a game does not, so they have separate grids — reusing
 `.moment-row` for a game squeezes the headline into the 72px thumb column.
+
+### Taking a moment off the desk
+
+Two things can be done with a moment once it has been watched: **Download** it
+as an MP4, or **Publish** it to a channel. Both sit in the popup's head, and
+both cut *the range that is playing* — the padded moment by default, or
+whatever Widen and the trim have made of it. What comes out is what was on
+screen, which is the only version of this that needs no explaining.
+
+**The publish preview is the player, not a picture of one.** Publish swaps the
+record column for a panel — trim, title, description, visibility — while the
+video beside it keeps playing; moving either end re-aims that same video. A
+separate confirmation dialog with its own small preview would be a second
+player to build, and a worse one than the one already running.
+
+**The record bounds the trim.** Either end may move up to `_TRIM_SLACK_SEC`
+(120s) from the moment's own in and out points, and no cut may exceed
+`_MAX_CUT_SEC` (600s). Both are clamps, not refusals: a control held at its
+limit should stop rather than start failing. **The figures are mirrored** in
+`web/src/player.js` (`TRIM_SLACK_SEC`, `MAX_CUT_SEC`, `trim`, tested) and in
+`api/app/routers/jobs.py`, and only the API's decide — the browser's copy
+exists so a button never offers what the server would refuse. Change one and
+change both. The API reads the moment itself (`catalog.get_moment`) rather than
+trusting the times it was sent, so "this moment" cannot become an hour of the
+match under a moment's name.
+
+**A download is a signed URL, not a proxied file.** `POST
+/api/jobs/{id}/moments/{mid}/download` cuts the range (`media.cut_moment`, into
+`jobs/{job}/downloads/`) and signs a 24-hour GET for it. Streaming it through
+the API would hold a request open for the whole transfer on the service whose
+other job is an agent's SSE. The signed URL carries
+`response_disposition: attachment` — without it the browser plays the MP4 in a
+tab, because the object's own content type says video and a link that plays is
+not a download — and a filename built from the match, the moment and its
+timecode, since a hex moment id says nothing once the file is on a desktop.
+
+### Publishing to YouTube
+
+**A video belongs to a channel, and a channel belongs to a person.** There is
+no service-account path to YouTube, so the desk holds an OAuth client and a
+refresh token for one channel. The client is a deployment fact and arrives as
+environment (`YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` from Secret Manager);
+the refresh token is whatever channel someone connected and lives in Firestore
+under `config/youtube`, because it changes without a deploy. `credentials()`
+prefers what is stored over what was deployed: a deployment default is a
+starting point, not a ceiling.
+
+**Terraform enables the API and cannot create the client.** `youtube.googleapis.com`
+is in `local.services`, the client secret gets a Secret Manager secret and
+accessor bindings for the API and media service accounts, and the
+`youtube_redirect_uri` output prints exactly what to register. The OAuth client
+itself is made once by hand in the console — no Google API creates one, and the
+IAP OAuth Admin APIs that used to were shut down in March 2026. This is the
+same wall federated sign-in hits, and the panel says so rather than offering a
+Connect button that can only fail.
+
+**The refresh token never reaches the browser.** `GET /api/integrations/youtube`
+reports whether each part is set, and what the channel is called; never a
+value. The connect flow is `auth-url` → Google → `GET
+/api/integrations/youtube/callback`, which is deliberately *not* behind
+`current_user`: it is a top-level navigation from Google carrying no
+Authorization header. What stands in for one is the code — single-use, minted
+for this deployment's own client, worthless without the secret held here. The
+consent URL asks `access_type=offline` **with** `prompt=consent`, because
+Google returns a refresh token only on freshly granted consent: approving an
+already-approved client hands back an access token that dies in an hour and
+nothing that outlives it, and the callback says exactly that when it happens.
+`config` is denied to every client by `firestore.rules`' catch-all, so the
+token is readable only by the services holding admin credentials.
+
+**The upload is resumable, and every call takes its transport as an argument.**
+A moment is tens of megabytes and would fit in one multipart request; a
+resumable session is what fails in a way that names the step. Injecting the
+transport is what makes the two failures that matter testable at all — a
+revoked refresh token (`invalid_grant`, which says nothing an editor can act
+on, so the message says "reconnect the channel" instead) and an upload YouTube
+starts and then rejects. The error detail is the API's own message and reason,
+never the whole body: the body of a failed upload start carries the request
+back, and that request has an access token in its headers.
+
+**Instagram and TikTok are named and marked as not built.** They are what this
+is for, and a missing option reads as an oversight where a marked one reads as
+a plan.
 
 Grounded values get their own rows in the game popup, labelled "(from search)",
 and the sources sit at the bottom of it rather than on the card. They qualify
@@ -1248,7 +1362,7 @@ on.
 services are still reachable only through the load balancer. What changed is
 that "may read this" is now "is signed in" rather than "uploaded it".
 
-`ownerUid` is still written on every job, moment, clip and game — as provenance
+`ownerUid` is still written on every job, moment and game — as provenance
 rather than as a gate. It says who uploaded a match, which is worth knowing
 precisely because anyone can now act on it.
 
@@ -1390,8 +1504,8 @@ page's own background.
 
 **Anything a model produced is set in Geist Mono**, never the sans — the
 brand's own example is `01:24 · ATH-0842 · conf 0.941 · v2.3.0`, and in this
-app that means the moment thumbnail's timecode, per-clip durations, clip
-numbering and page counts. Anything a person wrote (labels, descriptions,
+app that means the moment thumbnail's timecode, a cut's in, out and length in
+the publish panel, and page counts. Anything a person wrote (labels, descriptions,
 summaries) stays in Geist.
 
 Where the backend genuinely cannot do what the design prototype mocks (post to
@@ -1522,8 +1636,8 @@ for 45 minutes so it is not a metadata round trip per tool call.
 took the sport as a required argument. With one sport registered a model could
 guess it safely; the day a second one existed it correctly stopped guessing and
 asked — *"What sport is being played in the video?"* — inside a `SequentialAgent`
-with nobody to answer. The stage made no tool call, and clips, captions and
-publish all ran successfully on zero moments and marked the job complete. The
+with nobody to answer. The stage made no tool call, and every stage after it
+ran successfully on zero moments and marked the job complete. The
 sport is read off the job now, the stage instructions say plainly that a
 question is the end of the run rather than a pause, and `inspect_source` returns
 the sport so the stages after it inherit the fact instead of asking for it.
@@ -1541,21 +1655,15 @@ and the one thing cancelling promises not to do is report the run as broken. Ing
 there on a job that is failed by definition, and so is playback, which an
 editor asks for on its own.
 
-**A match can be analysed without being cut.** A competition day is hundreds
-of moments, and an editor who wants the log does not want twenty clip
-suggestions and a Gemini call each for their copy. `makeClips` is fixed on
-the job at registration — the same reasoning as the metadata language: what
-a match was analysed *for* does not change because the panel's checkbox did.
-`propose_clips` returns `skipped` without reading the moments, the caption
-stage then finds no clips to write for, and `finalize_job` reports the run
-`ready` on its moments rather than failing it for the clips nobody asked
-for. Absent on an older job, it means True, so nothing already on the desk
-changes.
-
-**A run that analysed nothing is not a finished run.** "0 of 0 clips ready to
-publish" reads as a match with no highlights in it. `finalize_job` marks the job
-`failed` with a reason when there are no clips *and* no moments — a quiet match
-still only needs attention, because that is a real outcome.
+**A run that analysed nothing is not a finished run.** `finalize_job` — the
+`finalize` stage, and the last thing `analysis_pipeline` does — reads the
+moment count and nothing else: moments make the job `ready`, none make it
+`failed` with a reason. Reporting an empty run as ready reads as a quiet match,
+and it is far more often an analysis that never produced anything. There was a
+`makeClips` flag here, fixed on the job at registration, saying whether a match
+was cut as well as read; with nothing cutting it decided nothing, so it is gone
+from the registration routes, the panel and the job document. Jobs that still
+carry one are not read for it.
 
 **Nothing on the engine retries a run that dies.** A deploy replaces the Agent
 Runtime engine and kills whatever it was doing. Progress reporting dies with it,
@@ -1924,7 +2032,7 @@ about fragments. `store.event_tree` reads the raw game document because
 
 The browser fetches the tree only when the open game has rides, again only
 when the rides or a moment's `rideOrder` change, and applies it to the live
-moments in `web/src/ridegroups.js` (tested) so the filter, sort, reel star and
+moments in `web/src/ridegroups.js` (tested) so the filter, sort and
 thumbnails keep working. Without a tree — another sport, a failed fetch — the
 flat grid stands.
 

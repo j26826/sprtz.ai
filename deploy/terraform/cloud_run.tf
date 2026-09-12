@@ -173,6 +173,25 @@ resource "google_cloud_run_v2_service" "mcp_media" {
         name  = "LIVE_CHUNK_SECONDS"
         value = tostring(var.live_chunk_seconds)
       }
+      env {
+        name  = "YOUTUBE_CLIENT_ID"
+        value = var.youtube_oauth_client_id
+      }
+      # The refresh token this is spent against lives in Firestore, written
+      # when someone connects a channel in Settings. Only the client is
+      # deployment configuration.
+      dynamic "env" {
+        for_each = var.youtube_oauth_client_secret != "" ? [1] : []
+        content {
+          name = "YOUTUBE_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.youtube_client_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
 
       startup_probe {
         http_get {
@@ -266,6 +285,26 @@ resource "google_cloud_run_v2_service" "api" {
       env {
         name  = "AGENT_ENGINE_DISPLAY_NAME"
         value = local.agent_display_name
+      }
+      env {
+        name  = "YOUTUBE_CLIENT_ID"
+        value = var.youtube_oauth_client_id
+      }
+      env {
+        name  = "YOUTUBE_REDIRECT_URI"
+        value = local.youtube_redirect_uri
+      }
+      dynamic "env" {
+        for_each = var.youtube_oauth_client_secret != "" ? [1] : []
+        content {
+          name = "YOUTUBE_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.youtube_client_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
       }
       # Empty because IAP is not in front of this service. It cannot be derived
       # here either: the value would be the LB backend service's id, and that

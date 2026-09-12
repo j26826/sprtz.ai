@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse
 
 import requests
 
-from media_server import ffmpeg_ops, gcs, hls, runjobs, transcoder
+from media_server import ffmpeg_ops, gcs, hls, runjobs, transcoder, youtube
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("mcp-media")
@@ -626,6 +626,46 @@ def cut_moment(gcs_uri: str, job_id: str, moment_id: str, start_sec: float,
         logger.exception("cut_moment failed for %s", moment_id)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}",
                 "moment_id": moment_id}
+    finally:
+        _cleanup(work)
+
+
+@mcp.tool
+def publish_youtube(clip_uri: str, title: str, description: str = "",
+                    privacy: str = "private", tags: list[str] | None = None) -> dict:
+    """Upload a rendered cut to the configured YouTube channel.
+
+    The credentials are the channel's, read from the deployment's own config
+    rather than passed in: a client secret that travels through a tool call is
+    a client secret in somebody's log.
+
+    Args:
+        clip_uri: gs:// URI of the MP4 to publish.
+        title: Video title. YouTube cuts anything past 100 characters.
+        description: Video description.
+        privacy: "private", "unlisted" or "public".
+        tags: Tags, without the leading hash.
+    """
+    work = _scratch()
+    try:
+        creds = youtube.credentials()
+        local = work / "upload.mp4"
+        gcs.download(clip_uri, local)
+        token = youtube.access_token(creds)
+        result = youtube.upload(
+            local, token=token, title=title, description=description,
+            privacy=privacy, tags=tags or [],
+        )
+        return {"status": "success", **result}
+    except youtube.YouTubeError as exc:
+        # Expected and the editor's to act on: not configured, a revoked token,
+        # a channel over its quota. Logged as a warning rather than an
+        # exception, because a stack trace here says nothing a reader needs.
+        logger.warning("youtube publish refused: %s", exc)
+        return {"status": "error", "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("publish_youtube failed for %s", clip_uri)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
     finally:
         _cleanup(work)
 
