@@ -1799,6 +1799,14 @@ for a whole analysis.
   `-backend-config`), then re-run the trigger. Cancel a build before its apply
   or let it finish.
 
+  **A `dynamic` block's `for_each` will not take a list of numbers**, and
+  `terraform validate` passes on one. `for_each = cond ? [1] : []` — the usual
+  way to write an optional block — is rejected at apply time with "Cannot use a
+  list of number value in for_each", halfway through a deploy, after every
+  image has been built. It wants a map or a **set of strings**:
+  `cond ? toset(["name"]) : toset([])`. Validation cannot see it because the
+  type only settles once the condition is evaluated.
+
   `gcloud builds list` writes "filter keys were not present in any resource" to
   **stderr** when nothing matches. Merged into stdout that reads as a build id
   and the wait never ends, so every call in that step discards stderr.

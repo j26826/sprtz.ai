@@ -181,7 +181,10 @@ resource "google_cloud_run_v2_service" "mcp_media" {
       # when someone connects a channel in Settings. Only the client is
       # deployment configuration.
       dynamic "env" {
-        for_each = var.youtube_oauth_client_secret != "" ? [1] : []
+        # toset, not a bare list: a dynamic block's for_each will not take a
+        # list of numbers, and `terraform validate` does not catch it — the
+        # apply does, halfway through a deploy.
+        for_each = var.youtube_oauth_client_secret != "" ? toset(["youtube"]) : toset([])
         content {
           name = "YOUTUBE_CLIENT_SECRET"
           value_source {
@@ -295,7 +298,10 @@ resource "google_cloud_run_v2_service" "api" {
         value = local.youtube_redirect_uri
       }
       dynamic "env" {
-        for_each = var.youtube_oauth_client_secret != "" ? [1] : []
+        # toset, not a bare list: a dynamic block's for_each will not take a
+        # list of numbers, and `terraform validate` does not catch it — the
+        # apply does, halfway through a deploy.
+        for_each = var.youtube_oauth_client_secret != "" ? toset(["youtube"]) : toset([])
         content {
           name = "YOUTUBE_CLIENT_SECRET"
           value_source {
