@@ -22,6 +22,10 @@ from sprtz_agents.tools import equipe
 HERE = Path(__file__).parent
 SCHEDULE = json.loads((HERE / "fixtures_lemieux_schedule.json").read_text())
 RIDES = json.loads((HERE / "fixtures_lemieux_arenas.json").read_text())
+# Who the organiser published as down to ride in each class, keyed by class id
+# as strings because JSON has no integer keys.
+ENTRANTS = {int(k): v for k, v in
+            json.loads((HERE / "fixtures_lemieux_entrants.json").read_text()).items()}
 
 # The camera. Every one of these captures is the same Castr URL on the same ring.
 CAMERA = "LeMieux Arena"
@@ -37,12 +41,20 @@ def _show():
     return equipe.parse_schedule(SCHEDULE)
 
 
-def _runs(job: str, arena: str):
+def _runs(job: str, arena: str, entrants=None):
     show = _show()
     day = equipe.local_day(STARTED[job], show)
     rides = sorted(RIDES[job], key=lambda r: int(r.get("order") or 0))
     return equipe.assign_classes(
-        rides, equipe.classes_on(show, day, arena=arena), recorded_from=STARTED[job])
+        rides, equipe.classes_on(show, day, arena=arena),
+        recorded_from=STARTED[job], entrants=entrants)
+
+
+def _spans(runs):
+    """Each run as (class id, first order, last order)."""
+    return [(r.show_class.class_id,
+             min(int(x["order"]) for x in r.rides),
+             max(int(x["order"]) for x in r.rides)) for r in runs]
 
 
 class TestTheShowKeepsItsOwnClock:
@@ -121,3 +133,71 @@ class TestNamingTheRing:
         show = _show()
         assert equipe.pick_arena(show, "2026-09-12", RIDES[SATURDAY]) == ""
         assert equipe.pick_arena(show, "2026-09-12", []) == ""
+
+
+class TestTheStartListSettlesTheBoundaryRide:
+    """Who was down to ride is a record; a timetable is an estimate.
+
+    The clock cannot see a class run over or start early, so the one ride
+    either side of a change lands on the wrong side of it. Both real days have
+    exactly that, and in both the ride in question is in the published start
+    list of exactly one class.
+    """
+
+    def test_fridays_first_freestyle_ride_stops_being_an_intermediate_one(self):
+        # The Intermediate I was a 42-horse class that began at 08:05 and was
+        # still running when the recorder started at 14:23 — so the clock is
+        # right about rides 1-6 and wrong only about the changeover. Olivia
+        # Oakeley is in the freestyle's list and in no other.
+        before = _spans(_runs(FRIDAY, CAMERA))
+        after = _spans(_runs(FRIDAY, CAMERA, ENTRANTS))
+        assert before == [(1278770, 1, 7), (1278771, 8, 24)]
+        assert after == [(1278770, 1, 6), (1278771, 7, 24)]
+
+    def test_saturdays_first_grand_prix_ride_stops_being_a_young_horse(self):
+        before = _spans(_runs(SATURDAY, CAMERA))
+        after = _spans(_runs(SATURDAY, CAMERA, ENTRANTS))
+        assert before == [(1278778, 1, 14), (1278779, 15, 36)]
+        assert after == [(1278778, 1, 13), (1278779, 14, 36)]
+
+    def test_the_record_says_the_start_list_moved_it(self):
+        runs = _runs(SATURDAY, CAMERA, ENTRANTS)
+        moved = next(r for r in runs if r.show_class.class_id == 1278779)
+        assert moved.decided_by == "start list"
+
+    def test_a_rider_entered_in_both_is_left_to_the_clock(self):
+        # Most riders here are down for two classes, so the lists rule out far
+        # more than they rule in. Greg Sims rode in both of Saturday's, and his
+        # three rides are placed by time exactly as they were.
+        runs = _runs(SATURDAY, CAMERA, ENTRANTS)
+        placed = {int(x["order"]): r.show_class.class_id for r in runs for x in r.rides}
+        assert placed[13] == 1278778
+        assert placed[22] == 1278779 and placed[24] == 1278779
+
+    def test_a_rider_in_no_list_narrows_nothing(self):
+        # A name the graphic never showed, or one nobody could read. Every
+        # class stays a candidate and the clock decides, which is the answer
+        # this had before start lists existed.
+        classes = equipe.classes_on(_show(), "2026-09-12", arena=CAMERA)
+        assert len(equipe._entered_in({"rider": ""}, classes, ENTRANTS)) == len(classes)
+        assert len(equipe._entered_in({"rider": "Nobody At All"}, classes, ENTRANTS)) == len(classes)
+
+    def test_no_start_lists_at_all_changes_nothing(self):
+        assert _spans(_runs(SATURDAY, CAMERA, {})) == _spans(_runs(SATURDAY, CAMERA))
+
+
+class TestMatchingARider:
+    def test_a_truncated_lower_third_still_finds_its_entrant(self):
+        assert equipe._same_person("Alexander Harrison", "Alexander Harrison-West")
+        assert equipe._same_person("Alexander Harrison-West", "Alexander Harrison")
+
+    def test_one_word_is_never_enough(self):
+        # "Sue" must not answer for "Sue Carson", and a surname shared by two
+        # riders must not decide which class either of them was in.
+        assert not equipe._same_person("Sue", "Sue Carson")
+        assert not equipe._same_person("Morgan", "Dannie Morgan")
+
+    def test_two_different_people_are_two_different_people(self):
+        assert not equipe._same_person("Greg Sims", "Greg Simmons")
+        assert not equipe._same_person("Laura Tomlinson", "Laura Thomlinson")
+        assert not equipe._same_person("", "Greg Sims")
