@@ -113,7 +113,7 @@ def build_media_toolset() -> McpToolset | None:
     return McpToolset(
         connection_params=_connection(settings.mcp_media_url),
         header_provider=_header_provider(settings.mcp_media_url),
-        tool_filter=["cut_clip", "reframe_vertical", "burn_captions", "render_preview"],
+        tool_filter=["render_preview"],
     )
 
 
@@ -129,9 +129,6 @@ def build_catalog_toolset() -> McpToolset | None:
         tool_filter=[
             "get_job",
             "list_moments",
-            "list_clips",
-            "update_clip",
-            "delete_clip",
             "knn_search_moments",
             "emit_event",
         ],

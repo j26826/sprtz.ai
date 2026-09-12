@@ -18,6 +18,13 @@ substitutions:
   _IAP_MEMBERS: ""
   _CDN_DOMAIN: ""
   _APP_DOMAIN: ""
+  # The OAuth client the desk publishes to YouTube with. The API is enabled by
+  # Terraform, but no Google API creates an OAuth client, so this pair is made
+  # once in the console and set on the trigger — the secret through a
+  # substitution Cloud Build keeps out of the log. Empty leaves publishing off
+  # and the editor's settings panel says so.
+  _YOUTUBE_CLIENT_ID: ""
+  _YOUTUBE_CLIENT_SECRET: ""
   # Editor service name. Overridden away from the default because IAP keeps
   # accessSettings per service name and a stale gcipSettings block could not be
   # cleared on the old one by any means.
@@ -337,7 +344,9 @@ steps:
                -var="image_tag=$SHORT_SHA" \
                -var="cdn_domain=${_CDN_DOMAIN}" \
                -var="app_domain=${_APP_DOMAIN}" \
-               -var="web_service_name=${_WEB_SERVICE_NAME}"
+               -var="web_service_name=${_WEB_SERVICE_NAME}" \
+               -var="youtube_oauth_client_id=${_YOUTUBE_CLIENT_ID}" \
+               -var="youtube_oauth_client_secret=${_YOUTUBE_CLIENT_SECRET}"
 
         # iap_members is a list; build the HCL literal only when it is set, so
         # an empty substitution does not become a list containing "".

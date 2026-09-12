@@ -3,9 +3,9 @@
 ADK agents for Sportscut, deployed to Vertex AI Agent Runtime.
 
 - `sprtz_agents/agent.py` — `sprtz_producer` root agent and the `analysis_pipeline`
-- `sprtz_agents/sub_agents/stages.py` — the five pipeline stages
+- `sprtz_agents/sub_agents/stages.py` — the four pipeline stages
 - `sprtz_agents/sports/` — per-sport moment taxonomies and the Gemini analysis prompt
-- `sprtz_agents/tools/` — segmented analysis, clip planning, MCP access
+- `sprtz_agents/tools/` — segmented analysis, rides, MCP access
 
 ## Local
 

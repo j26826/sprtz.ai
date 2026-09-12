@@ -59,7 +59,7 @@ output "uploads_bucket" {
 }
 
 output "media_bucket" {
-  description = "Bucket holding proxies, segments and rendered clips."
+  description = "Bucket holding proxies, segments and rendered cuts."
   value       = google_storage_bucket.media.name
 }
 

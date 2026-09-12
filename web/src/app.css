@@ -308,24 +308,6 @@ button.tile:hover { border-color: var(--color-accent); }
   background: color-mix(in srgb, var(--color-rule) 22%, transparent);
 }
 
-/* In the reel. Amber on the picture rather than a word beneath it: the tile is
-   narrow, and this is the one fact about a moment that is worth reading at a
-   glance across a whole row. Ink on the fill, never white. */
-.tile-star {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  z-index: 1;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  color: var(--color-on-accent, #111);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 /* Which game a tile is from, when the grid spans the desk. Mono and small,
    in the accent-700 ramp — the same treatment as a search result's game line,
    because it is the same fact. */
@@ -919,143 +901,6 @@ button.tile:hover { border-color: var(--color-accent); }
   color: var(--color-neutral-700);
 }
 
-/* Reel */
-
-.reel-bars { display: flex; height: 30px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
-.reel-bar { border-right: var(--rule-hair) solid var(--color-bg); flex-basis: 0; }
-
-.clip-row {
-  display: grid;
-  grid-template-columns: 20px 1fr auto auto;
-  gap: 10px;
-  align-items: center;
-  padding: 9px 12px;
-  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
-}
-
-.clip-n {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-neutral-600);
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-mono);
-}
-
-.clip-label { font-size: 12px; font-weight: 700; line-height: 1.25; min-width: 0; }
-
-.stepper { display: flex; align-items: center; gap: 6px; }
-
-.step-btn {
-  border: var(--rule-hair) solid var(--color-neutral-400);
-  background: transparent;
-  color: var(--color-text);
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  line-height: 1;
-}
-.step-btn:hover { border-color: var(--color-accent); }
-
-.step-val {
-  font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  min-width: 38px;
-  text-align: center;
-  font-family: var(--font-mono);
-}
-
-.link-btn {
-  border: 0;
-  background: transparent;
-  color: var(--color-neutral-600);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 4px 2px;
-}
-.link-btn:hover { color: var(--color-accent); }
-
-.panel-actions { display: flex; gap: 8px; padding: 11px 12px; flex-wrap: wrap; }
-
-/* Jobs */
-
-.job { padding: 11px 12px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
-.job:last-child { border-bottom: 0; }
-
-.job-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
-.job-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
-
-.job-status {
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--color-neutral-600);
-}
-.job-status[data-tone="running"] { color: var(--color-neutral-800); }
-.job-status[data-tone="failed"] { color: var(--color-accent-2); }
-
-.job-stage { font-size: 11px; color: var(--color-neutral-700); margin-top: 4px; line-height: 1.4; }
-
-.job-error {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin-top: 7px;
-  border-left: var(--rule) solid var(--color-accent-2);
-  background: var(--color-accent-2-100);
-  padding: 8px 10px;
-}
-.job-error p { font-size: 11px; line-height: 1.45; color: var(--color-accent-2-900); flex: 1; margin: 0; }
-
-/* Publish */
-
-.platform {
-  width: 100%;
-  text-align: left;
-  display: grid;
-  grid-template-columns: 18px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  border: 0;
-  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
-  background: transparent;
-  color: var(--color-text);
-  padding: 11px 12px;
-  cursor: pointer;
-}
-.platform:hover { background: var(--color-accent-100); }
-.platform[aria-pressed="true"] { background: var(--color-accent-100); }
-
-.checkmark { width: 14px; height: 14px; border: var(--rule) solid var(--color-neutral-600); }
-.platform[aria-pressed="true"] .checkmark { border-color: var(--color-accent); background: var(--color-accent); }
-
-.platform-name { font-size: 12.5px; font-weight: 700; }
-.platform-spec { font-size: 10.5px; color: var(--color-neutral-700); margin-top: 2px; }
-
-.platform-state {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-neutral-600);
-}
-
-.caption-box {
-  width: 100%;
-  border: var(--rule-hair) solid var(--color-neutral-400);
-  background: var(--color-neutral-100);
-  padding: 9px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  outline: 0;
-  resize: vertical;
-  color: var(--color-text);
-}
-.caption-box:focus-visible { border-color: var(--color-accent); }
-
 /* Composer */
 
 .composer { flex: none; border-top: var(--rule) solid var(--color-rule); }
@@ -1527,6 +1372,163 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
     border-bottom: var(--rule) solid var(--color-rule);
   }
   .detail-player .player-slot { position: static; }
+}
+
+/* ── The player popup is the whole screen ───────────────────────────────────
+
+   A moment is judged by watching it, and every pixel this dialog gave back to
+   the page behind it was a pixel off the picture. So the details popup is
+   full-bleed: no backdrop margin, no rounded card floating in the middle, the
+   viewport's own height. Only this popup — the settings dialog is a short form
+   and a full-screen form is a worse form.
+
+   The card is a column: a head that stays, and a split that takes the rest and
+   scrolls inside its two halves rather than scrolling the card. Without the
+   min-height:0 on the split and on each column, a grid child refuses to shrink
+   below its content and the whole thing grows past the viewport, which is the
+   one way this can silently stop being full height. */
+#details { padding: 0; align-items: stretch; }
+
+#details .modal-card {
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#details .detail-split { flex: 1; min-height: 0; }
+#details .detail-grid,
+#details .detail-body { min-height: 0; overflow-y: auto; }
+
+/* The player column is its own column: the chips at the top and the video keep
+   their place while the ride's summary under them scrolls. Scrolling the whole
+   column instead would take the video off screen, which is the one thing this
+   popup exists to show. */
+#details .detail-player {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0;
+}
+#details .player-over { flex: none; }
+#details .player-under { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+
+/* Full height means the video can have the height rather than an aspect ratio
+   deciding it. The frame takes what is left, and the picture is letterboxed
+   inside it — object-fit, so a 16:9 recording in a tall column keeps its shape
+   instead of stretching. `:not(:empty)` because an empty slot is display:none,
+   and a flex child cannot be both. */
+#details .detail-player .player-slot:not(:empty) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: static;
+}
+#details .inline-player { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#details .player-frame { flex: 1; min-height: 180px; }
+#details .inline-player video {
+  height: 100%;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
+/* Stacked, the split scrolls as one column: two independently scrolling halves
+   on a phone is two scrollbars nobody asked for, and the video is no longer
+   beside the record but above it. */
+@media (max-width: 760px) {
+  #details .detail-split { overflow-y: auto; }
+  #details .detail-player,
+  #details .detail-grid,
+  #details .detail-body { overflow-y: visible; }
+  #details .detail-player,
+  #details .detail-player .player-slot:not(:empty),
+  #details .inline-player { display: block; }
+  #details .player-under { overflow-y: visible; }
+  #details .player-frame { min-height: 0; }
+  #details .inline-player video { height: auto; aspect-ratio: 16 / 9; }
+}
+
+/* ── Taking a moment off the desk ─────────────────────────────────────────── */
+
+/* The two ways out of a moment sit in the popup's head, between the title and
+   Close. The title gives way rather than the buttons wrapping: a head that
+   reflows as the title changes length moves the buttons under the cursor. */
+.modal-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; padding-right: 12px; }
+.detail-action { padding: 6px 12px; font-size: 12px; }
+#details .modal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.publish-panel { padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 6px; }
+.publish-panel .field-label { margin-top: 10px; }
+.publish-panel .input { width: 100%; }
+.share-text { font-family: var(--font-body); line-height: 1.5; resize: vertical; }
+
+/* The trim reads as one row of three readings — in, out, and what they come
+   to — because the length is the number being aimed at and putting it beside
+   the two that decide it is the whole point of showing it. */
+.trim-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+  padding: 10px 0 4px;
+}
+.trim-controls { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.trim-at,
+.trim-len {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.trim-len { margin-top: 4px; display: block; }
+/* Past what the cut can be, so the figure says so before the button does. */
+.trim-len.is-over { color: var(--color-accent-2-900); font-weight: 700; }
+
+.platform-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.platform-soon {
+  font-size: 11.5px;
+  color: var(--color-neutral-600);
+  letter-spacing: 0.04em;
+}
+
+.share-error {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-accent-2-900);
+  background: var(--color-accent-2-100);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+}
+.share-done { font-size: 12px; margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── The channel, in Settings ─────────────────────────────────────────────── */
+
+.yt-line { font-size: 12px; color: var(--color-neutral-700); margin-top: 6px; }
+/* Configured and connected are the two facts worth seeing at a glance, so they
+   are the only thing here that takes the accent. */
+.yt-line.is-on { color: var(--color-accent-900); font-weight: 500; }
+.yt-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.yt-details { margin-top: 12px; }
+.yt-details summary {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+  cursor: pointer;
+}
+.yt-details .input { width: 100%; margin-bottom: 4px; }
+.yt-uri {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+  display: block;
+  margin-top: 4px;
 }
 
 /* Moment details */
@@ -2290,12 +2292,9 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .chip,
 .link-btn,
 .file-label,
-.platform,
 .session,
 .thumb,
 .dz-thumb,
-.step-btn,
-.caption-box,
 .composer-input,
 .header-select {
   border-radius: var(--radius-md);
@@ -2304,9 +2303,7 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .meter,
 .meter i,
 .stage-meter,
-.stage-meter i,
-.reel-bar,
-.checkmark {
+.stage-meter i {
   border-radius: var(--radius-sm);
 }
 

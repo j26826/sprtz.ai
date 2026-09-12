@@ -204,8 +204,9 @@ def delete_job(job_id: str) -> dict[str, Any]:
     """Remove a job and everything hanging off it.
 
     Firestore does not cascade: deleting a document leaves its subcollections
-    addressable and billable for ever, so the moments, clips and events have to
-    go explicitly. The game record lives in its own top-level collection and is
+    addressable and billable for ever, so the moments and events have to go
+    explicitly. `clips` is in the list because jobs analysed before clip
+    generation was withdrawn still hold one; nothing writes it any more. The game record lives in its own top-level collection and is
     not a subcollection at all, which is exactly the sort of thing a cascade you
     imagined into existence would miss.
 
@@ -252,6 +253,7 @@ def clear_analysis(job_id: str) -> dict[str, Any]:
     """
     removed = {
         "moments": _delete_collection(job_ref(job_id).collection("moments")),
+        # Left behind by a job analysed before clip generation was withdrawn.
         "clips": _delete_collection(job_ref(job_id).collection("clips")),
     }
     if game_ref(job_id).get().exists:
@@ -259,7 +261,7 @@ def clear_analysis(job_id: str) -> dict[str, Any]:
         removed["game"] = 1
 
     job_ref(job_id).update({
-        "counts": {"moments": 0, "clips": 0},
+        "counts": {"moments": 0},
         "error": None,
         "progress": 0,
         "status": "uploaded",
@@ -699,7 +701,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
                context_urls: list[str] | None = None,
                kind: str = "upload", hls_url: str = "",
                event_start: str = "", event_end: str = "",
-               chunk_sec: int = 0, make_clips: bool = True,
+               chunk_sec: int = 0,
                title_source: str = "derived",
                stall_minutes: float = 0) -> dict[str, Any]:
     """Open a job. Three kinds, told apart by where the video comes from.
@@ -746,14 +748,7 @@ def create_job(job_id: str, owner_uid: str, title: str, sport: str, gcs_uri: str
         },
         "media": {},
         "playback": {},
-        "counts": {"moments": 0, "clips": 0},
-        # Whether this match is being cut, or only read. A competition day
-        # yields hundreds of moments and an editor who wants the log does not
-        # want twenty suggestions and their copy — that is a Gemini call per
-        # clip for something nobody asked for. Fixed on the job at
-        # registration, like the metadata language: what a match was analysed
-        # for does not change because the panel's checkbox did.
-        "makeClips": bool(make_clips),
+        "counts": {"moments": 0},
         "error": None,
         "createdAt": now(),
         "updatedAt": now(),
@@ -1247,6 +1242,58 @@ def list_action_plays(job_id: str, limit: int = 500, min_score: float = 0.0) -> 
     return plays
 
 
+# --- Deployment configuration -------------------------------------------------
+#
+# One document per integration under `config`, written from the editor's
+# settings panel through the API. It holds secrets — a YouTube refresh token is
+# a standing permission to post to someone's channel — so nothing here is ever
+# projected into an agent's context or returned to the browser whole; the API
+# says whether a field is set, never what it is.
+
+CONFIG_COLLECTION = "config"
+
+
+def get_config(name: str) -> dict[str, Any]:
+    """Read one configuration document, empty when it has never been written."""
+    doc = db().collection(CONFIG_COLLECTION).document(name).get()
+    return doc.to_dict() or {} if doc.exists else {}
+
+
+def set_config(name: str, values: dict[str, Any]) -> dict[str, Any]:
+    """Merge fields into one configuration document.
+
+    A merge rather than a replace so connecting a channel does not clear the
+    client it was connected with, and an empty string is a real value — that is
+    how a field is cleared.
+    """
+    payload = {**values, "updatedAt": now()}
+    db().collection(CONFIG_COLLECTION).document(name).set(payload, merge=True)
+    return {"name": name, "fields": sorted(values)}
+
+
+def clear_config(name: str, fields: list[str]) -> dict[str, Any]:
+    """Blank the named fields, leaving the rest of the document alone."""
+    if not fields:
+        return {"name": name, "cleared": []}
+    payload: dict[str, Any] = {f: "" for f in fields}
+    payload["updatedAt"] = now()
+    db().collection(CONFIG_COLLECTION).document(name).set(payload, merge=True)
+    return {"name": name, "cleared": sorted(fields)}
+
+
+def get_moment(job_id: str, moment_id: str) -> dict[str, Any] | None:
+    """One moment, by id. None when the job does not hold it.
+
+    Downloading or publishing a moment starts from its in and out points, and
+    those come from the record rather than from whoever asked. A caller may
+    trim around them — that is what the publish preview does — but the record
+    is what the trim is bounded against, so "this moment" cannot become an
+    hour of the match under a moment's name.
+    """
+    doc = job_ref(job_id).collection("moments").document(moment_id).get()
+    return _moment_out(doc.to_dict()) if doc.exists else None
+
+
 def list_moments(job_id: str, limit: int = 100, min_score: float = 0.0) -> list[dict[str, Any]]:
     from google.cloud import firestore
 
@@ -1543,123 +1590,6 @@ def knn_search_moments(query: str, job_id: str = "", owner_uid: str = "",
     for position, moment in enumerate(ranked):
         moment["rank"] = position + 1
     return ranked
-
-
-# --- Clips --------------------------------------------------------------------
-
-
-def upsert_clips(job_id: str, clips: list[dict[str, Any]]) -> int:
-    if not clips:
-        return 0
-
-    owner_uid = get_job(job_id).get("ownerUid", "")
-    batch = db().batch()
-    collection = job_ref(job_id).collection("clips")
-    for clip in clips:
-        doc_id = clip["clip_id"]
-        batch.set(
-            collection.document(doc_id),
-            {
-                "clipId": doc_id,
-                "jobId": job_id,
-                "ownerUid": owner_uid,
-                "momentId": clip.get("moment_id"),
-                "startSec": clip["start_sec"],
-                "endSec": clip["end_sec"],
-                "durationSec": clip["duration_sec"],
-                "aspect": clip.get("aspect", "9:16"),
-                "platforms": clip.get("platforms", []),
-                "hookText": clip.get("hook_text", ""),
-                "title": clip.get("title", ""),
-                "captions": clip.get("captions", {}),
-                "hashtags": clip.get("hashtags", []),
-                "score": clip.get("score", 0.0),
-                "rationale": clip.get("rationale", ""),
-                "status": "suggested",
-                "renderUri": None,
-                "thumbnailUri": None,
-                "createdAt": now(),
-                "updatedAt": now(),
-            },
-            merge=True,
-        )
-    batch.commit()
-    job_ref(job_id).update({"counts.clips": len(clips), "updatedAt": now()})
-    return len(clips)
-
-
-def _clip_out(data: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "clip_id": data.get("clipId"),
-        "job_id": data.get("jobId"),
-        "moment_id": data.get("momentId"),
-        "start_sec": data.get("startSec", 0.0),
-        "end_sec": data.get("endSec", 0.0),
-        "duration_sec": data.get("durationSec", 0.0),
-        "aspect": data.get("aspect", "9:16"),
-        "platforms": data.get("platforms", []),
-        "hookText": data.get("hookText", ""),
-        "title": data.get("title", ""),
-        "captions": data.get("captions", {}),
-        "hashtags": data.get("hashtags", []),
-        "score": data.get("score", 0.0),
-        "rationale": data.get("rationale", ""),
-        "status": data.get("status", "suggested"),
-        "renderUri": data.get("renderUri"),
-        "thumbnailUri": data.get("thumbnailUri"),
-    }
-
-
-def list_clips(job_id: str, limit: int = 100) -> list[dict[str, Any]]:
-    from google.cloud import firestore
-
-    query = (
-        job_ref(job_id)
-        .collection("clips")
-        .order_by("score", direction=firestore.Query.DESCENDING)
-        .limit(limit)
-    )
-    return [_clip_out(d.to_dict()) for d in query.stream()]
-
-
-_CLIP_WRITABLE = {
-    "title", "hookText", "captions", "hashtags", "startSec", "endSec",
-    "durationSec", "aspect", "platforms", "status", "renderUri", "thumbnailUri",
-}
-
-
-def delete_clip(job_id: str, clip_id: str) -> dict[str, Any]:
-    """Drop a clip from the reel.
-
-    The moment it was cut from is untouched: a clip is a suggestion about a
-    moment, and rejecting the suggestion is not a claim that the moment did not
-    happen. Removing the moment as well would also lose its embedding, and with
-    it the ability to find the play again later.
-    """
-    ref = job_ref(job_id).collection("clips").document(clip_id)
-    existed = ref.get().exists
-    if existed:
-        ref.delete()
-    return {"job_id": job_id, "clip_id": clip_id, "deleted": existed}
-
-
-def update_clip(job_id: str, clip_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    """Apply a partial update, rejecting fields callers must not rewrite.
-
-    Score, momentId and ownerUid are derived, not editable — an agent that
-    rewrote them would silently break ranking and the tenant boundary.
-    """
-    rejected = sorted(set(patch) - _CLIP_WRITABLE)
-    clean = {k: v for k, v in patch.items() if k in _CLIP_WRITABLE}
-    if not clean:
-        return {"status": "error", "error": "Nothing writable in the patch.", "rejected": rejected}
-
-    clean["updatedAt"] = now()
-    if "startSec" in clean and "endSec" in clean:
-        clean["durationSec"] = round(float(clean["endSec"]) - float(clean["startSec"]), 2)
-
-    job_ref(job_id).collection("clips").document(clip_id).update(clean)
-    return {"status": "success", "clip_id": clip_id, "updated": sorted(clean), "rejected": rejected}
 
 
 # --- Recovery ---------------------------------------------------------------------

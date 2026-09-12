@@ -21,7 +21,7 @@
 <div class="signin" id="signin">
   <div class="signin-card">
     <img class="signin-logo" src="/assets/arenos-lockup-tagline-on-dark.svg" alt="Arenos" />
-    <p data-i18n="signin.blurb">Sign in to analyse a match and cut it into short-form clips.</p>
+    <p data-i18n="signin.blurb">Sign in to analyse a match and find every moment worth publishing.</p>
 
     <form id="signin-form" style="text-align:left">
       <div class="field" style="margin-bottom:12px">
@@ -111,7 +111,7 @@
                    placeholder="e.g. &ldquo;show me all events&rdquo;, &ldquo;show me the ride for Gareth Hughes&rdquo;, &ldquo;best pirouettes&rdquo;, &ldquo;rides scoring more than 70%&rdquo;" />
             <button class="composer-send" type="submit" id="send" data-i18n="composer.send">Send</button>
           </form>
-          <div class="footer-line" id="footer-line">Enter to send &middot; the agent edits the reel in place &mdash; no timeline required</div>
+          <div class="footer-line" id="footer-line">Enter to send &middot; the agent finds the moments &mdash; no timeline required</div>
         </div>
       </div>
     </div>
@@ -123,6 +123,7 @@
        aria-labelledby="details-title">
     <div class="modal-head">
       <div class="modal-title" id="details-title"></div>
+      <div class="modal-actions" id="details-actions"></div>
       <button class="link-btn" id="close-details" data-i18n="settings.close">Close</button>
     </div>
     <div class="detail-split" id="details-split">
@@ -170,6 +171,15 @@
         finished and analysed. Applies to events scheduled from now on.
       </div>
       <input class="input" id="set-live-stall" type="number" min="1" max="240" step="1" />
+    </div>
+
+    <div class="setting" id="youtube-setting">
+      <div class="field-label" data-i18n="settings.youtube">Publishing to YouTube</div>
+      <div class="setting-hint" data-i18n="settings.youtubeHint">
+        The channel moments are published to. A video belongs to a channel
+        rather than to this service, so someone has to approve the desk once.
+      </div>
+      <div id="youtube-state"></div>
     </div>
 
     <div class="setting">

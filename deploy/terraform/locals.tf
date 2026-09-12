@@ -33,6 +33,11 @@ locals {
     "storage.googleapis.com",
     "transcoder.googleapis.com",
     "videointelligence.googleapis.com",
+    # Publishing a moment to a channel. Enabling the API is the whole of what
+    # can be automated here: Google has no API that creates an OAuth client, so
+    # the client itself is made once in the console and passed in as a variable
+    # — the same wall the federated sign-in provider hits.
+    "youtube.googleapis.com",
   ]
 
   # The Agent Runtime engine is created by the SDK, not Terraform — see

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
+  countTypesIn, filterByTypes, groupByRide, momentTypesIn,
   rideNamedIn, rideRank, rideScoreAsked, ridesAsked, sortRideGroups,
 } from '../src/ridegroups.js';
 
@@ -131,19 +131,6 @@ test('no name and no bar is every ride, in running order, without the outside gr
   const out = ridesAsked(groups, 'show all rides');
   assert.deepEqual(out.groups.map((g) => g.ride.order), [1, 2, 3, 4]);
   assert.ok(!out.narrowed);
-});
-
-
-test('only the not-confirmed notes from a ride\'s own windows are about that ride', () => {
-  const record = [
-    { momentType: 'pirouette', notes: ['[segment 0] two candidates near 07:40', '[segment 3] a corner at 02:10'] },
-    { momentType: 'passage', notes: [] },
-    { momentType: 'piaffe', notes: ['[segment 3] no piaffe in this window'] },
-  ];
-  assert.deepEqual(notesForRide(record, [0, 1]),
-    [{ momentType: 'pirouette', notes: ['two candidates near 07:40'] }]);
-  assert.deepEqual(notesForRide(record, []), []);
-  assert.deepEqual(notesForRide(null, [0]), []);
 });
 
 

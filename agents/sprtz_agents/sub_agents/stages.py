@@ -74,7 +74,7 @@ ladder, uploads it to the CDN bucket, and records the playback URL on the job.
 Report one sentence: playback is ready, and in which renditions.
 
 If it fails, say so plainly and note that the analysis is unaffected — the editor
-will still get key moments and clip suggestions, they just cannot preview them in
+will still get key moments, they just cannot preview them in
 the player until playback is rebuilt. Do not retry more than once.
 """.strip(),
     tools=[pipeline.prepare_playback],
@@ -119,96 +119,31 @@ does not know a five-minute window was skipped will assume it was empty.
 )
 
 
-clip_agent = Agent(
-    name="clip_agent",
+finalize_agent = Agent(
+    name="finalize_agent",
     model=_model(),
-    description="Selects which moments become short-form clips and sets their in and out points.",
-    instruction="""
-You choose which moments are worth publishing.
-
-Call `propose_clips` with the job_id, `max_clips` of 20, and `min_score` of 0.5.
-It picks the highest-scoring moments, sets in and out points appropriate to each
-moment type, and drops candidates that overlap a stronger one.
-
-Then review what came back. Report:
-- how many clips were proposed and their total runtime
-- any clip whose rationale flags it as longer than ideal
-- whether the selection is lopsided — twenty jump shots and nothing else is a
-  worse reel than a spread across the match, so say so if that happened
-
-Do not call `propose_clips` more than once unless it returned an empty result and
-you are retrying with a lower `min_score`.
-""".strip(),
-    tools=[pipeline.propose_clips],
-    generate_content_config=_generation(0.3, 4096),
-    output_key="clip_result",
-)
-
-
-caption_agent = Agent(
-    name="caption_agent",
-    model=_model(),
-    description="Writes the on-screen hook, titles, captions and hashtags for each clip.",
-    instruction="""
-You write the copy that makes each clip worth tapping.
-
-First call `list_clips_for_copywriting` with the job_id. Then call
-`save_clip_copy` once for every clip it returns — one call per clip, no batching.
-
-How to write:
-
-- `hook_text` is burned over the first second. Six words at most, upper case, and
-  it must promise the specific thing in this clip. "CAUGHT IN MID-AIR" beats
-  "AMAZING PLAY". Never use a hook that the clip does not deliver on.
-- `title` is a plain description an editor can scan in a list. No hype, no emoji.
-- Captions differ per platform:
-  - TikTok: one line, conversational, a question or a claim. No hashtag block.
-  - Instagram: one or two lines, slightly more descriptive, warmer.
-  - YouTube: two or three sentences of real description — this is a search
-    surface, so name the action, the players or teams if the scoreboard shows
-    them, and the situation.
-- `hashtags`: five to eight, no leading hash, most specific first. Include the
-  sport and the moment type; include team names only if you actually read them
-  from the scoreboard.
-
-Rules you must not break:
-- Never invent a player name, a team, a score or a competition. If the moment's
-  description and scoreboard do not tell you, write around it.
-- Never claim a record, a milestone or a "first" you have no evidence for.
-- Write about what is in the clip, not about the match in general.
-""".strip(),
-    tools=[pipeline.list_clips_for_copywriting, pipeline.save_clip_copy],
-    generate_content_config=_generation(0.8, 8192),
-    output_key="caption_result",
-)
-
-
-publish_agent = Agent(
-    name="publish_agent",
-    model=_model(),
-    description="Validates the finished clips and marks the job ready for export.",
+    description="Closes the run out on what the analysis found.",
     instruction="""
 You close the job out.
 
-Call `finalize_job` with the job_id. It checks every clip against the platform
-limits and the copy requirements, then sets the job's final status.
+Call `finalize_job` with the job_id. It reads how many moments the analysis
+saved and sets the job's final status: ready when there are moments, failed
+when there are none, because a run that found nothing needs someone to look at
+it rather than to read as a quiet match.
 
-Report the outcome in a short paragraph: how many clips are ready, and for any
-clip held back, which clip and what is wrong with it. Be specific — "clip 7 has
-no caption copy" is actionable, "some clips need attention" is not.
+Report the outcome in one or two sentences: how many moments the match holds,
+or — if there are none — that the analysis produced nothing and needs re-running.
 """.strip(),
     tools=[pipeline.finalize_job],
     generate_content_config=_generation(0.1, 2048),
-    output_key="publish_result",
+    output_key="finalize_result",
 )
 
 
 __all__ = [
     "analysis_agent",
-    "caption_agent",
-    "clip_agent",
+    "finalize_agent",
     "ingest_agent",
-    "publish_agent",
     "transcode_agent",
 ]
 

@@ -45,9 +45,12 @@ const RULES = [
   ['activity', /\b(activity|event log|what happened|progress log|history)\b/],
   ['ingest', /\b(ingest|upload|uploaded|import)\b|\bnew (game|match|recording)\b|\banaly[sz]e a\b/],
   ['jobs', /\b(process|processing|job|jobs|status|fail|failed|error|still running|analysing|analyzing|analysis)\b/],
-  ['publish', /\b(publish|post|schedule|package)\b/],
-  ['reel', /\b(cut|reel|montage|render|generate|reframe|vertical|shorter|tighten)\b/],
 ];
+
+// There was a 'reel' route here, and a 'publish' one, for cutting a montage
+// and packaging it. Clip generation is being rebuilt and neither card exists,
+// so those questions fall through to the moments list — which is the honest
+// answer to "cut me the best bits" while there is nothing that cuts.
 
 // Looking across the desk rather than inside the open match. The signal is a
 // scope led by a preposition or a question about which match — "in any match",
@@ -108,9 +111,8 @@ export function chooseCard(question) {
   if (RULES[0][1].test(q)) return 'activity';
 
   // Rides before the games list and the desk search: "rides in every event"
-  // is about rides. Getting one in, cutting one or posting one is still that
-  // action, whatever it is a ride of.
-  const acting = RULES.filter(([card]) => ['ingest', 'publish', 'reel'].includes(card))
+  // is about rides. Getting one in is still ingesting, whatever it is a ride of.
+  const acting = RULES.filter(([card]) => card === 'ingest')
     .some(([, pattern]) => pattern.test(q));
   if (RIDES.test(q) && !acting) return 'rides';
 

@@ -16,6 +16,13 @@ import pytest
 from sprtz_agents.tools import pipeline
 
 
+class _Context:
+    """Enough of an ADK ToolContext for these paths."""
+
+    def __init__(self):
+        self.state: dict = {}
+
+
 @pytest.fixture
 def calls():
     mock = AsyncMock(return_value={"status": "success"})
@@ -146,7 +153,7 @@ class TestAFailedRunStops:
     async def test_a_later_stage_skips_a_job_that_already_failed(self):
         ran = []
 
-        @pipeline.stage("clips", skip_if_failed=True)
+        @pipeline.stage("finalize", skip_if_failed=True)
         async def later(job_id: str) -> dict:
             ran.append(job_id)
             return {"status": "success"}
@@ -184,7 +191,7 @@ class TestAFailedRunStops:
 
     @pytest.mark.asyncio
     async def test_a_running_job_goes_through(self):
-        @pipeline.stage("clips", skip_if_failed=True)
+        @pipeline.stage("finalize", skip_if_failed=True)
         async def later(job_id: str) -> dict:
             return {"status": "success", "ran": True}
 
@@ -204,9 +211,92 @@ class TestAFailedRunStops:
         from pathlib import Path
 
         src = Path(pipeline.__file__).read_text()
-        for name in ("analysis", "clips"):
+        for name in ("analysis", "finalize"):
             assert f'@stage("{name}", skip_if_failed=True)' in src, name
         assert '@stage("ingest")\nasync def inspect_source' in src
         # Playback is also a tool the editor calls on its own, on a job whose
         # analysis may well have failed; it does not skip.
         assert '@stage("playback")\nasync def prepare_playback' in src
+
+
+class TestPackagingAFinishedMatch:
+    """Playback is a stage of a run and a button on a match that finished days ago.
+
+    On the second path the job's status is not the run's to change: the
+    LeMieux event sat overnight reading "transcoding" — complete, playable, and
+    looking to every reader like a run in progress.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_finished_job_gets_its_status_back(self):
+        updates: list[dict] = []
+
+        async def call(server, tool, args=None):
+            if tool == "get_job":
+                return {"status": "ready", "kind": "upload",
+                        "source": {"gcsUri": "gs://b/o"}, "playback": {}}
+            if tool == "update_job_status":
+                updates.append(args)
+            if tool == "transcode_hls":
+                return {"status": "started", "transcoder_job": "tj-1",
+                        "playback_url": "https://cdn/x.m3u8", "renditions": ["480p"]}
+            if tool == "generate_poster":
+                return {"poster_url": "https://cdn/p.jpg"}
+            return {"status": "success"}
+
+        with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)), \
+                patch.object(pipeline, "_await_transcode",
+                             AsyncMock(return_value={"succeeded": True})):
+            await pipeline.prepare_playback("job-1", _Context())
+
+        assert any(u.get("status") == "transcoding" for u in updates), "it still reports the encode"
+        assert updates[-1]["status"] == "ready"
+        assert updates[-1]["stage"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_encode_does_not_leave_it_running_either(self):
+        updates: list[dict] = []
+
+        async def call(server, tool, args=None):
+            if tool == "get_job":
+                return {"status": "complete", "kind": "upload",
+                        "source": {"gcsUri": "gs://b/o"}, "playback": {}}
+            if tool == "update_job_status":
+                updates.append(args)
+            if tool == "transcode_hls":
+                return {"status": "started", "transcoder_job": "tj-1",
+                        "playback_url": "https://cdn/x.m3u8", "renditions": ["480p"]}
+            return {"status": "success"}
+
+        with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)), \
+                patch.object(pipeline, "_await_transcode",
+                             AsyncMock(return_value={"succeeded": False, "state": "FAILED"})):
+            await pipeline.prepare_playback("job-1", _Context())
+
+        assert updates[-1]["status"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_a_run_in_progress_keeps_reporting_the_encode(self):
+        # Inside a pipeline run the status is the run's to set, and the strip
+        # is meant to say "transcoding" while it does.
+        updates: list[dict] = []
+
+        async def call(server, tool, args=None):
+            if tool == "get_job":
+                return {"status": "analyzing", "kind": "upload",
+                        "source": {"gcsUri": "gs://b/o"}, "playback": {}}
+            if tool == "update_job_status":
+                updates.append(args)
+            if tool == "transcode_hls":
+                return {"status": "started", "transcoder_job": "tj-1",
+                        "playback_url": "https://cdn/x.m3u8", "renditions": ["480p"]}
+            if tool == "generate_poster":
+                return {"poster_url": "https://cdn/p.jpg"}
+            return {"status": "success"}
+
+        with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)), \
+                patch.object(pipeline, "_await_transcode",
+                             AsyncMock(return_value={"succeeded": True})):
+            await pipeline.prepare_playback("job-1", _Context())
+
+        assert not any(u.get("status") == "analyzing" for u in updates)

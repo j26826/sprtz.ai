@@ -51,6 +51,64 @@ export function widen(range, { by = WIDEN_SEC, duration = 0 } = {}) {
 }
 
 
+/* ── Trimming a cut, for download or publish ──────────────────────────────────
+
+   A publish preview exists so an editor can breathe a second either side of a
+   play before it goes to a channel — not so "this moment" can become half the
+   match under a moment's name. Both figures mirror the API's own clamps
+   (`_TRIM_SLACK_SEC` and `_MAX_CUT_SEC` in api/app/routers/jobs.py), which are
+   the ones that actually decide: this copy only stops the buttons offering
+   something the server would refuse. Change one and change both. */
+
+/** How far either end may be moved from the moment's own in and out points. */
+export const TRIM_SLACK_SEC = 120;
+
+/** The longest cut anything here will ask for. */
+export const MAX_CUT_SEC = 600;
+
+/** One press of a trim button. */
+export const TRIM_STEP_SEC = 1;
+
+/**
+ * Move one end of a cut, within what the record and the ceiling allow.
+ *
+ * `edge` is 'start' or 'end', `by` is signed seconds. Clamping rather than
+ * refusing: a button held at its limit should stop, not start failing.
+ */
+export function trim(range, edge, by, { moment = null, duration = 0 } = {}) {
+  const ownStart = Number(moment?.startSec ?? range.start);
+  const ownEnd = Number(moment?.endSec ?? range.end);
+  const floor = Math.max(0, ownStart - TRIM_SLACK_SEC);
+  const ceiling = duration > 0
+    ? Math.min(ownEnd + TRIM_SLACK_SEC, duration)
+    : ownEnd + TRIM_SLACK_SEC;
+
+  let start = Number(range.start);
+  let end = Number(range.end);
+  if (edge === 'start') {
+    start = Math.min(Math.max(floor, start + Number(by)), end - TRIM_STEP_SEC);
+  } else {
+    end = Math.max(Math.min(ceiling, end + Number(by)), start + TRIM_STEP_SEC);
+  }
+  // The far end gives way rather than the near one refusing to move: dragging
+  // an in point past the ceiling's worth of footage is a request for a longer
+  // cut than this will render, and silently doing nothing looks like a dead
+  // button.
+  if (end - start > MAX_CUT_SEC) {
+    if (edge === 'start') end = start + MAX_CUT_SEC;
+    else start = end - MAX_CUT_SEC;
+  }
+  return { start: Math.max(0, start), end };
+}
+
+
+/** Whether a range can still be trimmed in a given direction. */
+export function canTrim(range, edge, by, opts = {}) {
+  const moved = trim(range, edge, by, opts);
+  return moved.start !== Number(range.start) || moved.end !== Number(range.end);
+}
+
+
 /** A time kept inside the range being played. */
 export function clampTo(range, at) {
   return Math.min(Math.max(Number(at), Number(range.start)), Number(range.end));

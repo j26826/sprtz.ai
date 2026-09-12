@@ -107,7 +107,7 @@ resource "google_cloud_run_v2_service" "mcp_media" {
     service_account = google_service_account.mcp_media.email
     # One heavy job per instance. Packaging a match now runs on Transcoder API
     # and no video passes through here, so this no longer guards against the
-    # OOM that set it — but probes, clip cuts and reframes are still ffmpeg,
+    # OOM that set it — but probes, stills and moment cuts are still ffmpeg,
     # and their working set is a whole container's business.
     max_instance_request_concurrency = 1
     timeout                          = "3600s"
@@ -172,6 +172,25 @@ resource "google_cloud_run_v2_service" "mcp_media" {
       env {
         name  = "LIVE_CHUNK_SECONDS"
         value = tostring(var.live_chunk_seconds)
+      }
+      env {
+        name  = "YOUTUBE_CLIENT_ID"
+        value = var.youtube_oauth_client_id
+      }
+      # The refresh token this is spent against lives in Firestore, written
+      # when someone connects a channel in Settings. Only the client is
+      # deployment configuration.
+      dynamic "env" {
+        for_each = var.youtube_oauth_client_secret != "" ? [1] : []
+        content {
+          name = "YOUTUBE_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.youtube_client_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
       }
 
       startup_probe {
@@ -266,6 +285,26 @@ resource "google_cloud_run_v2_service" "api" {
       env {
         name  = "AGENT_ENGINE_DISPLAY_NAME"
         value = local.agent_display_name
+      }
+      env {
+        name  = "YOUTUBE_CLIENT_ID"
+        value = var.youtube_oauth_client_id
+      }
+      env {
+        name  = "YOUTUBE_REDIRECT_URI"
+        value = local.youtube_redirect_uri
+      }
+      dynamic "env" {
+        for_each = var.youtube_oauth_client_secret != "" ? [1] : []
+        content {
+          name = "YOUTUBE_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.youtube_client_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
       }
       # Empty because IAP is not in front of this service. It cannot be derived
       # here either: the value would be the LB backend service's id, and that

@@ -7,7 +7,7 @@
  *
  *   - the transcript and its inline cards render from Firestore, which the
  *     agents write through the catalog MCP server, so the moment list and the
- *     reel update live while an analysis runs;
+ *     moments update live while an analysis runs;
  *   - the composer talks to the deployed ADK agent over SSE;
  *   - a moment plays from the job's HLS stream behind the CDN, seeking to its
  *     in point and stopping at its out point — no timeline, as the footer says.
@@ -38,10 +38,11 @@ import {
   filterAsked, gameNamedIn as namedGame, selectGames, selectMoments,
 } from './search.js';
 import {
-  clampTo, nextSpeed, playRange, playerTimeline, rangeBand, shortClock, widen,
+  MAX_CUT_SEC, canTrim, clampTo, nextSpeed, playRange, playerTimeline, rangeBand,
+  shortClock, trim, widen,
 } from './player.js';
 import {
-  countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
+  countTypesIn, filterByTypes, groupByRide, momentTypesIn,
   rideNamedIn, rideRank, ridesAsked, sortRideGroups,
 } from './ridegroups.js';
 import {
@@ -76,12 +77,18 @@ const state = {
   jobId: null,
   job: null,
   moments: [],
-  clips: [],
   events: [],
   thinking: false,
   sessionId: null,
   sports: ['handball'],
-  platforms: { tiktok: true, instagram: true, youtube: false },
+  // The publish panel, when the popup's record column has been swapped for
+  // it: { momentId, title, description, privacy, status, error, url }. It
+  // lives here rather than on a message because the popup is not a message.
+  share: null,
+  // What the server says is configured for YouTube, and what someone has typed
+  // into the settings panel but not saved yet.
+  youtube: null,
+  youtubeForm: null,
   // What the player is on: { key, momentId, rideOrder, start, end, label,
   // full, loop, rate }. key names the popup's player slot and stays put while
   // the range changes — a chip or Widen re-aims the same video.
@@ -91,9 +98,6 @@ const state = {
     // What the match is called. Empty means "take it from the file or the
     // URL", which is what this did before there was anywhere to type one.
     title: '',
-    // Whether this match is cut as well as read. Sent with the registration
-    // and fixed on the job there, like the metadata language.
-    makeClips: true,
     src: 'file',              // 'file' | 'path' | 'stream' — one source, not three stacked
     hlsUrl: '',               // a VOD playlist to download
     live: { title: '', hlsUrl: '', start: '', end: '' },
@@ -106,12 +110,6 @@ const state = {
   // the field, the same reason the ingest panel's inputs do.
   renaming: null,
   unsubscribe: [],
-};
-
-const PLATFORM_SPEC = {
-  tiktok: { name: 'TikTok', spec: '9:16 · captions burned in' },
-  instagram: { name: 'Instagram Reels', spec: '9:16 · cover frame at 00:03' },
-  youtube: { name: 'YouTube Shorts', spec: '9:16 · title from caption' },
 };
 
 /* ─────────────────────────────────────────────────────────── utils ── */
@@ -168,10 +166,35 @@ async function api(path, options = {}) {
   if (res.status === 401 && state.user) res = await send(true);
 
   if (!res.ok) {
+    // A 401 that survives a forced refresh is a session that has genuinely
+    // ended — the token could not be renewed, or the account no longer exists.
+    // Leaving the desk on screen under a dead credential is the state this
+    // used to sit in: every card failing, nothing saying why. Signing out
+    // hands the editor the sign-in screen, which is the honest answer and the
+    // only way back.
+    if (res.status === 401) sessionExpired();
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `${res.status} ${res.statusText}`);
   }
   return res.json();
+}
+
+
+/**
+ * End the session and show the sign-in screen.
+ *
+ * Called from two places, and only ever when the credential itself is the
+ * problem: an api() 401 that a forced refresh did not fix, and a scheduled
+ * refresh that Firebase refuses. Once, however many requests fail at the same
+ * moment — a page mid-analysis has several in flight, and each of them
+ * signing out would be several sign-outs and several re-renders.
+ */
+let sessionEnding = false;
+
+function sessionExpired() {
+  if (sessionEnding || !state.user) return;
+  sessionEnding = true;
+  signOutNow().finally(() => { sessionEnding = false; });
 }
 
 
@@ -218,11 +241,131 @@ function renderSettings() {
   fillSelect('set-theme', themeOptions(), s.theme);
   const stall = $('set-live-stall');
   if (stall) stall.value = String(s.liveStallMinutes);
+  // Re-drawn here too so switching language relabels it; its own state comes
+  // from the server and is not re-fetched by a repaint.
+  renderYouTube();
 }
 
 function openSettings() {
   renderSettings();
+  refreshYouTube();
   $('settings').classList.remove('hidden');
+}
+
+
+/* ── The channel moments are published to ─────────────────────────────────────
+
+   Unlike everything else in Settings, this is not a per-device preference: it
+   is one channel for the whole desk, and the refresh token behind it is a
+   standing permission to post there. So it lives on the server and this only
+   ever asks what is set — never what any of it is — and sends what someone
+   typed. */
+
+async function refreshYouTube() {
+  try {
+    state.youtube = await api('/api/integrations/youtube');
+  } catch (err) {
+    state.youtube = { error: err.message };
+  }
+  renderYouTube();
+}
+
+
+function renderYouTube() {
+  const box = $('youtube-state');
+  if (!box) return;
+  const y = state.youtube;
+  if (!y) { box.innerHTML = `<div class="setting-hint">${esc(t('youtube.loading'))}</div>`; return; }
+  if (y.error) { box.innerHTML = `<div class="share-error">${esc(y.error)}</div>`; return; }
+
+  const form = state.youtubeForm || {};
+  const client = y.client_configured
+    ? `<div class="yt-line is-on">${esc(y.client_from_deployment
+      ? t('youtube.clientFromDeployment') : t('youtube.clientSet'))}</div>`
+    : `<div class="yt-line">${esc(t('youtube.noClient'))}</div>`;
+
+  // The client is normally Terraform's, so its two boxes stay folded away
+  // until someone opens them: a deployment that already supplies a client
+  // should not greet everyone with two empty secret fields.
+  const clientFields = `
+    <details class="yt-details" ${y.client_configured ? '' : 'open'}>
+      <summary>${esc(t('youtube.clientFields'))}</summary>
+      <label class="field-label" for="yt-client-id">${esc(t('youtube.clientId'))}</label>
+      <input class="input" id="yt-client-id" data-youtube-field="clientId"
+             autocomplete="off" value="${esc(form.clientId || '')}" />
+      <label class="field-label" for="yt-client-secret">${esc(t('youtube.clientSecret'))}</label>
+      <input class="input" id="yt-client-secret" type="password" autocomplete="off"
+             data-youtube-field="clientSecret" value="${esc(form.clientSecret || '')}" />
+      <label class="field-label" for="yt-refresh">${esc(t('youtube.refreshToken'))}</label>
+      <input class="input" id="yt-refresh" type="password" autocomplete="off"
+             data-youtube-field="refreshToken" value="${esc(form.refreshToken || '')}" />
+      <div class="setting-hint">${esc(t('youtube.refreshHint'))}</div>
+      <div class="yt-actions">
+        <button class="btn-outline" data-youtube-act="save">${esc(t('youtube.save'))}</button>
+      </div>
+      ${y.redirect_uri ? `<div class="setting-hint">${esc(t('youtube.redirectUri'))}
+        <code class="yt-uri">${esc(y.redirect_uri)}</code></div>` : ''}
+    </details>`;
+
+  const channel = y.connected
+    ? `<div class="yt-line is-on">${esc(y.channel_title
+        ? `${t('youtube.connectedTo')} ${y.channel_title}` : t('youtube.connected'))}</div>`
+    : `<div class="yt-line">${esc(t('youtube.notConnected'))}</div>`;
+
+  box.innerHTML = `
+    ${client}
+    ${channel}
+    <div class="yt-actions">
+      <button class="btn-accent" data-youtube-act="connect" ${y.can_connect ? '' : 'disabled'}>${
+        esc(y.connected ? t('youtube.reconnect') : t('youtube.connect'))}</button>
+      ${y.connected ? `<button class="link-btn" data-youtube-act="disconnect">${
+        esc(t('youtube.disconnect'))}</button>` : ''}
+    </div>
+    ${y.can_connect ? '' : `<div class="setting-hint">${esc(t('youtube.cannotConnect'))}</div>`}
+    ${clientFields}`;
+}
+
+
+async function onYouTubeAction(action) {
+  if (action === 'connect') {
+    try {
+      const out = await api('/api/integrations/youtube/auth-url');
+      // A new tab, not this one: coming back lands on the callback page, and
+      // replacing the desk with it would lose an open session.
+      window.open(out.url, '_blank', 'noopener');
+    } catch (err) {
+      state.youtube = { ...(state.youtube || {}), error: err.message };
+      renderYouTube();
+    }
+    return;
+  }
+  if (action === 'disconnect') {
+    if (!window.confirm(t('youtube.disconnectConfirm'))) return;
+    try {
+      await api('/api/integrations/youtube', { method: 'DELETE' });
+    } catch (err) {
+      state.youtube = { ...(state.youtube || {}), error: err.message };
+    }
+    await refreshYouTube();
+    return;
+  }
+  if (action === 'save') {
+    const form = state.youtubeForm || {};
+    const body = {};
+    // Only what was typed: an empty box means "leave it alone", because the
+    // fields never show what is stored and blanking one would be a way to
+    // wipe the client by opening the panel.
+    if (form.clientId) body.client_id = form.clientId;
+    if (form.clientSecret) body.client_secret = form.clientSecret;
+    if (form.refreshToken) body.refresh_token = form.refreshToken;
+    try {
+      await api('/api/integrations/youtube', { method: 'PUT', body: JSON.stringify(body) });
+      state.youtubeForm = null;
+    } catch (err) {
+      state.youtube = { ...(state.youtube || {}), error: err.message };
+    }
+    await refreshYouTube();
+  }
 }
 
 function closeSettings() {
@@ -292,9 +435,13 @@ function keepSessionAlive(user) {
   if (!user) return;
   refreshTimer = setInterval(() => {
     getIdToken(user, true).catch((err) => {
-      // A failure here is not fatal on its own — api() still force-refreshes on
-      // a 401 — so it is logged rather than shown.
+      // Firebase renews a token from a credential it still holds, so a refusal
+      // here is that credential being gone — the account disabled, the session
+      // revoked, the password changed on another device. A network blip is not
+      // this: it resolves as a failed fetch inside the SDK and comes back on
+      // the next tick, which is why only auth/* errors end the session.
       console.warn('token refresh failed', err);
+      if (String(err?.code || '').startsWith('auth/')) sessionExpired();
     });
   }, TOKEN_REFRESH_MS);
 }
@@ -396,9 +543,22 @@ onAuthStateChanged(auth, async (user) => {
   $('signin').classList.toggle('hidden', !!user);
   $('app').classList.toggle('hidden', !user);
   if (!user) {
+    // Nothing of the previous session stays on screen behind the sign-in card:
+    // it is another person's desk until someone signs in again, and a popup
+    // left open over it would still be playing their match.
+    closeDetails();
+    closeSettings();
     state.msgs = [];
     state.jobs = [];
     state.jobId = null;
+    state.job = null;
+    state.moments = [];
+    state.events = [];
+    state.game = null;
+    state.share = null;
+    state.youtube = null;
+    state.youtubeForm = null;
+    render();
     return;
   }
 
@@ -462,7 +622,7 @@ function watchJobs() {
       // No session is created per job — the sidebar lists conversations, and a
       // match exists perfectly well without anyone having talked about it. But
       // something has to be selected or the per-job listeners never start and
-      // every card that reads moments, clips or the game record is empty
+      // every card that reads moments or the game record is empty
       // whatever Firestore holds.
       ensureJobContext();
       render();
@@ -474,7 +634,7 @@ function watchJobs() {
 /**
  * Make sure some match is in context.
  *
- * The moments, clips, events and game record are all read through listeners
+ * The moments, events and game record are all read through listeners
  * opened by selectJob, so with nothing selected the cards are empty however
  * much has been analysed — which reads as "the analysis found nothing" rather
  * than "no match is open". The most recent one is the useful default: it is
@@ -498,7 +658,6 @@ function selectJob(jobId) {
   state.unsubscribe = [];
   state.jobId = jobId;
   state.moments = [];
-  state.clips = [];
   state.game = null;
   state.gameFor = null;
   state.eventTree = null;
@@ -531,11 +690,6 @@ function selectJob(jobId) {
       refreshEventTree();
       render();
     },
-  ));
-
-  state.unsubscribe.push(onSnapshot(
-    query(collection(db, 'jobs', jobId, 'clips'), orderBy('score', 'desc'), limit(200)),
-    (snap) => { state.clips = snap.docs.map((d) => ({ id: d.id, ...d.data() })); render(); },
   ));
 
   state.unsubscribe.push(onSnapshot(
@@ -830,11 +984,6 @@ function filterTitle(view, index, fallback) {
 
 
 
-/* A star, for a moment that is already in the reel. */
-const STAR = '<svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
-  + '<path d="M12 2l2.9 6.6L22 9.6l-5 4.9 1.2 7L12 18.1 5.8 21.5 7 14.5l-5-4.9 7.1-1z"/></svg>';
-
-
 /**
  * A list panel's head: what it is showing, how many, and any controls.
  *
@@ -854,12 +1003,9 @@ function listHead(view, index, fallback, extra = '') {
 }
 
 
-function momentsHead(view, index, inReel) {
+function momentsHead(view, index) {
   const sort = view.sort === 'time' ? 'time' : 'score';
-  const stars = inReel
-    ? `<span class="list-count" title="${esc(t('moment.inReel'))}">${STAR} ${inReel}</span>`
-    : '';
-  return listHead(view, index, t('moments.title'), stars + ['score', 'time'].map((key) => `
+  return listHead(view, index, t('moments.title'), ['score', 'time'].map((key) => `
     <button class="link-btn" data-sort="${index}:${key}"
             aria-pressed="${key === sort}">${esc(t(`moments.sort.${key}`))}</button>`).join(''));
 }
@@ -869,10 +1015,10 @@ function momentsHead(view, index, inReel) {
  * One moment as a tile.
  *
  * The picture is the way in: a play button sits on it, and the whole frame
- * opens the moment in the player, where its record, its ride and the reel
- * controls are. The buttons that used to sit at the foot of every tile are
- * gone — a row of Details and Add repeated down a page was most of what the
- * page said, and the player answers both.
+ * opens the moment in the player, where its record, its ride and the
+ * download and publish buttons are. The buttons that used to sit at the foot
+ * of every tile are gone — a row of them repeated down a page was most of what
+ * the page said, and the player answers all of it.
  *
  * The summary is still the headline — the line an editor scans by is who did
  * what, not what the taxonomy calls it — clamped rather than cut at a
@@ -889,7 +1035,6 @@ function momentTile(m, opts = {}) {
   // listeners, which do not hold it. opts.open routes the picture through the
   // row payload instead, and opts.game puts the match on the tile — across the
   // desk a moment without its match is a sentence without a subject.
-  const clip = opts.open ? null : state.clips.find((c) => c.momentId === m.momentId);
   const meta = [
     // H.No and rider first: on a competition day that is what a tile is
     // scanned for. A schedule-inferred name is marked with a tilde. Not inside
@@ -911,7 +1056,6 @@ function momentTile(m, opts = {}) {
         ${state.thumbs.urls[m.momentId]
           ? `<img src="${esc(state.thumbs.urls[m.momentId])}" alt="" loading="lazy">`
           : '<span class="thumb-stripes"></span>'}
-        ${clip ? `<span class="tile-star" title="${esc(t('moment.inReel'))}">${STAR}</span>` : ''}
         <span class="thumb-play" aria-hidden="true"></span>
         <span class="thumb-clock">${clock(m.startSec)}</span>
       </button>
@@ -942,8 +1086,6 @@ function momentsCard(msg, index) {
   if (event) return rideGroupsCard(msg, index, found, event);
 
   const view = pageOf(found.list, msg.page);
-  const inReel = found.list
-    .filter((m) => state.clips.some((c) => c.momentId === m.momentId)).length;
 
   // The row scrolls sideways within a page rather than instead of one. A match
   // yields a couple of hundred moments, and one scroller holding all of them is
@@ -951,7 +1093,7 @@ function momentsCard(msg, index) {
   // findable, and no way to tell how much is left.
   return `
     <div class="list">
-      ${momentsHead({ ...found, sort: msg.sort }, index, inReel)}
+      ${momentsHead({ ...found, sort: msg.sort }, index)}
       <div class="tile-row">${view.slice.map(momentTile).join('')}</div>
       ${pagerRow(view, index)}
     </div>`;
@@ -989,12 +1131,10 @@ const RIDES_PER_PAGE = 4;
 function rideGroupsCard(msg, index, found, event) {
   const groups = groupByRide(event, found.list, { filtered: found.narrowed });
   const view = pageOf(groups, msg.page, RIDES_PER_PAGE);
-  const inReel = found.list
-    .filter((m) => state.clips.some((c) => c.momentId === m.momentId)).length;
 
   return `
     <div class="list">
-      ${momentsHead({ ...found, sort: msg.sort }, index, inReel)}
+      ${momentsHead({ ...found, sort: msg.sort }, index)}
       ${eventHead(event)}
       ${view.slice.map(rideGroup).join('')}
       ${pagerRow(view, index)}
@@ -1531,9 +1671,9 @@ function rideLabel(ride) {
  * details of a play is the point at which someone wants to see it, and the
  * facts are what they are checking it against — reading "double save" and
  * watching the save are the same act here. Three seconds either side of what
- * was asked for — the moment's own times, or a clip's trim — so the play is
+ * was asked for — the moment's own times, padded — so the play is
  * seen in its context. Every way into the player comes through here: the
- * row's thumbnail, the details button, and the reel's Play.
+ * row's thumbnail and the details button.
  */
 function openDetails(momentId, range = null) {
   const m = momentById(momentId);
@@ -1621,9 +1761,213 @@ function renderDetailsBody() {
   if (over) over.innerHTML = panel ? panel.over : '';
   const under = $('details-player').querySelector('.player-under');
   if (under) under.innerHTML = panel ? panel.summary : '';
+  const actions = $('details-actions');
+  if (actions) actions.innerHTML = detailActions();
   const body = $('details-body');
   body.className = 'detail-body';
-  body.innerHTML = (panel ? panel.reference : '') + (p.moment ? momentRecord(p.moment, Boolean(ride)) : '');
+  body.innerHTML = state.share?.mode === 'publish'
+    ? publishPanel()
+    : (panel ? panel.reference : '') + (p.moment ? momentRecord(p.moment, Boolean(ride)) : '');
+}
+
+
+/* ── Taking a moment off the desk ─────────────────────────────────────────────
+
+   Two things can be done with a moment once it has been watched: saved as a
+   file, or put on a channel. Both cut the range that is playing, so what comes
+   out is what was on screen — the padded moment by default, or whatever the
+   trim and Widen have made of it.
+
+   The buttons live in the popup's head rather than on the tile, for the reason
+   the tile's buttons were removed: down a page of moments they were most of
+   what the page said, and neither is a decision anyone makes without watching
+   the thing first. */
+
+function detailActions() {
+  const p = state.playing;
+  if (!p?.moment) return '';
+  const busy = state.share?.status === 'sending';
+  const publishing = state.share?.mode === 'publish';
+  return `
+    <button class="btn-outline detail-action" data-detail-act="download" ${
+      state.share?.downloading ? 'disabled' : ''}>${
+      esc(state.share?.downloading ? t('share.preparing') : t('share.download'))}</button>
+    <button class="btn-accent detail-action" data-detail-act="publish"
+            aria-pressed="${publishing}" ${busy ? 'disabled' : ''}>${esc(t('share.publish'))}</button>`;
+}
+
+
+/**
+ * The publish panel: what is being published, and what it will say.
+ *
+ * It replaces the moment's record in the popup's right-hand column rather than
+ * opening a dialog of its own, because the preview is the player that is
+ * already running beside it — trimming re-aims that video, so what is checked
+ * is the cut itself and not a description of one.
+ *
+ * Only YouTube can be published to. Instagram and TikTok are named because
+ * they are what this is for, and marked as not built rather than left off: a
+ * missing option reads as an oversight, a marked one reads as a plan.
+ */
+function publishPanel() {
+  const p = state.playing;
+  const share = state.share;
+  if (!p || !share) return '';
+  const length = Math.max(0, p.end - p.start);
+  const over = length > MAX_CUT_SEC;
+  const status = share.status || 'idle';
+
+  return `
+    <div class="publish-panel">
+      <div class="panel-label">${esc(t('share.title'))}</div>
+
+      <div class="trim-row">
+        <div class="trim-edge">
+          <div class="field-label">${esc(t('share.in'))}</div>
+          <div class="trim-controls">
+            ${trimButton('start', -1)}
+            <span class="trim-at">${esc(clock(p.start))}</span>
+            ${trimButton('start', 1)}
+          </div>
+        </div>
+        <div class="trim-edge">
+          <div class="field-label">${esc(t('share.out'))}</div>
+          <div class="trim-controls">
+            ${trimButton('end', -1)}
+            <span class="trim-at">${esc(clock(p.end))}</span>
+            ${trimButton('end', 1)}
+          </div>
+        </div>
+        <div class="trim-edge">
+          <div class="field-label">${esc(t('share.length'))}</div>
+          <div class="trim-len ${over ? 'is-over' : ''}">${esc(shortClock(length))}</div>
+        </div>
+        <button class="link-btn" data-trim-reset>${esc(t('share.reset'))}</button>
+      </div>
+
+      <label class="field-label" for="share-title">${esc(t('share.videoTitle'))}</label>
+      <input class="input" id="share-title" maxlength="100" data-share-field="title"
+             value="${esc(share.title)}" />
+      <div class="setting-hint">${esc(t('share.titleHint'))}</div>
+
+      <label class="field-label" for="share-description">${esc(t('share.description'))}</label>
+      <textarea class="input share-text" id="share-description" rows="5"
+                data-share-field="description">${esc(share.description)}</textarea>
+
+      <label class="field-label" for="share-privacy">${esc(t('share.privacy'))}</label>
+      <select class="input" id="share-privacy" data-share-field="privacy">
+        ${['private', 'unlisted', 'public'].map((v) => `
+          <option value="${v}" ${share.privacy === v ? 'selected' : ''}>${
+            esc(t(`share.privacy.${v}`))}</option>`).join('')}
+      </select>
+
+      <div class="platform-row">
+        <button class="btn-accent" data-publish-to="youtube" ${
+          status === 'sending' ? 'disabled' : ''}>${
+          esc(status === 'sending' ? t('share.sending') : t('share.toYouTube'))}</button>
+        <span class="platform-soon">${esc(t('share.instagramSoon'))}</span>
+        <span class="platform-soon">${esc(t('share.tiktokSoon'))}</span>
+      </div>
+
+      ${status === 'error' ? `<div class="share-error">${esc(share.error || '')}</div>` : ''}
+      ${status === 'done' ? `<div class="share-done">${esc(t('share.published'))}
+        <a class="link-btn" href="${esc(share.url)}" target="_blank"
+           rel="noopener noreferrer">${esc(share.url)}</a></div>` : ''}
+      ${over ? `<div class="share-error">${esc(t('share.tooLong'))}</div>` : ''}
+    </div>`;
+}
+
+
+function trimButton(edge, by) {
+  const p = state.playing;
+  const can = canTrim(p, edge, by, { moment: p.moment, duration: jobDuration() });
+  return `<button class="pc" data-trim="${edge}:${by}" ${can ? '' : 'disabled'}
+    aria-label="${esc(t(by < 0 ? 'share.earlier' : 'share.later'))}">${by < 0 ? '−1s' : '+1s'}</button>`;
+}
+
+
+/** The copy a moment arrives with: what it is, in the match it came from. */
+function shareDefaults(m) {
+  const game = state.game || {};
+  const match = state.job?.title || game.title || '';
+  const who = [m.rider, m.horse].filter(Boolean).join(' / ');
+  const headline = [who, m.label || m.momentType || ''].filter(Boolean).join(' — ');
+  return {
+    title: [headline, match].filter(Boolean).join(' · ').slice(0, 100),
+    description: [
+      m.summary || m.description || '',
+      match ? `${match}${game.competition && game.competition !== match ? ` · ${game.competition}` : ''}` : '',
+      `${t('share.atTime')} ${clock(m.startSec)}`,
+    ].filter(Boolean).join('\n\n'),
+  };
+}
+
+
+function openPublish() {
+  const p = state.playing;
+  if (!p?.moment) return;
+  const defaults = shareDefaults(p.moment);
+  state.share = {
+    mode: 'publish',
+    momentId: p.moment.momentId,
+    privacy: state.youtube?.privacy || 'private',
+    status: 'idle',
+    ...defaults,
+  };
+  // What is configured is a server fact and changes without this tab knowing,
+  // so it is asked for when the panel opens rather than trusted from earlier.
+  refreshYouTube();
+  renderDetailsBody();
+}
+
+
+async function downloadMoment() {
+  const p = state.playing;
+  if (!p?.moment || state.share?.downloading) return;
+  state.share = { ...(state.share || {}), downloading: true, status: 'idle', error: '' };
+  renderDetailsBody();
+  try {
+    const out = await api(
+      `/api/jobs/${p.moment.jobId || state.jobId}/moments/${p.moment.momentId}/download`,
+      { method: 'POST', body: JSON.stringify({ start_sec: p.start, end_sec: p.end }) },
+    );
+    // The signed URL carries a content-disposition, so this saves the file
+    // rather than navigating away from the desk.
+    window.location.href = out.url;
+  } catch (err) {
+    state.share = { ...(state.share || {}), status: 'error', error: err.message };
+  } finally {
+    state.share = { ...(state.share || {}), downloading: false };
+    renderDetailsBody();
+  }
+}
+
+
+async function publishToYouTube() {
+  const p = state.playing;
+  const share = state.share;
+  if (!p?.moment || !share || share.status === 'sending') return;
+  state.share = { ...share, status: 'sending', error: '' };
+  renderDetailsBody();
+  try {
+    const out = await api(
+      `/api/jobs/${p.moment.jobId || state.jobId}/moments/${p.moment.momentId}/publish/youtube`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          start_sec: p.start,
+          end_sec: p.end,
+          title: share.title,
+          description: share.description,
+          privacy: share.privacy,
+        }),
+      },
+    );
+    state.share = { ...state.share, status: 'done', url: out.url };
+  } catch (err) {
+    state.share = { ...state.share, status: 'error', error: err.message };
+  }
+  renderDetailsBody();
 }
 
 
@@ -1712,7 +2056,6 @@ function ridePanel(ride, p) {
        ${esc(mo.label || mo.momentType || '')} <span>${clock(mo.startSec)}</span></button>`),
   ].join('');
 
-  const notes = notesForRide(state.game?.notConfirmed, ride.segments);
   const incidents = moments.filter((mo) => mo.category === 'incident' || mo.requiresHumanReview);
   // Above the player, the one thing that drives it: the chips that pick what
   // is playing. They used to sit under the ride's score tiles, which put the
@@ -1735,12 +2078,14 @@ function ridePanel(ride, p) {
         r.scoreboard ? `<pre class="source-ref">${esc(r.scoreboard)}</pre>` : ''}`)}
     </section>`;
 
-  // What the analysis found beyond the moments: what it looked for and could
-  // not confirm, and whether anything went wrong in the arena.
+  // What the analysis found beyond the moments: whether anything went wrong
+  // in the arena. There was a "looked for, not confirmed" section above this
+  // one, listing the types the analysis went looking for in this ride's own
+  // windows and could not confirm. It was removed at the editor's request: a
+  // list of things that did not happen is a paragraph of hedging beside the
+  // moments that did, and it was read as doubt about them.
   const reference = `
     <section class="ride-panel">
-      ${notes.length ? panelSection(t('ride.lookedFor'), notes.map((n) => `
-        <div class="panel-line"><b>${esc(n.momentType)}</b> — ${esc(n.notes.join(' '))}</div>`).join('')) : ''}
       ${panelSection(t('ride.incidents'), incidents.length
         ? incidents.map((mo) => `<div class="panel-line"><b>${esc(mo.label || mo.momentType)}</b>
             <span class="mono-soft">${clock(mo.startSec)}</span> — ${esc(mo.summary || '')}</div>`).join('')
@@ -1852,6 +2197,9 @@ function showDetailsModal(withPlayer) {
 function closeDetails() {
   $('details').classList.add('hidden');
   $('details-player').innerHTML = '';
+  // A publish panel belongs to the moment it was opened over, and its trim is
+  // that moment's. Reopening anything starts from the record again.
+  state.share = null;
   if (state.details) {
     // The player lived in the popup, so closing the popup stops it. Leaving it
     // running would be audio from a dialog that is no longer on screen.
@@ -1866,7 +2214,7 @@ function closeDetails() {
  * Adding a video, or reserving the pipeline for one that has not been played.
  *
  * Two panels, not two tabs of one. A file and a live event share a sport, a
- * set of context links and the clips question, and nothing else: one is here
+ * set of context links, and nothing else: one is here
  * now and the other is a booking. Tabbing between them put a datetime picker
  * one click from a drop zone and made the panel read as a single form with
  * half its fields hidden, which is what "split them" was asking to undo.
@@ -1891,7 +2239,7 @@ function ingestCard(m) {
 }
 
 
-/** Sport and the clips question: the two things asked of every match. */
+/** The sport: the one thing asked of every match. */
 function sportRow(u) {
   return `
       <div class="ingest-field">
@@ -1901,22 +2249,6 @@ function sportRow(u) {
             <button class="chip" data-sport="${esc(s)}" aria-pressed="${u.sport === s}"
                     style="text-transform:capitalize">${esc(s)}</button>`).join('')}
         </div>
-      </div>`;
-}
-
-
-function clipsField(u) {
-  return `
-      <div class="ingest-field">
-        <div class="field-label">${esc(t('ingest.clips'))}</div>
-        <label class="ingest-clips">
-          <input type="checkbox" data-make-clips ${u.makeClips ? 'checked' : ''} />
-          <span>
-            <span class="ingest-clips-title">${esc(t('ingest.makeClips'))}</span>
-            <span class="setting-hint">${esc(t(
-    u.makeClips ? 'ingest.makeClipsOn' : 'ingest.makeClipsOff'))}</span>
-          </span>
-        </label>
       </div>`;
 }
 
@@ -1990,7 +2322,6 @@ function uploadForm(u, busy) {
           ${source}
         </div>
         ${contextField(u)}
-        ${clipsField(u)}
       </div>
       ${u.status === 'uploading' || u.status === 'analyzing' ? `
         <div class="ingest-progress">
@@ -2013,7 +2344,7 @@ function uploadForm(u, busy) {
           <button class="btn-accent btn-accent-lg" data-register-hls="1"
                   ${u.hlsUrl.trim() && !busy ? '' : 'disabled'}>${esc(t('ingest.useStream'))}</button>`}
         <span class="ingest-ready">${esc(ready
-    ? `${t('ingest.ready')} — ${u.sport}${u.makeClips ? `, ${t('ingest.readyClips')}` : `, ${t('ingest.readyMoments')}`}`
+    ? `${t('ingest.ready')} — ${u.sport}, ${t('ingest.readyMoments')}`
     : t('ingest.pickSource'))}</span>
         ${pending && u.src === 'file' ? `
           <button class="btn-outline" data-resume="${esc(pending.job_id)}" ${busy ? 'disabled' : ''}
@@ -2055,7 +2386,6 @@ function liveForm(u, busy) {
           <div class="setting-hint">${esc(t('ingest.liveHint'))}</div>
         </div>
         ${contextField(u)}
-        ${clipsField(u)}
       </div>
       <div class="ingest-foot">
         <button class="btn-accent btn-accent-lg" data-schedule-live="1"
@@ -2063,54 +2393,12 @@ function liveForm(u, busy) {
           ${esc(u.status === 'scheduling' ? t('ingest.scheduling') : t('ingest.schedule'))}
         </button>
         <span class="ingest-ready">${esc(err ? t(err)
-    : ready ? `${t('ingest.ready')} — ${u.sport}${u.makeClips ? `, ${t('ingest.readyClips')}` : `, ${t('ingest.readyMoments')}`}`
+    : ready ? `${t('ingest.ready')} — ${u.sport}, ${t('ingest.readyMoments')}`
       : t('ingest.liveNeeds'))}</span>
       </div>`;
 }
 
 
-function reelCard(msg, index) {
-  if (!state.clips.length) return emptyCard(t('reel.none'));
-  const total = state.clips.reduce((a, c) => a + (c.durationSec || 0), 0);
-  const aspect = state.clips[0]?.aspect || '9:16';
-  // The bar strip stays whole — it is the shape of the reel, and a page of it
-  // would be a different reel. Only the editable rows page.
-  const view = pageOf(state.clips, msg.page);
-  return `
-    <div class="panel">
-      <div class="panel-head">
-        <div class="panel-head-title">${esc(t('reel.title'))}</div>
-        <div class="panel-head-meta">${dur(total)} · ${esc(aspect)}</div>
-      </div>
-      <div class="reel-bars">
-        ${state.clips.map((c, i) => `
-          <div class="reel-bar" style="flex-grow:${c.durationSec || 1};
-               background:${i % 2 ? 'var(--color-neutral-400)' : 'var(--color-neutral-700)'}"></div>`).join('')}
-      </div>
-      ${view.slice.map((c, i) => `
-        <div class="clip-row">
-          <div class="clip-n">${String(view.from + i).padStart(2, '0')}</div>
-          <div class="clip-label">${esc(c.title || c.hookText || 'Clip')}</div>
-          <div class="stepper">
-            <button class="step-btn" data-clip-shorter="${esc(c.clipId)}">&minus;</button>
-            <div class="step-val">${(c.durationSec || 0).toFixed(1)}s</div>
-            <button class="step-btn" data-clip-longer="${esc(c.clipId)}">+</button>
-          </div>
-          <button class="link-btn" data-clip-play="${esc(c.clipId)}">${esc(t('reel.play'))}</button>
-        </div>`).join('')}
-      ${pagerRow(view, index)}
-      <div class="panel-actions">
-        <button class="btn-solid" data-ask="Generate the video">${esc(t('reel.generate'))}</button>
-        <button class="btn-outline" data-ask="Reframe it vertical">${esc(t('reel.reframe'))}</button>
-        <button class="btn-outline" data-ask="Prepare it for publishing">${esc(t('reel.publish'))}</button>
-      </div>
-    </div>`;
-}
-
-// A run that dies takes its progress reporting with it, so the job keeps the
-// status it had and looks alive for ever. Nothing retries on its own, so the
-// only honest reading of a long silence is that it needs starting again.
-const STALLED_AFTER_MS = 15 * 60 * 1000;
 
 function toDate(value) {
   if (!value) return null;
@@ -2142,8 +2430,7 @@ const STAGES = [
   { key: 'ingest', start: 0, end: 10 },
   { key: 'transcode', start: 10, end: 20 },
   { key: 'analysis', start: 20, end: 80 },
-  { key: 'clips', start: 80, end: 95 },
-  { key: 'captions', start: 95, end: 100 },
+  { key: 'finalize', start: 80, end: 100 },
 ];
 
 /** How far through its own span a stage is, given overall progress. */
@@ -2598,7 +2885,6 @@ function openSession(sessionId) {
     state.jobId = null;
     state.job = null;
     state.moments = [];
-    state.clips = [];
     state.events = [];
     state.game = null;
     // A conversation about no particular match still shows the desk's most
@@ -3118,33 +3404,33 @@ function scopeCard(m, i) {
 /* ──────────────────────────────────────────────────────── the opener ── */
 
 /**
- * The three icons the opener draws, as the design draws them: a recording
- * arriving, a search, and a strip of film. Inline rather than fetched — three
- * shapes are cheaper as markup than as a request, and a missing asset here
- * would leave the option nameless.
+ * The icons the opener draws, as the design draws them: a recording arriving
+ * and a search. Inline rather than fetched — two shapes are cheaper as markup
+ * than as a request, and a missing asset here would leave the option nameless.
  */
 const OPENER_ICONS = {
   upload: '<path d="M12 16V5"/><path d="m7.5 9.5 4.5-4.5 4.5 4.5"/>'
     + '<path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
-  film: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9.5h18"/>'
-    + '<path d="M8 5v4.5"/><path d="M16 5v4.5"/><path d="m11 12.5 3.5 2-3.5 2z"/>',
 };
 
 
 /**
  * What a session can be about, and the ways in.
  *
- * Three things happen on this desk — a match arrives, a match is searched, a
- * match is cut — and the second and third are the same four questions about
- * *which* matches. So the scope is not a separate interrogation any more: it
- * is the second half of the answer to what the session is for. "Find
- * moments · Across a Sport" both names the session and narrows every card in
- * it, which is what the scope card did on its own and in a step nobody could
- * connect to what they had come to do.
+ * Two things happen on this desk — a match arrives, and a match is searched —
+ * and the second carries four questions about *which* matches. So the scope is
+ * not a separate interrogation: it is the second half of the answer to what
+ * the session is for. "Find moments · Across a Sport" both names the session
+ * and narrows every card in it, which is what the scope card did on its own
+ * and in a step nobody could connect to what they had come to do.
+ *
+ * There was a third option — generate clips — over the same four scopes. Clip
+ * generation is being rebuilt and offering a way into something that no longer
+ * runs is worse than offering nothing.
  *
  * The first option is the exception, and deliberately: a video that is not on
- * the desk yet has no scope to pick, so its two ways in open a panel instead.
+ * the desk yet has no scope to pick, so its ways in open a panel instead.
  */
 const OPENER_SCOPES = ['all', 'recent', 'games', 'category'];
 
@@ -3152,7 +3438,6 @@ function openerOptions() {
   return [
     { key: 'add', icon: 'upload', links: ['upload', 'live', 'status'] },
     { key: 'find', icon: 'search', links: OPENER_SCOPES },
-    { key: 'clips', icon: 'film', links: OPENER_SCOPES },
   ];
 }
 
@@ -3252,7 +3537,7 @@ function onOpenerClick(hit) {
     return;
   }
 
-  msg.intent = group;                      // 'find' or 'clips'
+  msg.intent = group;                      // 'find'
   if (key === 'all') { applyScope(i, { kind: 'all' }); return; }
   if (key === 'recent') {
     // The desk's newest analysed match. With none, there is nothing to scope
@@ -3299,7 +3584,7 @@ function applyScope(i, scope) {
     msg.intent = null;
     // No cards passed, so the reply is routed through attachCards the way a
     // typed question is — "the best moments" gets the moments card.
-    ask(t(intent === 'clips' ? 'opener.askClips' : 'opener.askMoments'));
+    ask(t('opener.askMoments'));
   }
 }
 
@@ -3380,36 +3665,6 @@ function onScopeClick(hit) {
   }
 }
 
-function publishCard() {
-  const posted = state.job?.status === 'ready';
-  return `
-    <div class="panel">
-      ${Object.entries(PLATFORM_SPEC).map(([key, p]) => {
-        const on = state.platforms[key];
-        return `
-          <button class="platform" data-platform="${key}" aria-pressed="${on}">
-            <span class="checkmark"></span>
-            <span>
-              <span class="platform-name" style="display:block">${esc(p.name)}</span>
-              <span class="platform-spec" style="display:block">${esc(p.spec)}</span>
-            </span>
-            <span class="platform-state">${on ? (posted ? 'Packaged' : 'Selected') : 'Off'}</span>
-          </button>`;
-      }).join('')}
-      <div style="padding:12px">
-        <div class="field-label" style="margin-bottom:6px">Caption drafted by the agent</div>
-        <textarea class="caption-box" id="caption" rows="3">${
-          esc(state.clips[0]?.captions?.tiktok || '')}</textarea>
-        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
-          <div class="field-label">${esc(t('publish.note'))}</div>
-          <div style="flex:1"></div>
-          <button class="btn-solid" data-ask="Finalise the job for publishing">
-            ${posted ? '✓ Packaged' : 'Prepare package'}
-          </button>
-        </div>
-      </div>
-    </div>`;
-}
 
 function activityCard(msg, index) {
   if (!state.events.length) return emptyCard(t('activity.none'));
@@ -3489,11 +3744,9 @@ function render() {
       ${m.showMoments ? momentsCard(m, i) : ''}
       ${m.showRides ? ridesCard(m, i) : ''}
       ${m.showIngest ? ingestCard(m) : ''}
-      ${m.showReel ? reelCard(m, i) : ''}
       ${m.showJobs ? jobsCard(m, i) : ''}
       ${m.showGame ? gameCard() : ''}
       ${m.showGames ? gamesCard(m, i) : ''}
-      ${m.showPublish ? publishCard() : ''}
       ${m.showActivity ? activityCard(m, i) : ''}
       ${actionsRow(m)}
     </div>`;
@@ -3989,19 +4242,14 @@ function attachCards(index, question) {
     msg.showJobs = true;
     msg.showActions = true;
     msg.actions = [t('action.bestMoments'), t('action.ingest')];
-  } else if (card === 'publish') {
-    msg.showPublish = true;
-  } else if (card === 'reel') {
-    msg.showReel = true;
-    msg.showActions = true;
-    msg.actions = [t('reel.generate'), t('reel.reframe'), t('reel.publish')];
   } else {
     // Every moment, not a top handful. A list that silently stops at six looks
     // like the analysis found six. The order is chosen here rather than baked
     // in, so the card's own toggle can change it afterwards.
     msg.showMoments = true;
-    msg.showActions = true;
-    msg.actions = ['Cut all of these', 'Cut a 30-second short'];
+    // No action row: it offered "Cut all of these" and "Cut a 30-second
+    // short", and both asked for a thing this desk no longer does. The card's
+    // own sort and its tiles are what a moments answer is followed up with.
 
     // A question that names a match is about that match, whichever one happens
     // to be open. Selecting it re-points every listener, so the ids are not
@@ -4051,7 +4299,6 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
       // descriptions are written in is a property of that match, not of
       // whoever opens it later.
       metadata_language: getSettings().metadataLanguage,
-      make_clips: state.upload.makeClips,
       title_source: state.upload.title.trim() ? 'editor' : 'derived',
       context_urls: contextUrlList(),
       // Only set when picking up an orphan somebody else left: the bytes are
@@ -4091,7 +4338,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
   playbackUrl = null;
   render();
 
-  await ask('Analyse this match and suggest clips.', {
+  await ask('Analyse this match and find its key moments.', {
     showJobs: true,
     showActions: true,
     actions: [t('action.processing'), t('action.bestMoments')],
@@ -4169,8 +4416,7 @@ async function registerFromStorage() {
         title: u.title.trim() || uri.split('/').pop().replace(/\.[^.]+$/, '') || uri,
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
-        make_clips: state.upload.makeClips,
-        title_source: state.upload.title.trim() ? 'editor' : 'derived',
+          title_source: state.upload.title.trim() ? 'editor' : 'derived',
       context_urls: contextUrlList(),
       }),
     });
@@ -4189,7 +4435,7 @@ async function registerFromStorage() {
     }
     render();
 
-    await ask('Analyse this match and suggest clips.', {
+    await ask('Analyse this match and find its key moments.', {
       showJobs: true,
       showActions: true,
       actions: [t('action.processing'), t('action.bestMoments')],
@@ -4218,8 +4464,7 @@ async function registerFromHls() {
         title: u.title.trim() || url.split('/').pop().split('?')[0].replace(/\.[^.]+$/, '') || url,
         sport: u.sport,
         metadata_language: getSettings().metadataLanguage,
-        make_clips: state.upload.makeClips,
-        title_source: state.upload.title.trim() ? 'editor' : 'derived',
+          title_source: state.upload.title.trim() ? 'editor' : 'derived',
         context_urls: contextUrlList(),
       }),
     });
@@ -4238,7 +4483,7 @@ async function registerFromHls() {
     }
     render();
 
-    await ask('Analyse this match and suggest clips.', {
+    await ask('Analyse this match and find its key moments.', {
       showJobs: true,
       showActions: true,
       actions: [t('action.processing'), t('action.bestMoments')],
@@ -4275,8 +4520,7 @@ async function scheduleLiveEvent() {
         event_start: startIso,
         event_end: new Date(l.end).toISOString(),
         metadata_language: getSettings().metadataLanguage,
-        make_clips: state.upload.makeClips,
-        title_source: l.title.trim() ? 'editor' : 'derived',
+          title_source: l.title.trim() ? 'editor' : 'derived',
         stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
       }),
@@ -4384,20 +4628,21 @@ document.addEventListener('keydown', (event) => {
 
 
 document.addEventListener('click', (event) => {
-  const hit = event.target.closest('[data-ask],[data-play],[data-add],[data-platform],'
-    + '[data-clip-shorter],[data-clip-longer],[data-clip-play],[data-retry],'
+  const hit = event.target.closest('[data-ask],[data-play],[data-retry],'
     + '[data-sport],[data-close-player],[data-prepare-playback],'
     + '[data-reanalyse],[data-cancel-job],[data-delete-job],[data-session],'
     + '[data-delete-session],[data-details],[data-remove-clip],[data-game-details],'
     + '[data-open-game],[data-page],[data-sort],[data-show-all],[data-register-gcs],'
     + '[data-ctx-remove],[data-ctx-add],[data-reanalyse-go],[data-reanalyse-cancel],'
     + '[data-search-mode],[data-search-sport],[data-search-game],[data-search-run],[data-search-open],'
-    + '[data-desk-add],[data-register-hls],[data-schedule-live],'
+    + '[data-register-hls],[data-schedule-live],'
     + '[data-opener],[data-opener-back],[data-ingest-src],'
     + '[data-rename],[data-rename-save],[data-rename-cancel],[data-ride-sort],'
     + '[data-scope-pick],[data-scope-sport],[data-scope-disc],[data-scope-game],'
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
     + '[data-pc],[data-player-range],[data-watch-ride],'
+    + '[data-detail-act],[data-trim],[data-trim-reset],[data-publish-to],'
+    + '[data-youtube-act],'
     + '[data-ride-tab],[data-type-menu],[data-type-pick]');
 
   // An open moment-type menu closes on any click outside its own filter. Its
@@ -4420,11 +4665,39 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.playerRange) { setPlayerRange(hit.dataset.playerRange); return; }
   if (hit.dataset.watchRide) { openRide(hit.dataset.watchRide); return; }
 
+  if (hit.dataset.detailAct) {
+    if (hit.dataset.detailAct === 'download') downloadMoment();
+    // A second press closes the panel again: the button reads as a toggle
+    // because it is pressed, and a toggle that only opens is a trap.
+    else if (state.share?.mode === 'publish') { state.share = null; renderDetailsBody(); }
+    else openPublish();
+    return;
+  }
+  if (hit.dataset.trim) {
+    const [edge, by] = hit.dataset.trim.split(':');
+    const p = state.playing;
+    // Trimming re-aims the video that is already playing: the preview is the
+    // cut itself rather than a description of one.
+    Object.assign(p, trim(p, edge, Number(by), { moment: p.moment, duration: jobDuration() }),
+                  { full: false, free: false });
+    renderDetailsBody();
+    syncPlayer();
+    return;
+  }
+  if (hit.dataset.trimReset !== undefined) {
+    const p = state.playing;
+    Object.assign(p, playRange(p.moment.startSec, p.moment.endSec, { duration: jobDuration() }),
+                  { full: false, free: false });
+    renderDetailsBody();
+    syncPlayer();
+    return;
+  }
+  if (hit.dataset.publishTo) { publishToYouTube(); return; }
+  if (hit.dataset.youtubeAct) { onYouTubeAction(hit.dataset.youtubeAct); return; }
+
   if (hit.dataset.ask) {
     const q = hit.dataset.ask;
-    if (q === 'Cut all of these') {
-      ask('Cut all of these into clips.');
-    } else if (/ingest|upload/i.test(q)) {
+    if (/ingest|upload/i.test(q)) {
       // The upload panel is an affordance, not an answer. Attaching it up front
       // means it appears with the agent's first token rather than after the
       // turn ends — and a turn that starts a pipeline does not end for an hour.
@@ -4531,40 +4804,6 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
-  if (hit.dataset.removeClip) {
-    const m = momentById(hit.dataset.removeClip);
-    const clip = state.clips.find((c) => c.momentId === hit.dataset.removeClip);
-    // Named so the agent removes the clip and leaves the moment: "remove the
-    // jump shot" on its own reads as either.
-    ask(`Remove the clip "${clip?.title || m?.label || 'this one'}" from the reel. `
-      + 'Keep the moment itself.');
-    return;
-  }
-  if (hit.dataset.add) {
-    const m = momentById(hit.dataset.add);
-    ask(`Add the ${m?.label || 'moment'} at ${clock(m?.startSec || 0)} to the reel.`);
-    return;
-  }
-  if (hit.dataset.clipPlay) {
-    // Into the popup as well, with the clip's own trim rather than the
-    // moment's. Setting state.playing alone only worked while the moment's row
-    // happened to be rendered somewhere to hold the player.
-    const c = state.clips.find((x) => x.clipId === hit.dataset.clipPlay);
-    if (c) openDetails(c.momentId, { start: c.startSec, end: c.endSec });
-    return;
-  }
-  if (hit.dataset.clipShorter || hit.dataset.clipLonger) {
-    const id = hit.dataset.clipShorter || hit.dataset.clipLonger;
-    const c = state.clips.find((x) => x.clipId === id);
-    const delta = hit.dataset.clipShorter ? -1 : 1;
-    ask(`Make the clip "${c?.title || id}" ${Math.abs(delta)} second ${delta < 0 ? 'shorter' : 'longer'}.`);
-    return;
-  }
-  if (hit.dataset.platform) {
-    state.platforms[hit.dataset.platform] = !state.platforms[hit.dataset.platform];
-    render();
-    return;
-  }
   if (hit.dataset.deleteSession) { deleteSession(hit.dataset.deleteSession); return; }
   if (hit.dataset.session) {
     if (hit.dataset.session !== state.sessionKey) openSession(hit.dataset.session);
@@ -4585,17 +4824,6 @@ document.addEventListener('click', (event) => {
       msg.searchResults = null;
     }
     render();
-    return;
-  }
-  if (hit.dataset.deskAdd) {
-    // The reel is the open match's, so a moment from another game is added
-    // by opening that game first; the agent then reads the same job the
-    // moment belongs to.
-    const [i, k] = hit.dataset.deskAdd.split(':').map(Number);
-    const row = state.msgs[i]?.searchResults?.[k];
-    if (!row) return;
-    if (row.job_id && row.job_id !== state.jobId) selectJob(row.job_id);
-    ask(`Add the ${row.label || 'moment'} at ${clock(row.start_sec || 0)} to the reel.`);
     return;
   }
   if (hit.dataset.searchRun) { runSearch(Number(hit.dataset.searchRun)); return; }
@@ -4673,6 +4901,17 @@ document.addEventListener('input', (event) => {
   const el = event.target;
   if (!el.matches) return;
   const u = state.upload;
+  // The publish panel's fields are held rather than re-rendered: the panel is
+  // redrawn whenever the trim moves, and redrawing it under a caret would take
+  // the caret with it.
+  if (el.matches('[data-share-field]')) {
+    if (state.share) state.share[el.dataset.shareField] = el.value;
+    return;
+  }
+  if (el.matches('[data-youtube-field]')) {
+    state.youtubeForm = { ...(state.youtubeForm || {}), [el.dataset.youtubeField]: el.value };
+    return;
+  }
   // Only re-render when a button's enabled state or a validation message
   // actually changes; doing it on every keystroke would move the caret to
   // the end of the field.
@@ -4694,8 +4933,6 @@ document.addEventListener('input', (event) => {
     render();
     const again = document.querySelector('[data-scope-query]');
     if (again) { again.focus(); again.setSelectionRange(at, at); }
-  } else if (el.matches('[data-make-clips]')) {
-    u.makeClips = el.checked;
   } else if (el.matches('[data-rename-input]')) {
     if (!state.renaming) return;
     const wasEmpty = !state.renaming.value.trim();
@@ -4719,6 +4956,10 @@ document.addEventListener('input', (event) => {
 
 
 document.addEventListener('change', (event) => {
+  if (event.target.matches?.('[data-share-field]')) {
+    if (state.share) state.share[event.target.dataset.shareField] = event.target.value;
+    return;
+  }
   if (event.target.id !== 'file-input') return;
   const f = event.target.files?.[0];
   if (!f) return;

@@ -5,8 +5,8 @@
  * mcp/catalog_server/event_tree.py): which ride each moment belongs to is
  * decided there, once, for every reader. What is left here is applying that to
  * the list the editor is actually looking at — the live moments, already
- * filtered and sorted — so the tiles keep their live state (thumbnail, reel
- * star) and the order the editor chose.
+ * filtered and sorted — so the tiles keep their live state (their thumbnail)
+ * and the order the editor chose.
  *
  * A group is one ride: a rider on one horse.
  *
@@ -153,35 +153,6 @@ export function ridesAsked(groups, question) {
 
   const names = [...new Set(named.map((g) => g.ride.rider || g.ride.horse).filter(Boolean))];
   return { groups: shown, names, score, unchecked, narrowed: Boolean(named.length || score) };
-}
-
-
-/**
- * What was looked for and not found, as far as it concerns one ride.
- *
- * The record keeps these per moment type, each note stamped with the analysis
- * window it came from ("[segment 3] …"), and a ride knows which windows it was
- * seen in. A note from one of those windows is about the footage this ride is
- * in; a note from anywhere else is about somebody else's round. A type with
- * no note says nothing about any particular ride, so it is left out here.
- *
- * @param {{momentType:string, notes:string[]}[]} notConfirmed  From the game record.
- * @param {number[]} segments  The windows the ride was seen in.
- * @returns {{momentType:string, notes:string[]}[]}  Notes with the stamp removed.
- */
-export function notesForRide(notConfirmed, segments) {
-  const windows = new Set((segments || []).map(Number));
-  if (!windows.size) return [];
-  const out = [];
-  for (const item of notConfirmed || []) {
-    const notes = [];
-    for (const note of item?.notes || []) {
-      const m = /^\[segment (\d+)\]\s*/.exec(String(note));
-      if (m && windows.has(Number(m[1]))) notes.push(String(note).slice(m[0].length));
-    }
-    if (notes.length) out.push({ momentType: item.momentType, notes });
-  }
-  return out;
 }
 
 

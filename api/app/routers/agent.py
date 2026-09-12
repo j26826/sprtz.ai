@@ -187,7 +187,7 @@ async def send_message(
 
 class FeedbackRequest(BaseModel):
     job_id: str
-    clip_id: str | None = None
+    moment_id: str | None = None
     score: float = Field(ge=0.0, le=1.0)
     action: str
     comment: str = ""
@@ -201,7 +201,7 @@ async def send_feedback(
 ) -> dict:
     """Record what the editor did with a suggestion.
 
-    Which clips get discarded is the strongest signal available on whether the
+    Which moments get discarded is the strongest signal available on whether the
     scoring priors are right.
     """
     try:
