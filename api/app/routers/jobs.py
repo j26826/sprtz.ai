@@ -671,6 +671,124 @@ async def update_context(
     return result
 
 
+class LiveBookingRequest(BaseModel):
+    """A booking being corrected before it runs.
+
+    Every field optional and merged, because this is an edit of one thing at a
+    time — a start pushed back an hour, a playlist URL that came through with a
+    stale token — not a re-entry of the whole form.
+    """
+
+    hls_url: str | None = Field(default=None, min_length=10, max_length=1600)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    sport: str | None = Field(default=None, max_length=40)
+    event_start: datetime.datetime | None = None
+    event_end: datetime.datetime | None = None
+    metadata_language: str | None = Field(default=None, max_length=8)
+    stall_minutes: float | None = Field(default=None, ge=1, le=240)
+    context_urls: list[str] | None = None
+
+    @field_validator("hls_url")
+    @classmethod
+    def _hls(cls, v: str | None) -> str | None:
+        return _clean_hls_url(v) if v else v
+
+    @field_validator("context_urls")
+    @classmethod
+    def _context_urls(cls, v: list[str] | None) -> list[str] | None:
+        return _clean_context_urls(v) if v is not None else v
+
+    @field_validator("event_start", "event_end")
+    @classmethod
+    def _aware(cls, v: datetime.datetime | None) -> datetime.datetime | None:
+        if v is None:
+            return v
+        if v.tzinfo is None:
+            raise ValueError("Event times must carry a timezone (send UTC with a Z).")
+        return v.astimezone(datetime.UTC)
+
+
+@router.patch("/{job_id}/live")
+async def update_live_booking(
+    job_id: str, body: LiveBookingRequest, user: CallerIdentity = Depends(current_user),
+) -> dict:
+    """Correct a live event that has not started.
+
+    A booking is made hours ahead — a start time, an end time and a playlist
+    URL — and all three are the things most likely to be wrong by the time the
+    event comes round. Deleting and re-booking was the only way to fix one,
+    which loses the title and the context links with it.
+
+    Once the recorder is running this is refused: the window is what the
+    recorder was started with and the chunks are numbered against it, so moving
+    it mid-event would leave the event's own timeline disagreeing with the
+    recording of it. The answer then is to let it finish or delete it.
+    """
+    job = await _load_job(job_id, user)
+    if job.get("kind") != "live":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="This match is not a live event.")
+    if job.get("status") != "scheduled":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This event has already started; it can no longer be rescheduled.",
+        )
+    # The tick starts a capture `live_lead_seconds` before the start, and a
+    # status write lands a moment later — so a booking inside the lead-in is
+    # one the recorder may already be starting on.
+    live = job.get("live") or {}
+    if (live.get("capture") or {}).get("execution"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="This event's recorder has already started.")
+
+    start = body.event_start or _parse_iso(live.get("eventStart"))
+    end = body.event_end or _parse_iso(live.get("eventEnd"))
+    if not (start and end):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="This event has no window to edit.")
+    if end <= start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="The event must end after it starts.")
+    if (end - start).total_seconds() / 3600 > MAX_LIVE_EVENT_HOURS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"A live event is at most {MAX_LIVE_EVENT_HOURS} hours.")
+    if end <= datetime.datetime.now(datetime.UTC):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="The event has already ended.")
+
+    changes: dict = {"event_start": start.isoformat(), "event_end": end.isoformat()}
+    if body.hls_url is not None:
+        changes["hls_url"] = body.hls_url
+    if body.title is not None:
+        changes["title"] = body.title
+    if body.sport is not None:
+        changes["sport"] = body.sport
+    if body.metadata_language is not None:
+        changes["metadata_language"] = body.metadata_language
+    if body.stall_minutes is not None:
+        changes["stall_minutes"] = body.stall_minutes
+    if body.context_urls is not None:
+        changes["context_urls"] = body.context_urls
+
+    result = await clients.call_mcp(
+        "catalog", "update_live_booking", {"job_id": job_id, **changes})
+    if result.get("status") == "error":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+    return result
+
+
+def _parse_iso(value: str | None) -> datetime.datetime | None:
+    """A stored ISO time, or None. Accepts the Z the browser sends."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.UTC)
+
+
 @router.get("/{job_id}")
 async def get_job(job_id: str, user: CallerIdentity = Depends(current_user)) -> dict:
     """Read one job."""

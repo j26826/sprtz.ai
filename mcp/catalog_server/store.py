@@ -619,6 +619,65 @@ def rename_job(job_id: str, title: str) -> dict[str, Any]:
     return {"job_id": job_id, "title": title, "renamed_game": renamed_game}
 
 
+def update_live_booking(job_id: str, event_start: str = "", event_end: str = "",
+                        hls_url: str = "", title: str = "", sport: str = "",
+                        metadata_language: str = "", stall_minutes: float = 0,
+                        context_urls: list[str] | None = None) -> dict[str, Any]:
+    """Correct a live event that has not started yet.
+
+    A booking is made hours ahead, and the window and the playlist URL are the
+    two things most likely to be wrong by the time it comes round — a class
+    running late, a link whose token has turned over. Before this the only
+    remedy was to delete the event and book it again, which threw away the
+    title and the context links with it.
+
+    Refused once the event is running: the window is what the recorder was
+    started with, and the chunks are numbered and timed against it. The caller
+    checks that too — this checks again because the check and the write are
+    otherwise two moments apart, and the tick fires every minute.
+
+    ``updatedAt`` is left alone for the same reason `rename_job` leaves it: the
+    watchdog reads it, and editing a booking is not a sign of life from a run.
+    """
+    snapshot = job_ref(job_id).get()
+    if not snapshot.exists:
+        raise KeyError(f"No such job: {job_id}")
+    job = snapshot.to_dict() or {}
+    if job.get("kind") != "live":
+        raise ValueError("This match is not a live event.")
+    if job.get("status") != "scheduled":
+        raise ValueError("This event has already started; it can no longer be rescheduled.")
+
+    patch: dict[str, Any] = {}
+    if event_start:
+        patch["live.eventStart"] = event_start
+    if event_end:
+        patch["live.eventEnd"] = event_end
+    if hls_url:
+        patch["hlsUrl"] = hls_url
+        patch["source.originalName"] = hls_url
+    if title:
+        patch["title"] = title
+        patch["titleSource"] = "editor"
+    if sport:
+        patch["sport"] = sport
+    if metadata_language:
+        patch["metadataLanguage"] = metadata_language
+    if stall_minutes:
+        patch["live.stallMinutes"] = float(stall_minutes)
+    if context_urls is not None:
+        patch["contextUrls"] = list(context_urls)
+    if not patch:
+        return {"job_id": job_id, "changed": []}
+
+    job_ref(job_id).update(patch)
+    if title:
+        game = db().collection("games").document(job_id)
+        if game.get().exists:
+            game.update({"title": title, "updatedAt": now()})
+    return {"job_id": job_id, "changed": sorted(patch)}
+
+
 def get_job(job_id: str) -> dict[str, Any]:
     snapshot = job_ref(job_id).get()
     if not snapshot.exists:

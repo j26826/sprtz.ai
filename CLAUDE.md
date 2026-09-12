@@ -1072,6 +1072,27 @@ three inputs and three buttons where exactly one was ever going to be used.
 acts on it, beside a line saying whether the form is answerable yet: a
 disabled button on its own says no and not why.
 
+**A booking can be corrected until it starts.** A live event is scheduled
+hours ahead, and the window and the playlist URL are the two things most likely
+to be wrong by the time it comes round — a class running late, a link whose
+token has turned over. The only remedy was to delete the event and book it
+again, which threw the title and the context links away with it. The scheduled
+row carries Edit, which reopens the same panel with the booking on it
+(`state.upload.live.editing`), and `PATCH /api/jobs/{id}/live` merges what
+changed. **Once the recorder is running it is refused**, by the route and again
+by the store: the window is what the recorder was started with and the chunks
+are numbered and timed against it, so moving it mid-event leaves the event's
+own timeline disagreeing with the recording of it. The recorder existing counts
+as started even when the status has not caught up — the tick starts a capture
+before the status write lands.
+
+**The links typed into the panel live on the panel.** `contextUrls` is on
+`state.upload` like every other field, because `render()` rebuilds the ingest
+panel on every job write and an analysis running elsewhere writes often: typed
+links used to live only in the textarea, so the next write emptied it and a
+registration that followed one sent nothing. That is what "the context links
+are not persisted" was.
+
 **A match can be named.** Every registration route already took a `title` and
 the web derived one from the filename or the URL. The panel now has a box for
 it; empty still means "take it from the source", and it is cleared once the
@@ -2094,6 +2115,22 @@ moments in `web/src/ridegroups.js` (tested) so the filter, sort and
 thumbnails keep working. Without a tree — another sport, a failed fetch — the
 flat grid stands.
 
+**The board is what a moments question about one event gets.** A competition
+day asked about by "show me the best moments" came back as a flat grid of two
+hundred tiles from forty rounds, which is a list nobody reads down — who rode
+is the first question asked of a day, so the rail is the first axis. Only when
+one event is selected (`oneEventSelected`: a scope naming one game, or a desk
+holding one): across several matches the first axis is the match, and a rail of
+riders from four events is a rail of strangers. The question's own filter goes
+with it — `ridesCard` takes the narrowed list rather than reaching for the
+match's moments again — so asking for halts still gets halts.
+
+The rail runs the full height of the pane beside it (`height: 100%` with
+`min-height: 0`, which is what lets the tabs scroll inside a stretched grid
+item); a rail half the height of what it controls reads as a list that ended.
+A rider's moments page at twelve rather than the list's ten, because the pane
+fits four across and ten leaves a ragged row.
+
 **Two sorts, because two questions are being asked of one screen.** Best
 first / match order in the board's head orders the **rides** — best first puts
 the round holding the day's strongest moment at the top of the rail, so the
@@ -2125,6 +2162,15 @@ writing "<source> disagrees: …", and every Python caller tested only
 `startswith("mismatch")`. So a ride the published results contradict came back
 as one of the day's best while the editor's own card excluded it. "events" and "competitions" are the games
 list, as "games" is.
+
+**What is playing is chosen from a select, not a chip each.** A round holds a
+dozen movements, and a chip apiece was two lines of buttons above the video —
+pushing the picture down the screen on exactly the rides worth watching most,
+and rewrapping under the cursor as the player moved through them. One control
+is one line whatever the count. Download, Publish and Close share one treatment
+for the same reason: three buttons in three styles read as three kinds of
+thing, and they are one kind. The game record's popup shows neither — they act
+on the moment that is playing, and a game is not one.
 
 **The player is a ride player.** Opening a moment (or "Play full ride" on a
 ride's heading) plays a *range* held in `state.playing` — the moment padded 3s,

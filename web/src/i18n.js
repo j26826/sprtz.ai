@@ -212,6 +212,13 @@ const STRINGS = {
     'live.stage.capture': 'Capture',
     'live.stage.analysis': 'Analysis',
     'live.gamePending': 'Game details are being written.',
+    'ingest.saveBooking': 'Save changes',
+    'ingest.saving': 'Saving…',
+    'ingest.cancelEdit': 'Cancel',
+    'live.edit': 'Edit',
+    'live.editing': 'Editing a scheduled event.',
+    'live.rescheduledMsg': 'Saved. The event now starts {start}.',
+    'live.editFailed': 'The booking could not be changed:',
     'live.scheduledMsg':
       'The live event is scheduled. Capture starts five minutes before {start}, '
       + 'and key moments appear here as each chunk is analysed.',
@@ -634,6 +641,13 @@ const STRINGS = {
     'live.stage.capture': 'Aufnahme',
     'live.stage.analysis': 'Analyse',
     'live.gamePending': 'Die Spieldetails werden geschrieben.',
+    'ingest.saveBooking': 'Änderungen speichern',
+    'ingest.saving': 'Wird gespeichert…',
+    'ingest.cancelEdit': 'Abbrechen',
+    'live.edit': 'Bearbeiten',
+    'live.editing': 'Ein geplantes Event wird bearbeitet.',
+    'live.rescheduledMsg': 'Gespeichert. Das Event beginnt jetzt {start}.',
+    'live.editFailed': 'Die Buchung konnte nicht geändert werden:',
     'live.scheduledMsg':
       'Das Live-Event ist geplant. Die Aufnahme beginnt fünf Minuten vor {start}; '
       + 'Schlüsselmomente erscheinen hier, sobald ein Abschnitt analysiert ist.',
@@ -1036,6 +1050,13 @@ const STRINGS = {
     'live.stage.capture': 'Cattura',
     'live.stage.analysis': 'Analisi',
     'live.gamePending': 'I dettagli della gara sono in scrittura.',
+    'ingest.saveBooking': 'Salva modifiche',
+    'ingest.saving': 'Salvataggio…',
+    'ingest.cancelEdit': 'Annulla',
+    'live.edit': 'Modifica',
+    'live.editing': 'Modifica di un evento programmato.',
+    'live.rescheduledMsg': 'Salvato. L’evento inizia ora {start}.',
+    'live.editFailed': 'Non è stato possibile modificare la prenotazione:',
     'live.scheduledMsg':
       "L'evento live è programmato. La cattura inizia cinque minuti prima di {start}; "
       + 'i momenti chiave compaiono qui man mano che ogni blocco viene analizzato.',
@@ -1439,6 +1460,13 @@ const STRINGS = {
     'live.stage.capture': 'Capture',
     'live.stage.analysis': 'Analyse',
     'live.gamePending': "Les détails de l'épreuve sont en cours de rédaction.",
+    'ingest.saveBooking': 'Enregistrer',
+    'ingest.saving': 'Enregistrement…',
+    'ingest.cancelEdit': 'Annuler',
+    'live.edit': 'Modifier',
+    'live.editing': 'Modification d’un événement programmé.',
+    'live.rescheduledMsg': 'Enregistré. L’événement commence maintenant {start}.',
+    'live.editFailed': 'La réservation n’a pas pu être modifiée :',
     'live.scheduledMsg':
       "L'événement en direct est programmé. La capture commence cinq minutes avant {start} ; "
       + "les moments clés apparaissent ici au fil de l'analyse des tranches.",
@@ -1841,6 +1869,13 @@ const STRINGS = {
     'live.stage.capture': 'Captura',
     'live.stage.analysis': 'Análisis',
     'live.gamePending': 'Se están escribiendo los detalles de la prueba.',
+    'ingest.saveBooking': 'Guardar cambios',
+    'ingest.saving': 'Guardando…',
+    'ingest.cancelEdit': 'Cancelar',
+    'live.edit': 'Editar',
+    'live.editing': 'Editando un evento programado.',
+    'live.rescheduledMsg': 'Guardado. El evento empieza ahora {start}.',
+    'live.editFailed': 'No se pudo cambiar la reserva:',
     'live.scheduledMsg':
       'El evento en directo está programado. La captura empieza cinco minutos antes de {start}; '
       + 'los momentos clave aparecen aquí a medida que se analiza cada bloque.',
