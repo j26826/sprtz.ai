@@ -90,6 +90,11 @@ const state = {
   // it: { momentId, title, description, privacy, status, error, url }. It
   // lives here rather than on a message because the popup is not a message.
   share: null,
+  // Whose progress the popup is showing. Module state rather than the message
+  // that opened it: `render()` rebuilds the transcript on every job write, and
+  // the popup has to survive that — which is also what lets its bar move while
+  // it is open.
+  progressJobId: null,
   // What the server says is configured for YouTube, and what someone has typed
   // into the settings panel but not saved yet.
   youtube: null,
@@ -438,7 +443,7 @@ function mountSettings() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      closeSettings(); closeDetails(); toggleAccountMenu(false);
+      closeSettings(); closeDetails(); closeProgress(); toggleAccountMenu(false);
       if (closeTypeMenus()) render();
     }
   });
@@ -574,6 +579,7 @@ onAuthStateChanged(auth, async (user) => {
     // left open over it would still be playing their match.
     closeDetails();
     closeSettings();
+    closeProgress();
     state.msgs = [];
     state.jobs = [];
     state.jobId = null;
@@ -3371,43 +3377,116 @@ function openSearchResult(index, k) {
 }
 
 
+/**
+ * Every run on the desk, as a table.
+ *
+ * It was a stack of blocks, one per job, each carrying a title, a status, a
+ * stage line, a four-part stage strip and a meter. That reads well for one
+ * job and not at all for twenty: a competition day's desk is a screen of
+ * repeated structure where the only question ever asked of it is "which one
+ * is stuck", and that is a column to scan down, not a paragraph to read per
+ * row. The columns are the five things asked, in the order they are asked.
+ *
+ * Uploads and live events share the table. They are different runs — one has
+ * stages, the other has chunks — but they are the same question to whoever is
+ * looking, and two tables side by side would make the reader work out which
+ * of them a match is in before they could find it.
+ */
+const JOB_COLUMNS = ['jobs.colMatch', 'jobs.colStatus', 'jobs.colStage',
+  'jobs.colProgress', 'jobs.colActions'];
+
+
 function jobsCard(msg, index) {
   if (!state.jobs.length) return emptyCard(t('jobs.none'));
+  // Ten a page, as every other list here. A table makes fifty rows cheaper to
+  // draw than fifty blocks did, which is not the same as making them readable.
   const view = pageOf(state.jobs, msg.page);
-  return `<div class="panel-light">${view.slice.map((j) => {
-    if (j.kind === 'live') return liveJobRow(j);
-    const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
-    const failed = j.status === 'failed';
-    const stalled = running && isStalled(j);
-    const tone = failed || stalled ? 'failed' : running ? 'running' : 'idle';
-    return `
-      <div class="job">
-        ${state.reanalyse?.jobId === j.id ? reanalysePanel(j) : ''}
-        <div class="job-top">
-          ${editableTitle(j.id, j.title || j.source?.originalName || j.id, 'job-name')}
-          <div class="job-status" data-tone="${tone}">${
-            stalled ? esc(t('jobs.stalled')) : esc(j.status || 'unknown')}</div>
-        </div>
-        <div class="job-stage">${esc(j.stage || '')}${
-          j.media?.segmentCount ? ` · ${j.media.segmentCount} segments` : ''}${
-          j.recovery?.attempts ? ` · ${esc(t('jobs.recovered'))} ×${j.recovery.attempts}` : ''}</div>
-        ${running && !stalled ? `
-          ${stageStrip(j)}
-          <div class="meter-row">
-            <div class="meter meter-neutral"><i style="width:${j.progress || 0}%"></i></div>
-            <div class="meter-pct">${Math.round(j.progress || 0)}%</div>
-          </div>` : ''}
-        ${stalled ? `
-          <div class="job-error">
-            <p>${esc(t('jobs.noProgress'))} ${esc(sinceLabel(j.updatedAt))}.
-               ${esc(t('jobs.deadRun'))}</p>
-            <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
-          </div>` : ''}
-        ${failed && j.error ? `
-          <div class="job-error">
-            <p>${esc(jobFailure(j.error, { t }))}</p>
-            <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
-          </div>` : ''}
+  return `<div class="panel-light">
+    <div class="job-table-wrap">
+      <table class="job-table">
+        <thead>
+          <tr>${JOB_COLUMNS.map((key) => `<th>${esc(t(key))}</th>`).join('')}</tr>
+        </thead>
+        ${view.slice.map((j) => (j.kind === 'live' ? liveJobRow(j) : jobRow(j))).join('')}
+      </table>
+    </div>
+    ${pagerRow(view, index)}</div>`;
+}
+
+
+/**
+ * A panel that belongs to the row above it, across the whole table.
+ *
+ * An error, a retry offer, the re-analyse form and a finished event's game
+ * record are each a paragraph and a button or two. Put in one of five columns
+ * they would be a wrapped block that makes every other cell in that row tall;
+ * across the table they read as what they are — something said about the run
+ * on the line above.
+ */
+function noteRow(inner) {
+  return `<tr class="job-note"><td colspan="${JOB_COLUMNS.length}">${inner}</td></tr>`;
+}
+
+
+/**
+ * One job's rows, grouped.
+ *
+ * A run is not always one row — the re-analyse form opens above it, an error
+ * or a finished event's record sits under it — and the line between two jobs
+ * has to fall between the groups rather than between every pair of rows. Which
+ * rows start a new job cannot be read off adjacency, so the grouping says it:
+ * a `<tbody>` per job, which is what several tbodies in one table are for.
+ */
+function jobGroup(rows) {
+  return `<tbody class="job-group">${rows}</tbody>`;
+}
+
+
+/**
+ * How far along, as a figure and a way to see the rest.
+ *
+ * The bar is deliberately not in the table. Twenty rows of meters is a wall of
+ * moving parts, and only ever one of them is the run somebody is waiting on —
+ * so the column answers "how far" in the width of a number, and the button
+ * opens the stages for the one run that is being watched.
+ *
+ * A job with nothing in flight gets a dash rather than `0%`, which would read
+ * as a run that has started and got nowhere.
+ */
+function progressCell(jobId, pct) {
+  if (pct == null) return '<span class="job-pct-none">—</span>';
+  // The figure is the label. Under a column headed Progress a button reading
+  // "Progress" says the same word twice and costs the width to say it; the
+  // percentage is the thing being asked for, and it opens the rest. Mono,
+  // like every other figure here. The accessible name is the verb, since a
+  // screen reader reaches the button without the column heading beside it.
+  return `<button class="link-btn job-progress" data-progress="${esc(jobId)}"
+            title="${esc(t('jobs.viewProgress'))}" aria-label="${esc(t('jobs.viewProgress'))}"
+          ><span class="job-pct">${Math.round(pct)}%</span></button>`;
+}
+
+
+function jobRow(j) {
+  const running = ['analyzing', 'transcoding', 'uploaded'].includes(j.status);
+  const failed = j.status === 'failed';
+  const stalled = running && isStalled(j);
+  const tone = failed || stalled ? 'failed' : running ? 'running' : 'idle';
+  const detail = [
+    j.stage || '',
+    j.media?.segmentCount ? `${j.media.segmentCount} segments` : '',
+    j.recovery?.attempts ? `${t('jobs.recovered')} ×${j.recovery.attempts}` : '',
+  ].filter(Boolean).join(' · ');
+  return jobGroup(`
+    ${state.reanalyse?.jobId === j.id ? noteRow(reanalysePanel(j)) : ''}
+    <tr class="job-row">
+      <td class="job-cell-name">${
+        editableTitle(j.id, j.title || j.source?.originalName || j.id, 'job-name')}</td>
+      <td><span class="job-status" data-tone="${tone}">${
+        stalled ? esc(t('jobs.stalled')) : esc(j.status || t('jobs.unknown'))}</span></td>
+      <td class="job-stage">${esc(detail)}</td>
+      <td class="job-cell-progress">${
+        progressCell(j.id, running && !stalled ? (j.progress || 0) : null)}</td>
+      <td class="job-cell-actions">
         <div class="job-actions">
           ${running && !stalled
             ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
@@ -3415,18 +3494,33 @@ function jobsCard(msg, index) {
           <button class="link-btn" data-delete-job="${esc(j.id)}"
                   data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
-      </div>`;
-  }).join('')}${pagerRow(view, index)}</div>`;
+      </td>
+    </tr>
+    ${stalled ? noteRow(`
+      <div class="job-error">
+        <p>${esc(t('jobs.noProgress'))} ${esc(sinceLabel(j.updatedAt))}.
+           ${esc(t('jobs.deadRun'))}</p>
+        <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
+      </div>`) : ''}
+    ${failed && j.error ? noteRow(`
+      <div class="job-error">
+        <p>${esc(jobFailure(j.error, { t }))}</p>
+        <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
+      </div>`) : ''}`);
 }
 
+
 /**
- * A live event's row: its own state rather than the job status, a strip of
- * the three things that happen to it, and — once it is over — the game
- * record where the moments list would otherwise sit.
+ * A live event's row in the same table: its own state rather than the job
+ * status, and — once it is over — the game record under it.
  *
  * Progress is counted in chunks against how many the window will produce,
- * because that is the only unit a live event has: there is no duration to
- * be a fraction of until the event has ended.
+ * because that is the only unit a live event has: there is no duration to be
+ * a fraction of until the event has ended. Which is also why the figure in
+ * the column is the analysis fill rather than the job's `progress`, which a
+ * live event never writes. A booked event that has not started gets a dash
+ * rather than 0%: it is not a run that has got nowhere, it is a run that has
+ * not begun, and the status and start time beside it already say so.
  */
 function liveJobRow(j) {
   const live = liveSummary(j);
@@ -3445,29 +3539,15 @@ function liveJobRow(j) {
     line = `${live.captured} ${t('live.chunksDone')} · ${live.moments} ${t('live.moments')}`;
   }
   if (live.restarts) line += ` · ${t('live.restarted')} ×${live.restarts}`;
-  return `
-      <div class="job">
-        <div class="job-top">
-          ${editableTitle(j.id, j.title || j.id, 'job-name')}
-          <div class="job-status" data-tone="${tone}">${esc(t(`live.${live.state}`) || live.state)}</div>
-        </div>
-        <div class="job-stage">${esc(line)}</div>
-        ${liveStrip(live)}
-        ${j.status === 'failed' && j.error ? `
-          <div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>` : ''}
-        ${live.state === 'complete' ? (game ? `
-          <div class="live-game">
-            <div class="moment-label">${esc(gameHeadline(game))}</div>
-            <div class="moment-meta">${esc([
-              game.competition || game.groundedCompetition,
-              game.venue || game.groundedVenue, game.mood,
-            ].filter(Boolean).join(' · ') || t('game.notIdentified'))}</div>
-            ${game.summary ? `<div class="game-summary">${esc(game.summary)}</div>` : ''}
-            <div class="moment-actions">
-              <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
-            </div>
-          </div>` : `
-          <div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
+  return jobGroup(`
+    <tr class="job-row">
+      <td class="job-cell-name">${editableTitle(j.id, j.title || j.id, 'job-name')}</td>
+      <td><span class="job-status" data-tone="${tone}">${
+        esc(t(`live.${live.state}`) || live.state)}</span></td>
+      <td class="job-stage">${esc(line)}</td>
+      <td class="job-cell-progress">${
+        progressCell(j.id, live.state === 'live' ? liveStageFills(live).analysis : null)}</td>
+      <td class="job-cell-actions">
         <div class="job-actions">
           ${live.state === 'scheduled'
             ? `<button class="link-btn" data-edit-live="${esc(j.id)}">${esc(t('live.edit'))}</button>`
@@ -3478,8 +3558,24 @@ function liveJobRow(j) {
           <button class="link-btn" data-delete-job="${esc(j.id)}"
                   data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
-      </div>`;
+      </td>
+    </tr>
+    ${j.status === 'failed' && j.error
+      ? noteRow(`<div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>`) : ''}
+    ${live.state === 'complete' ? noteRow(game ? `
+      <div class="live-game">
+        <div class="moment-label">${esc(gameHeadline(game))}</div>
+        <div class="moment-meta">${esc([
+          game.competition || game.groundedCompetition,
+          game.venue || game.groundedVenue, game.mood,
+        ].filter(Boolean).join(' · ') || t('game.notIdentified'))}</div>
+        ${game.summary ? `<div class="game-summary">${esc(game.summary)}</div>` : ''}
+        <div class="moment-actions">
+          <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
+        </div>
+      </div>` : `<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}`);
 }
+
 
 function liveStrip(live) {
   const fills = liveStageFills(live);
@@ -3502,6 +3598,67 @@ function liveStrip(live) {
       <div class="meter-pct">${Math.round(fills.analysis)}%</div>
     </div>`;
 }
+
+/* ──────────────────────────────────────────────────────── progress ── */
+
+/**
+ * The stages of one run, in a popup, because they are not worth a column.
+ *
+ * The strip and the meter used to be drawn on every row of the jobs card. They
+ * are the most detailed thing on that screen and the least often wanted: a
+ * desk holds twenty runs and at most one of them is being waited on. Here they
+ * are asked for, by the run they are about.
+ *
+ * The popup is repainted from `render()` rather than written once when it
+ * opens, so the bar moves while it is on screen — the jobs listener fires on
+ * every write the run makes, and that is the only reason to have a bar at all.
+ */
+function openProgress(jobId) {
+  state.progressJobId = jobId;
+  render();
+}
+
+function closeProgress() {
+  state.progressJobId = null;
+  $('progress').classList.add('hidden');
+}
+
+function renderProgress() {
+  const box = $('progress');
+  if (!box) return;
+  const job = state.jobs.find((j) => j.id === state.progressJobId);
+  // A job deleted while its progress was open. Closing beats leaving a dialog
+  // that describes a run nothing can answer for any more.
+  if (!job) {
+    box.classList.add('hidden');
+    return;
+  }
+  $('progress-title').textContent = job.title || job.source?.originalName || job.id;
+  $('progress-body').innerHTML = progressBody(job);
+  box.classList.remove('hidden');
+}
+
+/**
+ * What a run has done and is doing. A live event has chunks where an upload
+ * has stages, so each gets its own strip — `liveStrip` carries its own meter,
+ * an upload's is added here.
+ */
+function progressBody(job) {
+  if (job.kind === 'live') {
+    const live = liveSummary(job);
+    return `<div class="progress-state">${esc(t(`live.${live.state}`) || live.state)}</div>
+      ${liveStrip(live)}`;
+  }
+  const progress = Math.max(0, Math.min(100, job.progress || 0));
+  return `<div class="progress-state">${esc(job.status || t('jobs.unknown'))}${
+    job.stage ? ` · ${esc(t(`stage.${job.stage}`) || job.stage)}` : ''}</div>
+    ${stageStrip(job)}
+    <div class="meter-row">
+      <div class="meter meter-neutral"><i style="width:${progress}%"></i></div>
+      <div class="meter-pct">${Math.round(progress)}%</div>
+    </div>`;
+}
+
 
 /* ─────────────────────────────────────────────────────────── scope ── */
 
@@ -3941,6 +4098,7 @@ function renderComposerContext() {
 function render() {
   renderSessions();
   renderComposerContext();
+  renderProgress();
   $('transcript').innerHTML = currentTurn(state.msgs).map(([m, i]) => {
     const agent = m.who === 'agent';
     const fresh = agent && !animatedMsgs.has(m);
@@ -4951,7 +5109,7 @@ document.addEventListener('click', (event) => {
     + '[data-detail-act],[data-trim],[data-trim-reset],[data-publish-to],'
     + '[data-edit-live],[data-cancel-edit-live],'
     + '[data-youtube-act],'
-    + '[data-ride-tab],[data-type-menu],[data-type-pick]');
+    + '[data-ride-tab],[data-type-menu],[data-type-pick],[data-progress]');
 
   // An open moment-type menu closes on any click outside its own filter. Its
   // toggle used to be the only way out, and a menu only its own button can
@@ -5037,6 +5195,7 @@ document.addEventListener('click', (event) => {
     openGameDetails(game);
     return;
   }
+  if (hit.dataset.progress) { openProgress(hit.dataset.progress); return; }
   if (hit.dataset.registerGcs) { registerFromStorage(); return; }
   if ('scopePick' in hit.dataset || 'scopeSport' in hit.dataset || 'scopeDisc' in hit.dataset
       || 'scopeGame' in hit.dataset || 'scopeDone' in hit.dataset || 'scopeBack' in hit.dataset
@@ -5344,6 +5503,10 @@ $('close-details')?.addEventListener('click', closeDetails);
 // Clicking the backdrop closes; clicking the card must not.
 $('details')?.addEventListener('click', (event) => {
   if (event.target.id === 'details') closeDetails();
+});
+$('close-progress')?.addEventListener('click', closeProgress);
+$('progress')?.addEventListener('click', (event) => {
+  if (event.target.id === 'progress') closeProgress();
 });
 $('sign-out')?.addEventListener('click', signOutNow);
 $('account-menu').addEventListener('click', () => toggleAccountMenu(false));

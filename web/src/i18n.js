@@ -271,6 +271,13 @@ const STRINGS = {
     'scope.titleGames': '{n} games',
     'jobs.none': 'No jobs yet.',
     'jobs.stalled': 'stalled',
+    'jobs.unknown': 'unknown',
+    'jobs.colMatch': 'Match',
+    'jobs.colStatus': 'Status',
+    'jobs.colStage': 'Stage',
+    'jobs.colProgress': 'Progress',
+    'jobs.colActions': 'Actions',
+    'jobs.viewProgress': 'View progress',
     'jobs.noProgress': 'No progress for',
     'jobs.deadRun':
       'The run that owned this job is gone — a deploy or a restart ends one '
@@ -740,6 +747,13 @@ const STRINGS = {
     'scope.titleGames': '{n} Spiele',
     'jobs.none': 'Noch keine Aufträge.',
     'jobs.stalled': 'steht still',
+    'jobs.unknown': 'unbekannt',
+    'jobs.colMatch': 'Spiel',
+    'jobs.colStatus': 'Status',
+    'jobs.colStage': 'Phase',
+    'jobs.colProgress': 'Fortschritt',
+    'jobs.colActions': 'Aktionen',
+    'jobs.viewProgress': 'Fortschritt anzeigen',
     'jobs.noProgress': 'Kein Fortschritt seit',
     'jobs.deadRun':
       'Der Durchlauf für diesen Auftrag existiert nicht mehr — ein Deployment oder '
@@ -1189,6 +1203,13 @@ const STRINGS = {
     'scope.titleGames': '{n} partite',
     'jobs.none': 'Nessun lavoro per ora.',
     'jobs.stalled': 'fermo',
+    'jobs.unknown': 'sconosciuto',
+    'jobs.colMatch': 'Partita',
+    'jobs.colStatus': 'Stato',
+    'jobs.colStage': 'Fase',
+    'jobs.colProgress': 'Avanzamento',
+    'jobs.colActions': 'Azioni',
+    'jobs.viewProgress': 'Mostra avanzamento',
     'jobs.noProgress': 'Nessun avanzamento da',
     'jobs.deadRun':
       'Il processo che seguiva questo lavoro non esiste più — un rilascio o un riavvio '
@@ -1639,6 +1660,13 @@ const STRINGS = {
     'scope.titleGames': '{n} matchs',
     'jobs.none': 'Aucun traitement pour le moment.',
     'jobs.stalled': 'à l’arrêt',
+    'jobs.unknown': 'inconnu',
+    'jobs.colMatch': 'Match',
+    'jobs.colStatus': 'Statut',
+    'jobs.colStage': 'Étape',
+    'jobs.colProgress': 'Progression',
+    'jobs.colActions': 'Actions',
+    'jobs.viewProgress': 'Voir la progression',
     'jobs.noProgress': 'Aucune progression depuis',
     'jobs.deadRun':
       "Le traitement qui suivait ce match n'existe plus — un déploiement ou un "
@@ -2088,6 +2116,13 @@ const STRINGS = {
     'scope.titleGames': '{n} partidos',
     'jobs.none': 'Todavía no hay trabajos.',
     'jobs.stalled': 'detenido',
+    'jobs.unknown': 'desconocido',
+    'jobs.colMatch': 'Partido',
+    'jobs.colStatus': 'Estado',
+    'jobs.colStage': 'Fase',
+    'jobs.colProgress': 'Progreso',
+    'jobs.colActions': 'Acciones',
+    'jobs.viewProgress': 'Ver el progreso',
     'jobs.noProgress': 'Sin avance desde hace',
     'jobs.deadRun':
       'El proceso que llevaba este trabajo ya no existe — un despliegue o un reinicio '

@@ -869,6 +869,110 @@ button.tile:hover { border-color: var(--color-accent); }
   color: var(--color-neutral-600);
 }
 
+/* Jobs
+
+   The runs on the desk, as a table. These rules were deleted wholesale by the
+   edit that withdrew clip generation — the Jobs block sat next to the
+   reel's and went with it — so the card has been rendering as unstyled divs
+   since. They are restored here in the shape the table needs.
+
+   A table is the one place in this app that may scroll sideways: five columns
+   of a run do not fold into 400px, and stacking them would put us back where
+   we started. The wrapper scrolls, the page never does. */
+
+/* Still the row shape of the activity feed and of every card's empty state,
+   which are lists of one thing rather than tables. */
+.job { padding: 11px 12px; border-bottom: var(--rule-hair) solid var(--color-neutral-300); }
+.job:last-child { border-bottom: 0; }
+.job-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+
+.job-table-wrap { overflow-x: auto; }
+
+.job-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.job-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+  border-bottom: var(--rule-hair) solid var(--color-neutral-300);
+  white-space: nowrap;
+}
+
+.job-table td { padding: 9px 12px; vertical-align: top; }
+
+/* The line falls between jobs, never inside one. A run can be three rows — the
+   re-analyse form above it, an error under it — and a rule through the middle
+   of that would cut the message off the run it is about. Each job is its own
+   tbody, so "between jobs" is something the markup states rather than
+   something these rules have to infer from adjacency. */
+.job-group + .job-group > tr:first-child > td {
+  border-top: var(--rule-hair) solid var(--color-neutral-300);
+}
+/* A note under its own row is a continuation of it, so it opens with no gap.
+   One that opens a job — the re-analyse form — keeps its padding. */
+.job-row + .job-note > td { padding-top: 0; }
+
+.job-cell-name { min-width: 180px; }
+.job-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+
+.job-status {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-neutral-600);
+}
+.job-status[data-tone="running"] { color: var(--color-neutral-800); }
+.job-status[data-tone="failed"] { color: var(--color-accent-2); }
+
+.job-stage {
+  font-size: 11px;
+  color: var(--color-neutral-700);
+  line-height: 1.4;
+  min-width: 160px;
+}
+
+/* The figure is the control. Underlined so a number in a table reads as
+   something to press rather than as data, and mono like every other figure. */
+.job-cell-progress { white-space: nowrap; }
+.job-progress { padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.job-pct { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.job-pct-none { color: var(--color-neutral-500); }
+
+.job-cell-actions { width: 1%; }
+.job-actions { display: flex; gap: 10px; align-items: baseline; white-space: nowrap; }
+
+.job-error {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 7px;
+  border-left: var(--rule) solid var(--color-accent-2);
+  background: var(--color-accent-2-100);
+  padding: 8px 10px;
+}
+.job-error p { font-size: 11px; line-height: 1.45; color: var(--color-accent-2-900); flex: 1; margin: 0; }
+
+/* The progress popup: a small dialog, not the player's full-viewport one. It
+   holds four stage meters and a bar, and a dialog sized to the screen for that
+   would be mostly empty. */
+.progress-body { padding: 14px 16px 20px; }
+.progress-state {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
 /* Progress */
 
 .meter { flex: 1; height: 4px; background: var(--color-neutral-300); }
