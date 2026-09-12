@@ -1055,13 +1055,18 @@ async def record_game_facts(
 
 
 def _classes_for(job: dict, game: GameDetails, context_urls: list[str],
-                 arena: str = "") -> list[Any]:
+                 arena: str = "", keep_single: bool = False) -> list[Any]:
     """The competitions a recording turned out to hold.
 
     Empty when it held one, which is every handball match and every day that
     ran a single class — and when Equipe cannot be reached, or cannot say which
     show this was. A day that stays one event is what the desk did before any
     of this, so nothing here is allowed to be fatal.
+
+    `keep_single` is for a recording that has already been split and now
+    resolves to one class. There, one class is not "nothing to do" — it is
+    several wrong events that have to become one right one, and the caller
+    needs the run in order to write it and prune the rest.
     """
     try:
         rides = [dict(r) for r in game.rides]
@@ -1117,7 +1122,7 @@ def _classes_for(job: dict, game: GameDetails, context_urls: list[str],
             recorded_from=equipe.recording_started(job))
         for run in runs:
             run.show = show
-        return runs if len(runs) > 1 else []
+        return runs if (len(runs) > 1 or (keep_single and runs)) else []
     except Exception:
         logger.warning("could not read the show timetable", exc_info=True)
         return []
@@ -1405,9 +1410,10 @@ async def _store_classes(job_id: str, game: GameDetails, runs: list[Any],
             await mcp_client.call_tool(
                 "catalog", "delete_game", {"job_id": job_id, "class_id": class_id})
     names = ", ".join(run.show_class.name for run in runs)
-    await _emit(job_id, "analysis",
-                f"This recording covered {len(runs)} classes, saved as separate events: {names}.",
-                classes=len(runs))
+    said = (f"This recording covered one class, saved as: {names}."
+            if len(runs) == 1 else
+            f"This recording covered {len(runs)} classes, saved as separate events: {names}.")
+    await _emit(job_id, "analysis", said, classes=len(runs))
 
 
 _CAMEL = re.compile(r"(?<!^)(?=[A-Z])")
@@ -1501,7 +1507,15 @@ async def split_event_classes(job_id: str, arena: str = "") -> dict:
                 "message": "Only a competition day is split into classes, and this has no rounds."}
 
     moments = [Moment.model_validate(m) for m in _moments_from(stored)]
-    runs = _classes_for(job, game, list(job.get("contextUrls") or []), arena=arena)
+    # How this recording is filed now. A day already split into several classes
+    # that the timetable now says was one is not a recording with nothing to
+    # do: it is several wrong events, and leaving them is the one outcome that
+    # cannot be corrected by asking again. A recording that has never been
+    # split is left alone on a single-class answer, as before.
+    listing = await mcp_client.call_tool("catalog", "list_games", {"job_id": job_id})
+    already = sum(1 for record in (listing.get("games") or []) if record.get("classId"))
+    runs = _classes_for(job, game, list(job.get("contextUrls") or []), arena=arena,
+                        keep_single=already > 1)
     if not runs:
         return {"status": "idle", "job_id": job_id,
                 "message": ("Nothing was changed. Either this recording covers one class, or "
