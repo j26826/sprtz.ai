@@ -283,3 +283,72 @@ class TestTheRecordReachesTheSchema:
         assert _snake_keys({"show_id": 1})["show_id"] == 1
         # The camelCase twin never overwrites a value that is already there.
         assert _snake_keys({"show_id": 1, "showId": 2})["show_id"] == 1
+
+
+class TestTheGameIsUnderGame:
+    """`get_game` answers `{"status": …, "game": {…}}`, and the split spread the
+    envelope rather than the record.
+
+    So the only key reaching `GameDetails` was the word "game". Every field of
+    it has a default except `sport`, so this surfaced as one missing-field
+    error — raised before a timetable was ever read, which is why fixing the
+    show lookup changed nothing. ADK handed the exception to the model, and the
+    model wrote the refusal an editor saw out of the tool's own docstring.
+
+    The test above this one fed `_snake_keys` the record directly, so it passed
+    on a shape the tool never sees. This one goes through the tool.
+    """
+
+    def _catalog(self, game):
+        async def call_tool(server, tool, args):
+            if tool == "get_job":
+                return {"status": "success", "job_id": args["job_id"], "contextUrls": []}
+            if tool == "get_game":
+                return {"status": "success", "game": game}
+            if tool == "list_game_rides":
+                return {"status": "success", "rides": [{"rideOrder": 1, "rider": "A"}]}
+            if tool == "list_moments":
+                return {"status": "success", "moments": []}
+            raise AssertionError(f"unexpected tool: {tool}")
+        return call_tool
+
+    async def test_the_record_reaches_the_timetable_intact(self, monkeypatch):
+        from sprtz_agents.tools import pipeline
+
+        seen = {}
+
+        def classes_for(job, game, context_urls, arena=""):
+            seen["game"] = game
+            return []
+
+        monkeypatch.setattr(pipeline.mcp_client, "call_tool", self._catalog({
+            "jobId": "j", "sport": "equestrian", "showId": 82348,
+            "showTitle": "LeMieux National Dressage Championships",
+            "competition": "D&H INTER I SILVER CHAMPIONSHIP - FEI Intermediate I 2009",
+        }))
+        monkeypatch.setattr(pipeline, "_classes_for", classes_for)
+
+        out = await pipeline.split_event_classes("j")
+
+        # It got as far as asking which classes, rather than raising on `sport`.
+        assert "game" in seen, out
+        assert seen["game"].sport == "equestrian"
+        # And carrying the id that lets a second split find the show at all.
+        assert seen["game"].show_id == 82348
+        assert seen["game"].job_id == "j"
+        assert out["status"] == "idle"
+
+    async def test_a_recording_with_no_record_is_told_so(self, monkeypatch):
+        from sprtz_agents.tools import pipeline
+
+        async def call_tool(server, tool, args):
+            if tool == "get_job":
+                return {"status": "success", "job_id": args["job_id"]}
+            if tool == "get_game":
+                return {"status": "success"}
+            return {"status": "success"}
+
+        monkeypatch.setattr(pipeline.mcp_client, "call_tool", call_tool)
+        out = await pipeline.split_event_classes("j")
+        assert out["status"] == "error"
+        assert "no game record" in out["error"]
