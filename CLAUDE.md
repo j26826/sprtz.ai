@@ -2248,11 +2248,16 @@ riders from four events is a rail of strangers. The question's own filter goes
 with it — `ridesCard` takes the narrowed list rather than reaching for the
 match's moments again — so asking for halts still gets halts.
 
-The rail runs the full height of the pane beside it (`height: 100%` with
-`min-height: 0`, which is what lets the tabs scroll inside a stretched grid
-item); a rail half the height of what it controls reads as a list that ended.
-A rider's moments page at twelve rather than the list's ten, because the pane
-fits four across and ten leaves a ragged row.
+**The pane decides the board's height and the rail matches it.** A rider's
+moments are four across by three down — twelve, which is exactly what the page
+holds, so the board is the same height for every rider rather than changing
+with the window or with how many moments a round produced. The rail is
+`height: 0` with `min-height: 100%`: a grid item with a real height takes part
+in sizing the row, so a class of forty rides would stretch the board to forty
+rows and scroll nothing; at zero it takes no part, and the minimum stretches it
+to whatever the moments came to. A rail half the height of what it controls
+reads as a list that ended, and one taller makes the board a different size for
+every rider.
 
 **Two sorts, because two questions are being asked of one screen.** Best
 first / match order in the board's head orders the **rides** — best first puts

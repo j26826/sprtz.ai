@@ -1184,9 +1184,11 @@ function eventFor(msg) {
 }
 
 
-// Moments per page inside one rider's pane. Twelve rather than the list's ten:
-// the pane is the width of the board and a row holds four, so twelve is three
-// full rows and ten leaves a ragged one.
+// Moments per page inside one rider's pane: four across by three down, which
+// the pane's own grid is fixed at (`.ride-pane .tile-row`). The two are one
+// decision — the page fills the grid exactly, so the board is the same height
+// for every rider, and the rail beside it is measured against that height.
+// Change one and change both.
 const RIDE_MOMENTS_PER_PAGE = 12;
 
 // Rides per page. A ride is a heading and a row of tiles, so a page of them is
