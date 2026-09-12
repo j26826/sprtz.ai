@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  countTypesIn, filterByTypes, groupByRide, momentTypesIn,
+  countTypesIn, filterByTypes, groupByRide, hasRides, momentTypesIn,
   rideNamedIn, rideRank, rideScoreAsked, ridesAsked, sortRideGroups,
 } from '../src/ridegroups.js';
 
@@ -279,4 +279,34 @@ test('a rank is a whole placing from 1 up, and anything else is not a rank yet',
   }
   assert.equal(rideRank({}), null);
   assert.equal(rideRank(null), null);
+});
+
+
+// `hasRides` is how the desk decides an event is a competition day, and it
+// decides two things: whether the moments card becomes the board, and whether
+// a best-moments question about a single event is answered by the board
+// rather than by the desk shortlist. Getting it wrong either way is a whole
+// screen: a handball match on a rail of riders, or a dressage day as a flat
+// grid of two hundred tiles.
+test('a game with rounds ridden in it is a competition day', () => {
+  assert.equal(hasRides({ rides: [{ order: 1, rider: 'Anna Berger' }] }), true);
+  assert.equal(hasRides({ rides: [{}, {}, {}] }), true);
+});
+
+test('anything without rounds is not, however it says so', () => {
+  // A handball match, an equestrian day whose analysis has not produced a ride
+  // yet, and every shape a missing field arrives in. An empty rail is not a
+  // board, so none of these may route to one.
+  assert.equal(hasRides({ sport: 'handball', rides: [] }), false);
+  assert.equal(hasRides({ sport: 'equestrian' }), false);
+  assert.equal(hasRides({ rides: null }), false);
+  assert.equal(hasRides({ rides: 0 }), false);
+  // A record whose `rides` is an object rather than a list — which is what a
+  // half-written document looks like — is not a list of rounds, and `.length`
+  // on it would be undefined rather than an error, so the Array check is what
+  // stops it reading as truthy further down.
+  assert.equal(hasRides({ rides: { 0: { order: 1 } } }), false);
+  assert.equal(hasRides({}), false);
+  assert.equal(hasRides(null), false);
+  assert.equal(hasRides(undefined), false);
 });
