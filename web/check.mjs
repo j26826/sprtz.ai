@@ -173,6 +173,16 @@ for (const [, key] of app.matchAll(/\bhumanError\([^,)]+,\s*'([^']+)'\)/g)) {
   if (!keys.has(key)) fail(`app.js falls back to '${key}' which en-GB does not define`);
 }
 
+// The detail tables are the same blind spot in the other direction: their keys
+// are string literals in a row list — ['game.arena', (g) => g.arena] — resolved
+// by t() somewhere else entirely. A missing one prints `game.arena` as the
+// label of a row in the record an editor is checking a result against.
+for (const [, rows] of app.matchAll(/const \w*(?:DETAIL_ROWS|_ROWS) = \[([\s\S]*?)\n\];/g)) {
+  for (const [, key] of rows.matchAll(/\[\s*'([a-z][\w.]+)'\s*,/g)) {
+    if (!keys.has(key)) fail(`app.js labels a row '${key}' which en-GB does not define`);
+  }
+}
+
 /* ── every element the script reaches for exists in the document ──────────── */
 
 const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));

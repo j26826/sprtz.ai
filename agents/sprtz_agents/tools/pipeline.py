@@ -1338,6 +1338,11 @@ async def _store_classes(job_id: str, game: GameDetails, runs: list[Any],
             "game": part.model_dump(),
             "embed_text": game_summary.embed_text(part),
         })
+    # The whole-day record goes as the classes arrive. A live event writes an
+    # interim one after every tick that analysed a chunk, so without this the
+    # desk would show the day twice once it finished — once whole, once in
+    # pieces — and a search would answer with both.
+    await mcp_client.call_tool("catalog", "delete_game", {"job_id": job_id})
     names = ", ".join(run.show_class.name for run in runs)
     await _emit(job_id, "analysis",
                 f"This recording covered {len(runs)} classes, saved as separate events: {names}.",
@@ -1395,10 +1400,6 @@ async def split_event_classes(job_id: str) -> dict:
                             "on the published timetable. Nothing was changed.")}
 
     await _store_classes(job_id, game, runs, moments)
-    # The whole-day record goes as the classes arrive: two answers to "what is
-    # this recording" is how a desk shows a day twice, once whole and once in
-    # pieces.
-    await mcp_client.call_tool("catalog", "delete_game", {"job_id": job_id})
     return {
         "status": "success",
         "job_id": job_id,

@@ -2083,6 +2083,88 @@ what someone searches by — and `discipline_by_code` normalises it back. The
 title falls back to it too: an equestrian graphic often names nobody, and
 `Jumping — CSI Aachen` is a title where the uploaded filename is not.
 
+### A recording is not a competition
+
+A live URL points at an arena. The camera runs all day and the classes change
+under it — the LeMieux capture of 11 September crossed the Novice Gold, the
+Prix St Georges Silver and the PSG Freestyle Gold in one unbroken recording,
+and the desk read the lot as a single event with a running order of twenty-four
+and a rider called "unknown". **A day is not a competition; a class is.**
+
+**Equipe publishes the timetable and it is genuinely fetchable.**
+`/api/v1/meetings` lists every show with its dates; `/api/v1/meetings/{id}/schedule`
+gives that show's classes with their start times, the marking sheet and the
+section ids; `/api/v1/class_sections/{id}` gives the panel by name and
+position, every combination in start order with the time it was due in the
+arena, its placing, its total, and each judge's own percentage split into
+technical and artistic. All of it beats what the desk can see: a lower third
+abbreviates a rider and vanishes for whole rounds, and a broadcast shows a
+total for five seconds and never shows who sat at M.
+
+This is a different route from `identify_show`, which asks Gemini with Google
+Search and gets one class at a time as prose — because a show *page* is a
+JavaScript shell and `.json` on it answers 406. A timetable has to be exact and
+complete, so it comes from the API; the search path stays for everything else.
+
+**Which class a ride was in is decided by the clock and corrected by the
+arena** (`tools/equipe.py`, tested against that day's real timetable and its
+real rides). Three rules, each of which got it wrong first:
+
+- **No allowance forward in the clock.** The last class to have *started* owns
+  the ride. An allowance lets a class that has not begun claim the rides of the
+  one still running; lateness needs no allowance, because a late class still
+  starts before its own rides. What is uncovered is a class running *over*, and
+  that is what the caption is for.
+- **A caption must beat the clock's own class by a margin** (`CAPTION_MARGIN`).
+  The Gold prize-giving card matched the *Silver* class 0.625 to 0.599: two
+  classes of one sponsor share every word but the grade, so a card that names
+  neither cleanly is not evidence of a boundary.
+- **PSG is Prix St Georges.** A caption spelling out what the timetable
+  abbreviates was filing Gold freestyle rides under a class that had finished
+  two hours earlier. `_EXPANSIONS` holds the discipline's own shorthand.
+
+**Each class is a game record of its own.** The id says which: `{job}` while a
+recording holds one competition — every handball match, every single-class day
+— and `{job}__{classId}` once it holds more, so nothing already on the desk
+changes id and there is nothing to migrate. A record is named for its class and
+keeps the day's name as its show title; it holds only its own rides and only
+the moments inside them (`classId` on the moment, written by
+`_tag_moments_with_class`). **The whole-day record is deleted as the classes are
+written** — a live event writes an interim one every tick, and left there the
+desk shows the day twice once it finishes.
+
+Readers land on the right one: a question about the recording is answered by
+the first class to run (`canonical_game`), a named class is read directly, and
+`get_rides` with no class gathers the day across its classes with each ride
+saying which it was in. The writers that act on a recording act on all of it —
+`rename_job` reaches every class, and `delete_job` and `clear_analysis` take
+every record, which left behind would be unreachable, still indexed for search,
+and still on the desk for a job that no longer exists. `get_games_by_ids` is
+keyed by job, so the first class to run names the recording rather than
+whichever document streamed last.
+
+**A class is grounded from its own published section**, not from a search over
+prose: the start list names rounds no graphic did (`align_schedule` gets real
+per-rider times rather than a median offset), and the results confirm or
+contradict the totals that were shown. Nothing observed is overwritten —
+`grounded_rider`, `grounded_total_pct`, `grounded_judge_marks`,
+`grounded_technical_pct` and `grounded_artistic_pct` are their own fields,
+because a caption and a results page are different kinds of fact. The record
+also keeps the test that was ridden and the movements it was marked on: a 7 for
+a piaffe at coefficient 2 is not a 7 for an entry.
+
+**The vector carries it.** The class, the show, the test, the arena, the panel
+and the first three placings are the words an equestrian desk searches by —
+"the freestyle Sandy Phillips judged", "Dannie Morgan's winning ride" — and
+none of them were in it before. A *moment's* vector is not re-embedded: it is
+written while the analysis runs, before any of this is known, so the class
+reaches search through the event record rather than through the moment.
+
+`split_event_classes` does it to a day already recorded, reading the timetable
+and refiling the rounds and moments already on record without re-analysing
+anything. A recording whose show cannot be found, or that held one class, is
+left exactly as it is.
+
 ### An equestrian recording is a competition day
 
 The five real samples are 6.3-8.45 hours and 7-12.6 GB each: **one fixed camera

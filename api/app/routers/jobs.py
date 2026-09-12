@@ -929,8 +929,25 @@ async def list_moments(
     )
 
 
+@router.get("/{job_id}/games")
+async def list_games(job_id: str, user: CallerIdentity = Depends(current_user)) -> dict:
+    """Every competition this recording holds, in running order.
+
+    A live URL points at an arena rather than at a contest, so a day's capture
+    can cross class after class — and each is an event of its own. One entry
+    for a recording that held one competition, which is every sport but
+    equestrian.
+    """
+    await _load_job(job_id, user)
+    result = await clients.call_mcp("catalog", "list_games", {"job_id": job_id})
+    if result.get("status") == "error":
+        raise _upstream(result, "The events in this recording could not be read just now.")
+    return {"job_id": job_id, "games": result.get("games") or []}
+
+
 @router.get("/{job_id}/event")
-async def event_tree(job_id: str, user: CallerIdentity = Depends(current_user)) -> dict:
+async def event_tree(job_id: str, class_id: str = "",
+                     user: CallerIdentity = Depends(current_user)) -> dict:
     """The event as a tree: the event, each ride in running order, the moments in each.
 
     A ride is a rider on one horse. Moments outside every ride come back under
@@ -939,7 +956,8 @@ async def event_tree(job_id: str, user: CallerIdentity = Depends(current_user)) 
     mcp/catalog_server/event_tree.py.
     """
     await _load_job(job_id, user)
-    result = await clients.call_mcp("catalog", "get_event_tree", {"job_id": job_id})
+    result = await clients.call_mcp(
+        "catalog", "get_event_tree", {"job_id": job_id, "class_id": class_id})
     if result.get("status") == "error":
         raise _upstream(result, "The rides for this event could not be read just now.")
     return {"event": result.get("event") or {}}

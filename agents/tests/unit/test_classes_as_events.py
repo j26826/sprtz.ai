@@ -133,14 +133,14 @@ class TestWhatIsWritten:
         assert second["class_decided_by"] == "caption"
 
     @pytest.mark.asyncio
-    async def test_the_whole_day_is_not_kept_beside_the_classes(self):
-        # Two answers to "what is this recording" is how a desk shows a day
-        # twice, once whole and once in pieces.
-        written = []
+    async def test_the_whole_day_record_goes_as_the_classes_arrive(self):
+        # A live event writes an interim whole-day record after every tick that
+        # analysed a chunk. Left there, the desk shows the day twice once it
+        # finishes — once whole, once in pieces — and a search answers with both.
+        calls = []
 
         async def call(server, tool, args=None):
-            if tool == "upsert_game":
-                written.append(args)
+            calls.append((tool, args))
             return {"status": "success"}
 
         run = equipe.ClassRun(show_class=SILVER, rides=[ride(1, 0, 60)])
@@ -148,7 +148,10 @@ class TestWhatIsWritten:
         with patch.object(pipeline.mcp_client, "call_tool", AsyncMock(side_effect=call)):
             await pipeline._store_classes("j1", game_with([ride(1, 0, 60)]), [run], [])
 
+        written = [args for tool, args in calls if tool == "upsert_game"]
         assert all(w.get("class_id") for w in written)
+        deleted = [args for tool, args in calls if tool == "delete_game"]
+        assert deleted and deleted[0] == {"job_id": "j1"}
 
     @pytest.mark.asyncio
     async def test_every_moment_is_told_which_class_it_was_in(self):
