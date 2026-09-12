@@ -1808,13 +1808,25 @@ for a whole analysis.
   `-backend-config`), then re-run the trigger. Cancel a build before its apply
   or let it finish.
 
-  **A `dynamic` block's `for_each` will not take a list of numbers**, and
-  `terraform validate` passes on one. `for_each = cond ? [1] : []` — the usual
-  way to write an optional block — is rejected at apply time with "Cannot use a
-  list of number value in for_each", halfway through a deploy, after every
-  image has been built. It wants a map or a **set of strings**:
-  `cond ? toset(["name"]) : toset([])`. Validation cannot see it because the
-  type only settles once the condition is evaluated.
+  **A sensitive variable poisons every `for_each` and `count` derived from
+  it**, and the error names the type instead. `for_each = var.secret != "" ?
+  [1] : []` on a `sensitive = true` variable fails the apply with "Cannot use a
+  list of number value in for_each. An iterable collection is required" — so
+  the obvious fix is to make it a set of strings, which fails with "Cannot use
+  a set of string value in for_each". Nothing is wrong with the type: a value
+  derived from a sensitive one carries the mark, and a marked value cannot be
+  iterated at all. `nonsensitive(var.secret != "")` is the fix — whether a
+  secret exists is not itself a secret — kept in one local so `count` and every
+  `dynamic` read the same unmarked boolean.
+
+  Two things hide this. `terraform validate` passes on all of it, and **the
+  builder is `hashicorp/terraform:1.9` while a developer machine is on
+  1.16**, which tolerates the mark and plans it happily. To reproduce a build
+  failure locally, run the builder's version:
+  `docker run --rm -v "$PWD:/w" -w /w hashicorp/terraform:1.9 plan`. The google
+  provider configures offline against a fake service-account JSON — a generated
+  RSA key is enough — so a plan needs no credentials as long as nothing
+  refreshes.
 
   `gcloud builds list` writes "filter keys were not present in any resource" to
   **stderr** when nothing matches. Merged into stdout that reads as a build id
