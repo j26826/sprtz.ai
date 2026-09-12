@@ -52,8 +52,12 @@ def test_an_unknown_job_is_404_before_the_catalog_is_asked():
 
 
 def test_a_catalog_failure_is_an_error_not_an_empty_event():
-    mock = _calls(tree={"status": "error", "error": "Firestore unavailable"})
+    mock = _calls(tree={"status": "error", "error": "DeadlineExceeded: Firestore unavailable"})
     with patch.object(jobs.clients, "call_mcp", mock), pytest.raises(HTTPException) as err:
         asyncio.run(jobs.event_tree("j1", USER))
     assert err.value.status_code == 502
-    assert "Firestore unavailable" in err.value.detail
+    # What the catalog said goes to the log, not to the browser: an exception
+    # rendered as text is true, useless to an editor, and a description of the
+    # inside of a system they cannot see.
+    assert "DeadlineExceeded" not in err.value.detail
+    assert "could not be read" in err.value.detail

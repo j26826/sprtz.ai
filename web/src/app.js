@@ -29,6 +29,7 @@ import {
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
 import { chooseCard, wantsDetail } from './cards.js';
 import { currentTurn } from './transcript.js';
+import { humanMessage, jobFailure } from './errors.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
   disciplinesFor, findGames, gamesInScope, scopeContextLine, scopeFilters, scopeTitle,
@@ -178,7 +179,13 @@ async function api(path, options = {}) {
     // only way back.
     if (res.status === 401) sessionExpired();
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `${res.status} ${res.statusText}`);
+    // The status and the detail travel on the error rather than being baked
+    // into its message: what an editor is shown is decided in one place
+    // (`errors.js`), and "502 Bad Gateway" is not a sentence.
+    const failure = new Error(body.detail || `${res.status} ${res.statusText}`);
+    failure.status = res.status;
+    failure.detail = body.detail || '';
+    throw failure;
   }
   return res.json();
 }
@@ -199,6 +206,21 @@ function sessionExpired() {
   if (sessionEnding || !state.user) return;
   sessionEnding = true;
   signOutNow().finally(() => { sessionEnding = false; });
+}
+
+
+/**
+ * What to show for a failure, in the editor's own language.
+ *
+ * Everything caught goes through here. Nothing from Firebase, a stack or a
+ * status line reaches the screen: those read as a broken product and say
+ * things about the inside of the system that a desk has no business showing.
+ * The technical text is not lost, it is logged — the console is where that
+ * belongs.
+ */
+function humanError(err, fallback = 'error.generic') {
+  if (err) console.warn('handled failure:', err);
+  return humanMessage(err, { t, fallback });
 }
 
 
@@ -269,7 +291,7 @@ async function refreshYouTube() {
   try {
     state.youtube = await api('/api/integrations/youtube');
   } catch (err) {
-    state.youtube = { error: err.message };
+    state.youtube = { error: humanError(err, 'youtube.checkFailed') };
   }
   renderYouTube();
 }
@@ -338,7 +360,7 @@ async function onYouTubeAction(action) {
       // replacing the desk with it would lose an open session.
       window.open(out.url, '_blank', 'noopener');
     } catch (err) {
-      state.youtube = { ...(state.youtube || {}), error: err.message };
+      state.youtube = { ...(state.youtube || {}), error: humanError(err, 'youtube.saveFailed') };
       renderYouTube();
     }
     return;
@@ -348,7 +370,7 @@ async function onYouTubeAction(action) {
     try {
       await api('/api/integrations/youtube', { method: 'DELETE' });
     } catch (err) {
-      state.youtube = { ...(state.youtube || {}), error: err.message };
+      state.youtube = { ...(state.youtube || {}), error: humanError(err, 'youtube.saveFailed') };
     }
     await refreshYouTube();
     return;
@@ -366,7 +388,7 @@ async function onYouTubeAction(action) {
       await api('/api/integrations/youtube', { method: 'PUT', body: JSON.stringify(body) });
       state.youtubeForm = null;
     } catch (err) {
-      state.youtube = { ...(state.youtube || {}), error: err.message };
+      state.youtube = { ...(state.youtube || {}), error: humanError(err, 'youtube.saveFailed') };
     }
     await refreshYouTube();
   }
@@ -470,15 +492,11 @@ const db = getFirestore(fb);
  */
 function signinError(err) {
   const box = $('signin-error');
-  const code = err?.code || '';
-  const message = {
-    'auth/invalid-credential': t('auth.badCredentials'),
-    'auth/wrong-password': t('auth.badCredentials'),
-    'auth/user-not-found': t('auth.noAccount'),
-    'auth/unauthorized-domain': t('auth.unauthorizedDomain'),
-    'auth/operation-not-allowed': t('auth.notEnabled'),
-  }[code] || err?.message || t('auth.failed');
-  box.textContent = message;
+  // The codes and their sentences live in `errors.js`, with everything else
+  // that decides what a person is told. What used to be here fell through to
+  // `err.message`, which for Firebase is "Firebase: Error (auth/…)." — the
+  // code twice over, and nothing to do about it.
+  box.textContent = humanError(err, 'auth.failed');
   box.classList.remove('hidden');
 }
 
@@ -1974,7 +1992,7 @@ async function downloadMoment() {
     // rather than navigating away from the desk.
     window.location.href = out.url;
   } catch (err) {
-    state.share = { ...(state.share || {}), status: 'error', error: err.message };
+    state.share = { ...(state.share || {}), status: 'error', error: humanError(err, 'share.downloadFailed') };
   } finally {
     state.share = { ...(state.share || {}), downloading: false };
     renderDetailsBody();
@@ -2004,7 +2022,7 @@ async function publishToYouTube() {
     );
     state.share = { ...state.share, status: 'done', url: out.url };
   } catch (err) {
-    state.share = { ...state.share, status: 'error', error: err.message };
+    state.share = { ...state.share, status: 'error', error: humanError(err, 'share.publishFailed') };
   }
   renderDetailsBody();
 }
@@ -2650,7 +2668,7 @@ async function saveRename(jobId) {
       render();
     }
   } catch (err) {
-    say(`${t('rename.failed')}: ${err.message || err}`);
+    say(`${t('rename.failed')}: ${humanError(err, 'error.generic')}`);
   }
 }
 
@@ -3217,7 +3235,7 @@ async function loadDeskMoments(index) {
     msg.running = res.running || [];
   } catch (err) {
     msg.searchResults = [];
-    say(`${t('desk.title')}: ${err.message || err}`);
+    say(`${t('desk.title')}: ${humanError(err, 'error.generic')}`);
   } finally {
     msg.deskLoading = false;
     render();
@@ -3245,7 +3263,7 @@ async function runSearch(index) {
     msg.searchResults = res.moments || res.results || [];
   } catch (err) {
     msg.searchResults = [];
-    say(`${t('search.title')}: ${err.message || err}`);
+    say(`${t('search.title')}: ${humanError(err, 'error.generic')}`);
   } finally {
     msg.searching = false;
     render();
@@ -3313,7 +3331,7 @@ function jobsCard(msg, index) {
           </div>` : ''}
         ${failed && j.error ? `
           <div class="job-error">
-            <p>${esc(j.error)}</p>
+            <p>${esc(jobFailure(j.error, { t }))}</p>
             <button class="btn-outline" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
           </div>` : ''}
         <div class="job-actions">
@@ -3362,7 +3380,7 @@ function liveJobRow(j) {
         <div class="job-stage">${esc(line)}</div>
         ${liveStrip(live)}
         ${j.status === 'failed' && j.error ? `
-          <div class="job-error"><p>${esc(j.error)}</p></div>` : ''}
+          <div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>` : ''}
         ${live.state === 'complete' ? (game ? `
           <div class="live-game">
             <div class="moment-label">${esc(gameHeadline(game))}</div>
@@ -4158,12 +4176,12 @@ async function mountPlayer() {
     // Packaging is independent of the analysis, so a job can have moments and
     // still have nothing to play — and re-running the whole analysis to fix
     // that would be an hour spent on the wrong thing. Offer the packaging.
-    const notReady = /still being prepared/i.test(err.message);
+    const notReady = /still being prepared/i.test(String(err?.detail || err?.message || ''));
     playerEl.insertAdjacentHTML('beforeend', `
       <div class="error-note">
         <p>${notReady
           ? esc(t('player.notPackaged'))
-          : `${esc(t('player.notReady'))}: ${esc(err.message)}`}</p>
+          : `${esc(t('player.notReady'))}: ${esc(humanError(err, 'error.desk'))}`}</p>
         ${notReady && state.jobId ? `
           <button class="btn-outline" data-prepare-playback="${esc(state.jobId)}">
             ${esc(t('player.preparePlayback'))}
@@ -4306,8 +4324,9 @@ async function ask(text, cards = null) {
     if (!cards) attachCards(msgIndex, text);
   } catch (err) {
     state.thinking = false;
-    if (msgIndex >= 0) state.msgs[msgIndex].text = `Could not reach the agent: ${err.message}`;
-    else say(`Could not reach the agent: ${err.message}`);
+    const message = humanError(err, 'error.agent');
+    if (msgIndex >= 0) state.msgs[msgIndex].text = message;
+    else say(message);
   }
   persistTranscript();
   render();
@@ -4532,7 +4551,7 @@ async function reanalyseWithContext(jobId) {
       method: 'PATCH', body: JSON.stringify({ context_urls: urls }),
     });
   } catch (err) {
-    say(`${t('reanalyse.title')}: ${err.message || err}`);
+    say(`${t('reanalyse.title')}: ${humanError(err, 'error.generic')}`);
     return;
   }
   state.reanalyse = null;
@@ -4583,7 +4602,7 @@ async function registerFromStorage() {
       actions: [t('action.processing'), t('action.bestMoments')],
     });
   } catch (err) {
-    say(`That location could not be used: ${err.message}`);
+    say(humanError(err, 'ingest.pathFailed'));
   }
   u.status = 'idle';
   render();
@@ -4632,7 +4651,7 @@ async function registerFromHls() {
     });
   } catch (err) {
     u.status = 'idle';
-    say(`That stream could not be used: ${err.message}`);
+    say(humanError(err, 'ingest.streamFailed'));
   }
   render();
 }
@@ -4680,7 +4699,7 @@ async function scheduleLiveEvent() {
     say(t('live.scheduledMsg').replace('{start}', when), { showJobs: true });
   } catch (err) {
     u.status = 'idle';
-    say(`The live event could not be scheduled: ${err.message}`);
+    say(humanError(err, 'ingest.scheduleFailed'));
   }
   render();
 }
@@ -4768,7 +4787,7 @@ async function saveLiveBooking() {
     u.status = 'idle';
     // The API refuses once the recorder is running, and that is the answer
     // rather than a failure: the event is under way.
-    say(`${t('live.editFailed')} ${err.message}`);
+    say(`${t('live.editFailed')} ${humanError(err, 'error.generic')}`);
   }
   render();
 }
@@ -4781,7 +4800,7 @@ async function resumeUpload(jobId) {
     await registerAndAnalyse(pending);
   } catch (err) {
     state.upload.status = 'idle';
-    say(`That upload could not be picked up: ${err.message}`);
+    say(humanError(err, 'ingest.resumeFailed'));
     render();
   }
 }
@@ -4832,7 +4851,7 @@ async function startUpload() {
     u.status = 'idle';
     u.stage = '';
     render();
-    say(`The upload did not complete: ${err.message}`);
+    say(humanError(err, 'ingest.uploadFailed'));
   }
 }
 
