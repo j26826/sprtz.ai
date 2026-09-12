@@ -2292,6 +2292,69 @@ def set_reel_render(reel_id: str, render: dict[str, Any]) -> dict[str, Any]:
     return get_reel(reel_id)
 
 
+def write_reel_copy(reel_id: str, generate: bool = True) -> dict[str, Any]:
+    """The copy a reel goes out with: title, description, keywords, hashtags.
+
+    Facts are assembled from the records — the title from what was read on
+    screen, the keywords from the sport's own taxonomy and the names the
+    analysis recorded — and only the description and the hashtags are written
+    by a model, over a digest of observations and nothing else. See
+    reel_copy.py for why the halves are split that way.
+
+    Falls back to composed copy on any failure. A reel that publishes with a
+    plain description is a far better outcome than one that cannot be
+    published, which is the same rule the reranker follows.
+    """
+    # Imported here like every other sibling and Google module in this file:
+    # module scope costs ~100s on a cold Cloud Run instance.
+    from catalog_server import reel_copy
+    from google.genai import types
+
+    reel = get_reel(reel_id)
+    cuts = reel.get("cuts") or []
+
+    # The moments in the order they play, and the events they came from. One
+    # read per cut and one per distinct match: a reel holds at most fifty.
+    moments: list[dict[str, Any]] = []
+    for cut in cuts:
+        found = get_moment(cut.get("jobId", ""), cut.get("momentId", ""))
+        if found:
+            moments.append(found)
+    events: list[dict[str, Any]] = []
+    for job_id in reel.get("jobIds") or []:
+        try:
+            events.append(get_game(job_id))
+        except KeyError:
+            continue
+
+    digest = reel_copy.build_digest(reel, moments, events)
+    written: reel_copy.ReelCopy | None = None
+    if generate:
+        try:
+            response = rerank_client().models.generate_content(
+                model=RERANK_MODEL,
+                contents=reel_copy.prompt_for(digest),
+                config=types.GenerateContentConfig(
+                    # Copy, not a judgement: a little warmth is the point, and
+                    # the prompt is what keeps it inside the observations.
+                    temperature=0.6,
+                    response_mime_type="application/json",
+                    # JSON Schema rather than the class, for the reason written
+                    # out at the rerank call: given the class, the newer Flash
+                    # models can write a field as an unbounded run of
+                    # characters until the token cap and the JSON never closes.
+                    response_json_schema=reel_copy.ReelCopy.model_json_schema(),
+                    max_output_tokens=2048,
+                ),
+            )
+            written = reel_copy.ReelCopy.model_validate_json(
+                (getattr(response, "text", "") or "").strip())
+        except Exception:  # noqa: BLE001
+            logger.warning("reel copy generation failed; composing instead", exc_info=True)
+
+    return {"reel_id": reel_id, **reel_copy.compose(reel, moments, events, written)}
+
+
 def match_reels_by_title(query: str, limit: int = 5) -> list[dict[str, Any]]:
     """Find reels whose name appears in ``query``, longest name first.
 

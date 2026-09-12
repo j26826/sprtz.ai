@@ -33,7 +33,8 @@ import { humanMessage, jobFailure } from './errors.js';
 import {
   CROP_ASPECTS, MIN_CUT_MS, cropBand, focusFrom, isPickedIn, isTrimmed, matchCount,
   moveCut, msAt, msClock, nextCut, nudge, pastEnd, pickKey, pctOf, reelLength,
-  rulerTicks, togglePicked, trimWindow,
+  hashLine, hashList, rulerTicks, splitTags, tagLine, togglePicked, trimWindow,
+  withHashtags,
 } from './reels.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
@@ -5321,6 +5322,15 @@ function reelPublishPanel(reel) {
         <span class="k">${esc(cutCount(reel.cuts.length))}</span>
       </div>
 
+      <div class="reel-copy-row">
+        <button class="btn-quiet btn-step" data-reel-copy="1" ${
+  pub.writing ? 'disabled' : ''}>${esc(pub.writing ? t('copy.writing') : t('copy.write'))}</button>
+        ${pub.copySource === 'generated' ? `<span class="reel-copy-note">${
+    esc(t('copy.generated'))}</span>` : ''}
+        ${pub.copySource === 'composed' ? `<span class="reel-copy-note">${
+    esc(t('copy.composed'))}</span>` : ''}
+      </div>
+
       <label class="field-label" for="reel-share-title">${esc(t('share.videoTitle'))}</label>
       <input class="input" id="reel-share-title" maxlength="100" data-reel-share="title"
              value="${esc(pub.title || '')}" />
@@ -5329,6 +5339,17 @@ function reelPublishPanel(reel) {
       <label class="field-label" for="reel-share-description">${esc(t('share.description'))}</label>
       <textarea class="input share-text" id="reel-share-description" rows="5"
                 data-reel-share="description">${esc(pub.description || '')}</textarea>
+
+      <label class="field-label" for="reel-share-tags">${esc(t('share.keywords'))}</label>
+      <input class="input" id="reel-share-tags" data-reel-share="tags"
+             placeholder="${esc(t('share.keywordsHint'))}"
+             value="${esc(tagLine(pub.tags))}" />
+
+      <label class="field-label" for="reel-share-hashtags">${esc(t('share.hashtags'))}</label>
+      <input class="input" id="reel-share-hashtags" data-reel-share="hashtags"
+             value="${esc(hashLine(pub.hashtags))}" />
+      ${hashList(pub.hashtags).length ? `<div class="hashtag-row">${
+    hashList(pub.hashtags).map((h) => `<span class="hashtag-chip">#${esc(h)}</span>`).join('')}</div>` : ''}
 
       <label class="field-label" for="reel-share-privacy">${esc(t('share.privacy'))}</label>
       <select class="input" id="reel-share-privacy" data-reel-share="privacy">
@@ -5595,6 +5616,33 @@ function reelShareDefaults(reel) {
   };
 }
 
+/** Ask the desk to write the copy, and put it in the fields for review. */
+async function writeReelCopy() {
+  if (!state.reel || !state.reelPublish) return;
+  state.reelPublish = { ...state.reelPublish, writing: true };
+  renderReelEditor();
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/copy`, { method: 'POST' });
+    state.reelPublish = {
+      ...state.reelPublish,
+      writing: false,
+      title: out.title || state.reelPublish.title,
+      description: out.description || '',
+      tags: out.tags || [],
+      hashtags: out.hashtags || [],
+      // Said on screen, because a composed description and a written one read
+      // differently and only one of them is worth editing before it goes out.
+      copySource: out.generated ? 'generated' : 'composed',
+    };
+  } catch (err) {
+    state.reelPublish = {
+      ...state.reelPublish, writing: false,
+      status: 'error', error: humanError(err, 'copy.failed'),
+    };
+  }
+  renderReelEditor();
+}
+
 async function publishReelToYouTube() {
   const pub = state.reelPublish;
   if (!state.reel || !pub || pub.status === 'sending') return;
@@ -5605,8 +5653,9 @@ async function publishReelToYouTube() {
       method: 'POST',
       body: JSON.stringify({
         title: pub.title,
-        description: pub.description,
+        description: withHashtags(pub.description, pub.hashtags),
         privacy: pub.privacy,
+        tags: splitTags(pub.tags),
       }),
     });
     state.reel = out.reel || state.reel;
@@ -6331,7 +6380,7 @@ document.addEventListener('click', (event) => {
     // rightly wants to know something handles it.
     + '[data-trim-grab],[data-reel-trim-reset],'
     + '[data-crop-aspect],[data-crop-fill],[data-crop-go],'
-    + '[data-reel-publish],[data-reel-publish-to],'
+    + '[data-reel-publish],[data-reel-publish-to],[data-reel-copy],'
     + '[data-reel-open],[data-reels-all],'
     + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
     + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
@@ -6522,9 +6571,14 @@ document.addEventListener('click', (event) => {
       ? { ...state.reelPublish, open: false }
       : { ...reelShareDefaults(state.reel), open: true, status: 'idle' };
     renderReelEditor();
+    // Written as the panel opens rather than behind a button nobody presses.
+    // It is one call, it is only a suggestion, and the alternative is an
+    // editor typing a description the desk could have offered.
+    if (state.reelPublish.open && !state.reelPublish.copySource) writeReelCopy();
     return;
   }
   if (hit.dataset.reelPublishTo) { publishReelToYouTube(); return; }
+  if (hit.dataset.reelCopy) { writeReelCopy(); return; }
   if (hit.dataset.cropGo) { cutReelShape(); return; }
   if (hit.dataset.reelPc) { reelControl(hit.dataset.reelPc); return; }
   if (hit.dataset.reelRender !== undefined) { startReelRender(); return; }

@@ -910,6 +910,26 @@ def set_reel_render(reel_id: str, render: dict) -> dict:
 
 
 @mcp.tool
+def write_reel_copy(reel_id: str, generate: bool = True) -> dict:
+    """The copy a reel goes out with: title, description, keywords, hashtags.
+
+    Facts are composed from the records and only the description and hashtags
+    are written by a model, over a digest of observations. Falls back to
+    composed copy if the model is unavailable.
+
+    Args:
+        reel_id: Reel to write copy for.
+        generate: False to compose without calling a model at all.
+    """
+    try:
+        return {"status": "success", **store.write_reel_copy(reel_id, generate)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "reel_id": reel_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id)
+
+
+@mcp.tool
 def find_reels(query: str, limit: int = 5) -> dict:
     """Find reels a question names, by comparing the name rather than its meaning.
 

@@ -2201,6 +2201,89 @@ async def find_reels(query: str, limit: int = 5) -> dict:
     } for r in (found.get("reels") or [])]}
 
 
+async def write_reel_copy(reel_id: str) -> dict:
+    """Write the copy a reel would go out with: title, description, keywords, hashtags.
+
+    Returns it rather than saving it. The editor reads it before anything is
+    published, and overwriting a description they had already written would be
+    the worst possible moment to be helpful.
+
+    Args:
+        reel_id: Reel to write copy for.
+    """
+    found = await mcp_client.call_tool("catalog", "write_reel_copy", {"reel_id": reel_id})
+    if found.get("status") != "success":
+        return {"status": "error", "reel_id": reel_id,
+                "error": found.get("error") or "The copy could not be written."}
+    return {k: v for k, v in found.items() if k != "status"}
+
+
+async def publish_reel(reel_id: str, title: str = "", description: str = "",
+                       privacy: str = "private") -> dict:
+    """Upload a reel that has already been rendered to the YouTube channel.
+
+    **This cannot be undone and it posts under the desk's own channel**, so
+    confirm with the editor before calling it unless they have already said
+    plainly that they want it published — the same rule `delete_job` follows,
+    for the same reason.
+
+    It publishes a reel that already exists. It does not choose what goes in
+    one and it does not render one: if the reel has not been rendered, say so
+    rather than rendering it, because what would go out is then something
+    nobody has watched.
+
+    Leave `privacy` at "private" unless the editor has said otherwise in as
+    many words. Public is not a default and is not yours to choose.
+
+    Args:
+        reel_id: The reel to publish. It must already be rendered.
+        title: What to call it on the channel. Empty uses the reel's own name.
+        description: The copy. Empty uses what `write_reel_copy` composes.
+        privacy: "private", "unlisted" or "public".
+    """
+    if privacy not in ("private", "unlisted", "public"):
+        return {"status": "error", "reel_id": reel_id,
+                "error": 'Choose "private", "unlisted" or "public".'}
+
+    found = await mcp_client.call_tool("catalog", "get_reel", {"reel_id": reel_id})
+    reel = found.get("reel") or {}
+    if not reel:
+        return {"status": "error", "reel_id": reel_id, "error": f"No reel {reel_id}."}
+
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        return {"status": "error", "reel_id": reel_id,
+                "error": "That reel has not been rendered yet, so there is nothing "
+                         "to upload. Rendering it is the editor's to ask for."}
+
+    copy: dict[str, Any] = {}
+    if not title or not description:
+        written = await mcp_client.call_tool(
+            "catalog", "write_reel_copy", {"reel_id": reel_id})
+        if written.get("status") == "success":
+            copy = written
+
+    result = await mcp_client.call_tool("media", "publish_youtube", {
+        "clip_uri": render["reelUri"],
+        "title": (title or copy.get("title") or reel.get("title") or "Highlights")[:100],
+        "description": description or copy.get("description") or "",
+        "privacy": privacy,
+        "tags": (copy.get("tags") or [])[:15],
+    })
+    if result.get("status") != "success":
+        # The reason travels: a revoked refresh token or a channel over quota
+        # is the editor's to act on, not something to flatten.
+        return {"status": "error", "reel_id": reel_id,
+                "error": result.get("error") or "YouTube would not accept the upload."}
+
+    publish = {"status": "done", "videoId": result.get("video_id", ""),
+               "url": result.get("url", ""), "privacy": result.get("privacy", privacy),
+               "error": ""}
+    await mcp_client.call_tool("catalog", "set_reel_publish",
+                               {"reel_id": reel_id, "publish": publish})
+    return {"status": "success", "reel_id": reel_id, **publish}
+
+
 async def reframe_reel(reel_id: str, aspect: str, focus_x: float = 0.5,
                        fill: str = "crop") -> dict:
     """Cut an existing reel to another shape: 9:16, 4:5 or 1:1.

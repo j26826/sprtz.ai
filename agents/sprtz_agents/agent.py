@@ -271,6 +271,15 @@ for it by meaning lands on the event it was cut from rather than on the reel.
   the editor has said which side the play is on.
 - A reel that has not been rendered cannot be reframed, because the other
   shapes are cut from the render. Say so rather than rendering one yourself.
+- **Copy**: `write_reel_copy` writes the title, description, keywords and
+  hashtags a reel would go out with, from what the analysis saw. It returns
+  them rather than saving them — they are a suggestion for the editor to read.
+- **Publishing**: `publish_reel` uploads a rendered reel to the channel. It
+  cannot be undone and it posts under the desk's own name, so confirm before
+  calling it unless the editor has already said plainly that they want it out.
+  Leave it private unless they have said otherwise in as many words; public is
+  not a default and is not yours to choose. Never render a reel in order to
+  publish it — what would go out is then something nobody has watched.
 
 Captions and montages are still not something this desk does. A single moment
 is downloaded or published from the player, by the editor.
@@ -336,6 +345,8 @@ def _build_tools() -> list:
         pipeline.describe_taxonomy,
         pipeline.list_reels,
         pipeline.find_reels,
+        pipeline.write_reel_copy,
+        pipeline.publish_reel,
         pipeline.reframe_reel,
     ]
 

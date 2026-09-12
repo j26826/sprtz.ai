@@ -218,3 +218,77 @@ export function focusFrom(fraction, aspect) {
   const f = Math.max(0, Math.min(1, Number(fraction) || 0));
   return Math.max(0, Math.min(1, (f - half) / (1 - band.width)));
 }
+
+
+/* ── The copy that goes out with it ───────────────────────────────────────
+   Two small conversions, pure so they can be tested: what an editor types is
+   text, and what YouTube wants is neither the same shape nor in the same
+   place. */
+
+/**
+ * Hashtags belong in the description, because that is where YouTube reads
+ * them and turns them into links.
+ *
+ * They are not the same thing as keywords: a keyword is metadata nobody sees,
+ * a hashtag is visible text. Sent as their own field they would simply be
+ * dropped, which is a silent way to lose half the reach someone was counting
+ * on. Accepts either a typed line or a list, because the field holds one and
+ * the generator returns the other.
+ */
+export function withHashtags(description, hashtags) {
+  const list = (typeof hashtags === 'string' ? hashtags.split(/[\s,]+/) : hashtags || [])
+    .map((h) => String(h).replace(/^#+/, '').trim())
+    .filter(Boolean);
+  const seen = [];
+  for (const tag of list) {
+    if (!seen.some((x) => x.toLowerCase() === tag.toLowerCase())) seen.push(tag);
+  }
+  const body = String(description || '').trim();
+  if (!seen.length) return body;
+  return `${body}\n\n${seen.map((h) => `#${h}`).join(' ')}`.trim();
+}
+
+/** How many tags YouTube will take before the 500-character budget bites. */
+export const MAX_SENT_TAGS = 15;
+
+/** A typed keyword line as a list. Commas or newlines — people do both. */
+export function splitTags(tags) {
+  const list = Array.isArray(tags)
+    ? tags
+    : String(tags || '').split(/[,\n]/);
+  const out = [];
+  for (const raw of list) {
+    const tag = String(raw).trim();
+    if (tag && !out.some((x) => x.toLowerCase() === tag.toLowerCase())) out.push(tag);
+  }
+  return out.slice(0, MAX_SENT_TAGS);
+}
+
+/**
+ * A keyword or hashtag value as the line to show in its field.
+ *
+ * The value is legitimately either shape: a list when the copy writer filled
+ * it, a string the moment an editor types in the field. Rendering assumed the
+ * list, so the first keystroke threw inside the panel — and because the throw
+ * happened during a re-render, the symptom was every later button doing
+ * nothing at all, which points nowhere near a keywords field.
+ */
+export function tagLine(value) {
+  return Array.isArray(value) ? value.join(', ') : String(value ?? '');
+}
+
+export function hashLine(value) {
+  if (!Array.isArray(value)) return String(value ?? '');
+  return value.map((h) => `#${String(h).replace(/^#+/, '')}`).join(' ');
+}
+
+/** The hashtags in a value of either shape, bare, for showing back as chips. */
+export function hashList(value) {
+  const raw = Array.isArray(value) ? value : String(value ?? '').split(/[\s,]+/);
+  const out = [];
+  for (const item of raw) {
+    const tag = String(item).replace(/^#+/, '').trim();
+    if (tag && !out.some((x) => x.toLowerCase() === tag.toLowerCase())) out.push(tag);
+  }
+  return out;
+}

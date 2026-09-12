@@ -3584,3 +3584,30 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   /* Ink on amber, never white. */
   color: var(--color-on-accent);
 }
+
+/* ── The copy a reel goes out with ────────────────────────────────────────
+   Written as the panel opens, and said to be written: a composed description
+   and a model's read differently, and only one of them is worth editing
+   before it leaves the desk. */
+.reel-copy-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.reel-copy-note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-neutral-600);
+}
+/* Hashtags echoed back under the field they were typed in. The field is the
+   truth; these are there so a run-together line can be checked at a glance. */
+.hashtag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.hashtag-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-neutral-700);
+}

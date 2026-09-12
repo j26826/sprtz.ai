@@ -299,6 +299,31 @@ async def crop_reel(reel_id: str, body: CropRequest,
             "reel": saved.get("reel") or reel}
 
 
+@router.post("/{reel_id}/copy")
+async def write_copy(reel_id: str, user: CallerIdentity = Depends(current_user)) -> dict:
+    """Write the copy this reel would go out with.
+
+    Returns it rather than saving it. The editor is going to read it before it
+    is published, and quietly overwriting a description someone had already
+    written would be the worst possible moment to be helpful.
+    """
+    await _reel(reel_id)
+    result = await clients.call_mcp("catalog", "write_reel_copy", {"reel_id": reel_id})
+    if result.get("status") != "success":
+        raise _upstream(result, "The copy could not be written just now.")
+    return {
+        "reel_id": reel_id,
+        "title": result.get("title", ""),
+        "description": result.get("description", ""),
+        "tags": result.get("tags") or [],
+        "hashtags": result.get("hashtags") or [],
+        # Whether a model wrote the description or it was composed. The editor
+        # is told which, because the two read differently and one of them is
+        # worth editing before it goes out.
+        "generated": bool(result.get("generated")),
+    }
+
+
 class PublishYouTubeRequest(BaseModel):
     """What to publish, and how it should read on the channel.
 

@@ -16,7 +16,8 @@ import { describe, it } from 'node:test';
 
 import {
   CROP_ASPECTS, MIN_CUT_MS, cropBand, focusFrom, isPickedIn, matchCount, moveCut,
-  msClock, nextCut, nudge, parsePickKey, pastEnd, pickKey, reelLength, togglePicked,
+  MAX_SENT_TAGS, hashLine, hashList, msClock, nextCut, nudge, parsePickKey, pastEnd,
+  pickKey, reelLength, splitTags, tagLine, togglePicked, withHashtags,
 } from '../src/reels.js';
 
 const cut = (jobId, startMs, endMs) => ({ jobId, momentId: `${jobId}-m`, startMs, endMs });
@@ -223,5 +224,91 @@ describe('the crop window drawn on the frame', () => {
       const b = cropBand('4:5', f);
       assert.ok(Math.abs(focusFrom(b.left + b.width / 2, '4:5') - f) < 1e-9);
     }
+  });
+});
+
+describe('the copy that goes out with a reel', () => {
+  it('puts hashtags in the description, where YouTube reads them', () => {
+    // Sent as their own field they are silently dropped, which loses half the
+    // reach someone was counting on and says nothing about it.
+    const out = withHashtags('Two rounds worth watching.', ['Dressage', 'Falkenstein']);
+    assert.ok(out.startsWith('Two rounds worth watching.'));
+    assert.ok(out.includes('#Dressage #Falkenstein'));
+  });
+
+  it('accepts either a typed line or a list, since the field holds one and the writer returns the other', () => {
+    assert.equal(withHashtags('x', '#a #b'), withHashtags('x', ['a', 'b']));
+    assert.equal(withHashtags('x', 'a, b'), withHashtags('x', ['a', 'b']));
+  });
+
+  it('does not double the hash someone already typed', () => {
+    assert.ok(!withHashtags('x', ['##Dressage']).includes('##'));
+  });
+
+  it('drops a repeat however it was capitalised', () => {
+    assert.equal(withHashtags('x', ['Dressage', 'dressage']).match(/#/g).length, 1);
+  });
+
+  it('leaves the description alone when there are none', () => {
+    assert.equal(withHashtags('Just this.', []), 'Just this.');
+    assert.equal(withHashtags('Just this.', ''), 'Just this.');
+  });
+
+  it('survives an empty description without leading blank lines', () => {
+    assert.equal(withHashtags('', ['a']), '#a');
+  });
+
+  it('splits a typed keyword line on commas or newlines', () => {
+    assert.deepEqual(splitTags('Dressage, Falkenstein\nPirouette'),
+      ['Dressage', 'Falkenstein', 'Pirouette']);
+  });
+
+  it('drops blanks and repeats rather than sending them', () => {
+    assert.deepEqual(splitTags('a, , a, A , b'), ['a', 'b']);
+  });
+
+  it('stops at what YouTube will take', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `tag${i}`).join(', ');
+    assert.equal(splitTags(many).length, MAX_SENT_TAGS);
+  });
+
+  it('accepts a list as readily as a line', () => {
+    assert.deepEqual(splitTags(['a', 'b']), ['a', 'b']);
+    assert.deepEqual(splitTags(null), []);
+  });
+});
+
+describe('a field whose value is a list until someone types in it', () => {
+  // This is the shape of a bug that already happened. The copy writer fills
+  // these with lists; the first keystroke replaces the list with a string.
+  // Rendering assumed the list, so the panel threw mid-render — and because
+  // it threw during a re-render, the symptom was every later button doing
+  // nothing, which points nowhere near a keywords field.
+  it('shows a list as a line', () => {
+    assert.equal(tagLine(['Dressage', 'Falkenstein']), 'Dressage, Falkenstein');
+    assert.equal(hashLine(['Dressage', 'Falkenstein']), '#Dressage #Falkenstein');
+  });
+
+  it('shows typed text unchanged, rather than throwing on it', () => {
+    assert.equal(tagLine('Dressage, half typed'), 'Dressage, half typed');
+    assert.equal(hashLine('#Dressage #half'), '#Dressage #half');
+  });
+
+  it('survives nothing at all', () => {
+    for (const empty of [undefined, null, '', []]) {
+      assert.equal(tagLine(empty), '');
+      assert.equal(hashLine(empty), '');
+      assert.deepEqual(hashList(empty), []);
+    }
+  });
+
+  it('does not double a hash already in the list', () => {
+    assert.equal(hashLine(['#Dressage']), '#Dressage');
+  });
+
+  it('reads hashtags back out of either shape', () => {
+    assert.deepEqual(hashList('#a #b'), ['a', 'b']);
+    assert.deepEqual(hashList(['a', 'b']), ['a', 'b']);
+    assert.deepEqual(hashList('a, a, A'), ['a']);
   });
 });

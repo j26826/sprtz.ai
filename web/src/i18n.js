@@ -16,6 +16,14 @@ const BASE = 'en-GB';
 
 const STRINGS = {
   'en-GB': {
+    'share.keywords': 'Keywords',
+    'share.keywordsHint': 'Comma separated',
+    'share.hashtags': 'Hashtags',
+    'copy.write': 'Write the copy',
+    'copy.writing': 'Writing…',
+    'copy.generated': 'Written from what the analysis saw — worth a read before it goes out',
+    'copy.composed': 'Composed from the records',
+    'copy.failed': 'The copy could not be written.',
     'reels.open': 'Open this reel',
     'reels.state': 'State',
     'reels.draft': 'Draft',
@@ -561,6 +569,14 @@ const STRINGS = {
   },
 
   de: {
+    'share.keywords': 'Schlagwörter',
+    'share.keywordsHint': 'Durch Komma getrennt',
+    'share.hashtags': 'Hashtags',
+    'copy.write': 'Text schreiben',
+    'copy.writing': 'Wird geschrieben…',
+    'copy.generated': 'Aus dem geschrieben, was die Analyse gesehen hat — vor dem Posten lesen',
+    'copy.composed': 'Aus den Aufzeichnungen zusammengestellt',
+    'copy.failed': 'Der Text konnte nicht geschrieben werden.',
     'reels.open': 'Dieses Reel öffnen',
     'reels.state': 'Status',
     'reels.draft': 'Entwurf',
@@ -1084,6 +1100,14 @@ const STRINGS = {
   },
 
   it: {
+    'share.keywords': 'Parole chiave',
+    'share.keywordsHint': 'Separate da virgola',
+    'share.hashtags': 'Hashtag',
+    'copy.write': 'Scrivi il testo',
+    'copy.writing': 'Scrittura…',
+    'copy.generated': 'Scritto da ciò che l\'analisi ha visto — da rileggere prima di pubblicare',
+    'copy.composed': 'Composto dai dati registrati',
+    'copy.failed': 'Non è stato possibile scrivere il testo.',
     'reels.open': 'Apri questo reel',
     'reels.state': 'Stato',
     'reels.draft': 'Bozza',
@@ -1605,6 +1629,14 @@ const STRINGS = {
   },
 
   fr: {
+    'share.keywords': 'Mots-clés',
+    'share.keywordsHint': 'Séparés par des virgules',
+    'share.hashtags': 'Hashtags',
+    'copy.write': 'Rédiger le texte',
+    'copy.writing': 'Rédaction…',
+    'copy.generated': 'Rédigé à partir de ce que l\'analyse a vu — à relire avant publication',
+    'copy.composed': 'Composé à partir des données',
+    'copy.failed': 'Le texte n\'a pas pu être rédigé.',
     'reels.open': 'Ouvrir ce reel',
     'reels.state': 'État',
     'reels.draft': 'Brouillon',
@@ -2129,6 +2161,14 @@ const STRINGS = {
   },
 
   es: {
+    'share.keywords': 'Palabras clave',
+    'share.keywordsHint': 'Separadas por comas',
+    'share.hashtags': 'Hashtags',
+    'copy.write': 'Redactar el texto',
+    'copy.writing': 'Redactando…',
+    'copy.generated': 'Redactado a partir de lo que vio el análisis — conviene leerlo antes de publicar',
+    'copy.composed': 'Compuesto a partir de los registros',
+    'copy.failed': 'No se pudo redactar el texto.',
     'reels.open': 'Abrir este reel',
     'reels.state': 'Estado',
     'reels.draft': 'Borrador',
