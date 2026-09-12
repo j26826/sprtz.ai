@@ -157,35 +157,6 @@ export function ridesAsked(groups, question) {
 
 
 /**
- * What was looked for and not found, as far as it concerns one ride.
- *
- * The record keeps these per moment type, each note stamped with the analysis
- * window it came from ("[segment 3] …"), and a ride knows which windows it was
- * seen in. A note from one of those windows is about the footage this ride is
- * in; a note from anywhere else is about somebody else's round. A type with
- * no note says nothing about any particular ride, so it is left out here.
- *
- * @param {{momentType:string, notes:string[]}[]} notConfirmed  From the game record.
- * @param {number[]} segments  The windows the ride was seen in.
- * @returns {{momentType:string, notes:string[]}[]}  Notes with the stamp removed.
- */
-export function notesForRide(notConfirmed, segments) {
-  const windows = new Set((segments || []).map(Number));
-  if (!windows.size) return [];
-  const out = [];
-  for (const item of notConfirmed || []) {
-    const notes = [];
-    for (const note of item?.notes || []) {
-      const m = /^\[segment (\d+)\]\s*/.exec(String(note));
-      if (m && windows.has(Number(m[1]))) notes.push(String(note).slice(m[0].length));
-    }
-    if (notes.length) out.push({ momentType: item.momentType, notes });
-  }
-  return out;
-}
-
-
-/**
  * A moment's type as a key: the taxonomy's code, or its label when a record
  * predates the code being stored. Blank for a moment that carries neither,
  * which is a moment no type filter can be about.

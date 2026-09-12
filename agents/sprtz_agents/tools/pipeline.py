@@ -548,6 +548,15 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
     # gone, and short-circuiting on the record alone made that unrecoverable:
     # the editor was told playback was ready while the CDN returned 403, and
     # asking for it again did nothing.
+    # What the job was before this started. Packaging is a stage of a run and
+    # also a button an editor presses on a match that finished days ago, and on
+    # that second path "transcoding" is a lie the job would keep telling: the
+    # status is restored at the end. The LeMieux event sat on it overnight —
+    # complete, played back, and reading as a run in progress.
+    was = job.get("status") or ""
+    finished_before = was in ("ready", "complete", "clips_ready", "needs_attention",
+                              "failed", "cancelled")
+
     existing = job.get("playback") or {}
     if existing.get("hlsUrl"):
         check = await mcp_client.call_tool("media", "playback_ready", {"job_id": job_id})
@@ -570,8 +579,12 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
             job_id, "transcode", "Could not start the preview encode.",
             level="error", detail=started.get("error"),
         )
-        # Playback is how the editor reviews suggestions, but the analysis is
-        # still worth having, so this failure does not fail the job.
+        # Playback is how the editor reviews a moment, but the analysis is
+        # still worth having, so this failure does not fail the job — and a
+        # match that was already finished goes back to being finished.
+        if finished_before:
+            await mcp_client.call_tool("catalog", "update_job_status", {
+                "job_id": job_id, "status": was, "stage": "complete", "progress": 100})
         return {"status": "error", "job_id": job_id, "error": started.get("error")}
 
     # The poster comes from one range-read frame, so it is ready long before the
@@ -586,6 +599,9 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
             job_id, "transcode", "The preview encode did not finish.",
             level="error", detail=outcome.get("error") or outcome.get("state"),
         )
+        if finished_before:
+            await mcp_client.call_tool("catalog", "update_job_status", {
+                "job_id": job_id, "status": was, "stage": "complete", "progress": 100})
         return {
             "status": "error", "job_id": job_id,
             "error": outcome.get("error") or f"encode ended in {outcome.get('state')}",
@@ -602,7 +618,13 @@ async def prepare_playback(job_id: str, tool_context: ToolContext) -> dict:
             "segment_seconds": started.get("segment_seconds", 6),
         },
     )
-    await _progress(job_id, "transcode", 1.0)
+    await _progress(job_id, "transcode", 1.0,
+                    status=was if finished_before else "")
+    if finished_before:
+        # ...and the stage it was on, or the strip shows a finished match
+        # sitting in Playback for ever.
+        await mcp_client.call_tool("catalog", "update_job_status", {
+            "job_id": job_id, "status": was, "stage": "complete", "progress": 100})
     await _emit(job_id, "transcode", "Playback ready at 480p.",
                 renditions=started.get("renditions", []))
 

@@ -42,7 +42,7 @@ import {
   shortClock, trim, widen,
 } from './player.js';
 import {
-  countTypesIn, filterByTypes, groupByRide, momentTypesIn, notesForRide,
+  countTypesIn, filterByTypes, groupByRide, momentTypesIn,
   rideNamedIn, rideRank, ridesAsked, sortRideGroups,
 } from './ridegroups.js';
 import {
@@ -2056,7 +2056,6 @@ function ridePanel(ride, p) {
        ${esc(mo.label || mo.momentType || '')} <span>${clock(mo.startSec)}</span></button>`),
   ].join('');
 
-  const notes = notesForRide(state.game?.notConfirmed, ride.segments);
   const incidents = moments.filter((mo) => mo.category === 'incident' || mo.requiresHumanReview);
   // Above the player, the one thing that drives it: the chips that pick what
   // is playing. They used to sit under the ride's score tiles, which put the
@@ -2079,12 +2078,14 @@ function ridePanel(ride, p) {
         r.scoreboard ? `<pre class="source-ref">${esc(r.scoreboard)}</pre>` : ''}`)}
     </section>`;
 
-  // What the analysis found beyond the moments: what it looked for and could
-  // not confirm, and whether anything went wrong in the arena.
+  // What the analysis found beyond the moments: whether anything went wrong
+  // in the arena. There was a "looked for, not confirmed" section above this
+  // one, listing the types the analysis went looking for in this ride's own
+  // windows and could not confirm. It was removed at the editor's request: a
+  // list of things that did not happen is a paragraph of hedging beside the
+  // moments that did, and it was read as doubt about them.
   const reference = `
     <section class="ride-panel">
-      ${notes.length ? panelSection(t('ride.lookedFor'), notes.map((n) => `
-        <div class="panel-line"><b>${esc(n.momentType)}</b> — ${esc(n.notes.join(' '))}</div>`).join('')) : ''}
       ${panelSection(t('ride.incidents'), incidents.length
         ? incidents.map((mo) => `<div class="panel-line"><b>${esc(mo.label || mo.momentType)}</b>
             <span class="mono-soft">${clock(mo.startSec)}</span> — ${esc(mo.summary || '')}</div>`).join('')

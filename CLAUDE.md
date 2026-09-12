@@ -763,6 +763,16 @@ nothing had been asked to package it. The button carries the job id and the
 request quotes it; the root instruction says to use that id rather than ask
 which match is meant.
 
+**Packaging a finished match gives it its status back.** `prepare_playback` is
+a stage of a run *and* a button pressed on a match that finished days ago, and
+on the second path the job's status is not the run's to change: it set
+`transcoding` at the start and never set anything else, so the LeMieux event
+sat overnight reading as a run in progress — complete, playable, and stalled to
+every reader, including the editor's own fifteen-minute rule. It now remembers
+what the job was, and restores it on every way out: the encode finishing, the
+encode failing, and Transcoder refusing to start one. Inside a pipeline run the
+status is the run's, so nothing is restored there.
+
 Packaging is independent of the analysis, so a job can hold moments and have
 nothing to play. `prepare_playback` is a root-agent tool as well as a pipeline
 stage for that reason — re-running a whole analysis to fix playback would be an
@@ -2081,11 +2091,13 @@ Widen or Play from the end re-arms the out point. Under the player: the
 ride, its score tiles (one per judge — the analysis does not split technical
 and artistic marks, so they are not shown), where the score came from, the
 moments as chips that re-aim the player, and the `ffmpeg` cut of what is
-playing. Beside it: what was looked for and not found *in this ride's own
-analysis windows* (the tree's `segments` against the notes' `[segment N]`
-stamps), the incident scan, and the moment's record. The pure parts —
-speeds, widen, the source reference, the notes filter — are in `player.js` and
-`ridegroups.js`, tested. A player with a summary under it scrolls rather than
+playing. Beside it: the incident scan and the moment's record — or the publish
+panel, when Publish has swapped it in. A "looked for, not confirmed" section
+used to sit above the incidents, listing what the analysis went looking for in
+this ride's own windows and could not confirm; it was removed at the editor's
+request, because a list of things that did not happen reads as doubt about the
+ones that did (`notesForRide` went with it). The pure parts — speeds, widen
+and the trim — are in `player.js`, tested. A player with a summary under it scrolls rather than
 sticks, or the summary would slide behind the video on a short screen.
 
 **`get_game` does not carry the rides.** `_game_out` is the game's shape for
