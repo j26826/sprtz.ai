@@ -17,6 +17,7 @@ import datetime
 import json
 from pathlib import Path
 
+from sprtz_agents.schemas import GameDetails
 from sprtz_agents.tools import equipe
 
 HERE = Path(__file__).parent
@@ -309,6 +310,8 @@ class TestTheGameIsUnderGame:
                 return {"status": "success", "rides": [{"rideOrder": 1, "rider": "A"}]}
             if tool == "list_moments":
                 return {"status": "success", "moments": []}
+            if tool == "list_games":
+                return {"status": "success", "games": []}
             raise AssertionError(f"unexpected tool: {tool}")
         return call_tool
 
@@ -317,7 +320,7 @@ class TestTheGameIsUnderGame:
 
         seen = {}
 
-        def classes_for(job, game, context_urls, arena=""):
+        def classes_for(job, game, context_urls, arena="", keep_single=False):
             seen["game"] = game
             return []
 
@@ -529,3 +532,128 @@ class TestASplitMustNotConfirmItself:
             ride, equipe.classes_on(_show(), "2026-09-12", arena=CAMERA))
         assert named is not None and named.class_id == 1278778
         assert score >= equipe.CAPTION_MATCH
+
+
+class TestOneClassIsNotAlwaysNothingToDo:
+    """`_classes_for` returned nothing when a recording held a single class.
+
+    Right for a recording nobody has split: a day that ran one competition is
+    one event, which is what the desk did before any of this existed. Wrong for
+    a recording that is *already* filed under three, because the correction is
+    exactly "this was one class all along" — and a tool that answers it by
+    changing nothing leaves the three wrong events in place for good, however
+    many times it is asked.
+
+    The 12th's afternoon capture is that recording: 14:00 to 17:00 on the ring,
+    every ride in the 13:50 freestyle, and three classes on the desk.
+    """
+
+    def _catalog(self, existing):
+        calls = {"upserts": [], "deletes": []}
+
+        async def call_tool(server, tool, args):
+            if tool == "get_job":
+                return {"status": "success", "job_id": args["job_id"], "contextUrls": []}
+            if tool == "get_game":
+                return {"status": "success", "game": {"jobId": "j", "sport": "equestrian"}}
+            if tool == "list_game_rides":
+                return {"status": "success", "rides": [{"order": 1, "rider": "A"}]}
+            if tool == "list_moments":
+                return {"status": "success", "moments": []}
+            if tool == "list_games":
+                return {"status": "success", "games": existing}
+            if tool == "upsert_game":
+                calls["upserts"].append(args.get("class_id"))
+            if tool == "delete_game":
+                calls["deletes"].append(args.get("class_id", ""))
+            return {"status": "success"}
+        return call_tool, calls
+
+    async def test_a_recording_already_split_collapses_to_its_one_class(self, monkeypatch):
+        from sprtz_agents.tools import pipeline
+
+        call_tool, calls = self._catalog(
+            [{"classId": "1278778"}, {"classId": "1278779"}, {"classId": "1278780"}])
+        monkeypatch.setattr(pipeline.mcp_client, "call_tool", call_tool)
+        monkeypatch.setattr(pipeline, "_tag_moments_with_class",
+                            lambda *a, **k: _noop())
+        monkeypatch.setattr(pipeline, "_published_class", lambda c: None)
+
+        one = equipe.classes_on(_show(), "2026-09-12", arena=CAMERA)[2]
+        run = equipe.ClassRun(show_class=one)
+        run.rides = [{"order": 1}]
+        run.show = None
+        monkeypatch.setattr(pipeline, "_classes_for",
+                            lambda *a, keep_single=False, **k: [run] if keep_single else [])
+
+        out = await pipeline.split_event_classes("j")
+        assert out["status"] == "success"
+        assert [c["class_id"] for c in out["classes"]] == ["1278780"]
+        assert calls["upserts"] == ["1278780"]
+        # The two it no longer holds go, and so does any whole-day record.
+        assert sorted(x for x in calls["deletes"] if x) == ["1278778", "1278779"]
+
+    async def test_a_recording_nobody_split_is_still_left_alone(self, monkeypatch):
+        from sprtz_agents.tools import pipeline
+
+        call_tool, calls = self._catalog([])
+        monkeypatch.setattr(pipeline.mcp_client, "call_tool", call_tool)
+        seen = {}
+
+        def classes_for(*a, keep_single=False, **k):
+            seen["keep_single"] = keep_single
+            return []
+        monkeypatch.setattr(pipeline, "_classes_for", classes_for)
+
+        out = await pipeline.split_event_classes("j")
+        assert seen["keep_single"] is False
+        assert out["status"] == "idle"
+        assert calls["upserts"] == []
+
+
+async def _noop():
+    return None
+
+
+class TestTheSingleClassGate:
+    """The line that decides it, tested on its own.
+
+    The two tests above stub `_classes_for` to pin what `split_event_classes`
+    does with its answer; this pins the answer.
+    """
+
+    def _stub(self, monkeypatch, run):
+        from sprtz_agents.tools import pipeline
+
+        show = _show()
+        monkeypatch.setattr(pipeline.equipe, "find_classes",
+                            lambda **k: (show, [run.show_class]))
+        monkeypatch.setattr(pipeline.equipe, "entrants_for", lambda c: [])
+        monkeypatch.setattr(pipeline.equipe, "assign_classes", lambda *a, **k: [run])
+        monkeypatch.setattr(pipeline.equipe, "recording_started", lambda job: None)
+        return pipeline
+
+    def _run(self):
+        one = equipe.classes_on(_show(), "2026-09-12", arena=CAMERA)[2]
+        run = equipe.ClassRun(show_class=one)
+        run.rides = [{"order": 1}]
+        return run
+
+    def test_one_class_is_nothing_to_do_by_default(self, monkeypatch):
+        run = self._run()
+        pipeline = self._stub(monkeypatch, run)
+        game = GameDetails.model_validate({"job_id": "j", "sport": "equestrian", "rides": []})
+        assert pipeline._classes_for({"arena": CAMERA}, game, []) == []
+
+    def test_and_is_the_whole_correction_when_asked_to_keep_it(self, monkeypatch):
+        run = self._run()
+        pipeline = self._stub(monkeypatch, run)
+        game = GameDetails.model_validate({"job_id": "j", "sport": "equestrian", "rides": []})
+        kept = pipeline._classes_for({"arena": CAMERA}, game, [], keep_single=True)
+        assert [r.show_class.class_id for r in kept] == [1278780]
+
+    def test_no_classes_at_all_is_still_nothing(self, monkeypatch):
+        from sprtz_agents.tools import pipeline
+        monkeypatch.setattr(pipeline.equipe, "find_classes", lambda **k: (None, []))
+        game = GameDetails.model_validate({"job_id": "j", "sport": "equestrian", "rides": []})
+        assert pipeline._classes_for({"arena": CAMERA}, game, [], keep_single=True) == []
