@@ -12,8 +12,25 @@
 # and the refresh token that comes back lives in Firestore, because it changes
 # without a deploy and belongs to whoever granted it.
 
+locals {
+  # Whether a client secret was supplied — and deliberately *not* sensitive.
+  #
+  # `youtube_oauth_client_secret` is declared sensitive, and every value
+  # derived from a sensitive one carries the mark with it. A marked value
+  # cannot be iterated, so a `dynamic` block fed one fails at apply with
+  # "Cannot use a set of string value in for_each. An iterable collection is
+  # required" — a message about the type, for a problem that has nothing to do
+  # with the type: it says the same thing about a list of numbers. `count` is
+  # refused for the same reason. `terraform validate` passes either way, so
+  # this only ever surfaces halfway through a deploy.
+  #
+  # Whether a secret exists is not itself a secret, which is what `nonsensitive`
+  # is for. The secret's *value* stays marked and never leaves Secret Manager.
+  youtube_configured = nonsensitive(var.youtube_oauth_client_secret != "")
+}
+
 resource "google_secret_manager_secret" "youtube_client_secret" {
-  count     = var.youtube_oauth_client_secret != "" ? 1 : 0
+  count     = local.youtube_configured ? 1 : 0
   project   = var.project_id
   secret_id = "${local.prefix}-youtube-client-secret"
 
@@ -25,7 +42,7 @@ resource "google_secret_manager_secret" "youtube_client_secret" {
 }
 
 resource "google_secret_manager_secret_version" "youtube_client_secret" {
-  count       = var.youtube_oauth_client_secret != "" ? 1 : 0
+  count       = local.youtube_configured ? 1 : 0
   secret      = google_secret_manager_secret.youtube_client_secret[0].id
   secret_data = var.youtube_oauth_client_secret
 }
@@ -34,7 +51,7 @@ resource "google_secret_manager_secret_version" "youtube_client_secret" {
 # service exchanges that refresh token for an access token on every upload.
 # Both need the client secret, and neither should hold a copy of it.
 resource "google_secret_manager_secret_iam_member" "api_reads_youtube_secret" {
-  count     = var.youtube_oauth_client_secret != "" ? 1 : 0
+  count     = local.youtube_configured ? 1 : 0
   project   = var.project_id
   secret_id = google_secret_manager_secret.youtube_client_secret[0].secret_id
   role      = "roles/secretmanager.secretAccessor"
@@ -42,7 +59,7 @@ resource "google_secret_manager_secret_iam_member" "api_reads_youtube_secret" {
 }
 
 resource "google_secret_manager_secret_iam_member" "media_reads_youtube_secret" {
-  count     = var.youtube_oauth_client_secret != "" ? 1 : 0
+  count     = local.youtube_configured ? 1 : 0
   project   = var.project_id
   secret_id = google_secret_manager_secret.youtube_client_secret[0].secret_id
   role      = "roles/secretmanager.secretAccessor"

@@ -181,10 +181,11 @@ resource "google_cloud_run_v2_service" "mcp_media" {
       # when someone connects a channel in Settings. Only the client is
       # deployment configuration.
       dynamic "env" {
-        # toset, not a bare list: a dynamic block's for_each will not take a
-        # list of numbers, and `terraform validate` does not catch it — the
-        # apply does, halfway through a deploy.
-        for_each = var.youtube_oauth_client_secret != "" ? toset(["youtube"]) : toset([])
+        # `local.youtube_configured`, not the variable: a value derived from a
+        # sensitive one carries the mark, and a marked value cannot be
+        # iterated. See the local's own comment — the error names the type and
+        # means the mark.
+        for_each = local.youtube_configured ? toset(["youtube"]) : toset([])
         content {
           name = "YOUTUBE_CLIENT_SECRET"
           value_source {
@@ -298,10 +299,11 @@ resource "google_cloud_run_v2_service" "api" {
         value = local.youtube_redirect_uri
       }
       dynamic "env" {
-        # toset, not a bare list: a dynamic block's for_each will not take a
-        # list of numbers, and `terraform validate` does not catch it — the
-        # apply does, halfway through a deploy.
-        for_each = var.youtube_oauth_client_secret != "" ? toset(["youtube"]) : toset([])
+        # `local.youtube_configured`, not the variable: a value derived from a
+        # sensitive one carries the mark, and a marked value cannot be
+        # iterated. See the local's own comment — the error names the type and
+        # means the mark.
+        for_each = local.youtube_configured ? toset(["youtube"]) : toset([])
         content {
           name = "YOUTUBE_CLIENT_SECRET"
           value_source {
