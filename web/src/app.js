@@ -905,10 +905,10 @@ function pagerRow(view, index) {
   if (view.total <= view.size) return '';
   return `
     <div class="pager">
-      <button class="link-btn" data-page="${index}:${view.current - 1}"
+      <button class="btn-quiet btn-step" data-page="${index}:${view.current - 1}"
               ${view.current === 0 ? 'disabled' : ''}>${esc(t('pager.previous'))}</button>
       <div class="pager-count">${view.from}–${view.to} ${esc(t('pager.of'))} ${view.total}</div>
-      <button class="link-btn" data-page="${index}:${view.current + 1}"
+      <button class="btn-quiet btn-step" data-page="${index}:${view.current + 1}"
               ${view.current >= view.pages - 1 ? 'disabled' : ''}>${esc(t('pager.next'))}</button>
     </div>`;
 }
@@ -1790,10 +1790,10 @@ function detailActions() {
   const busy = state.share?.status === 'sending';
   const publishing = state.share?.mode === 'publish';
   return `
-    <button class="btn-outline detail-action" data-detail-act="download" ${
+    <button class="btn-quiet detail-action" data-detail-act="download" ${
       state.share?.downloading ? 'disabled' : ''}>${
       esc(state.share?.downloading ? t('share.preparing') : t('share.download'))}</button>
-    <button class="btn-accent detail-action" data-detail-act="publish"
+    <button class="btn-primary detail-action" data-detail-act="publish"
             aria-pressed="${publishing}" ${busy ? 'disabled' : ''}>${esc(t('share.publish'))}</button>`;
 }
 
