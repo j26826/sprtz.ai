@@ -3139,3 +3139,21 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 .trim-len { color: var(--color-accent-700) !important; }
 .trim-reset { margin-left: auto; }
+
+/* The strip's head carries the nudge step, since that is the fine end of the
+   same control the handles are the coarse end of. */
+.trim-card-head-right { display: inline-flex; align-items: center; gap: var(--space-3); }
+.reel-cuts-total {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent-700);
+}
+/* A row says it was trimmed; the strip above says by how much. */
+.reel-edge-trimmed {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}

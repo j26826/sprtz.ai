@@ -2040,6 +2040,12 @@ def plan_cut(job_id: str, moment_id: str,
         "end_sec": end,
         "start_ms": round(start * 1000),
         "end_ms": round(end * 1000),
+        # What the analysis actually found, carried alongside what was asked
+        # for. The editor shows the two together so a trim can be seen as a
+        # trim and put back; without this the detected range is only knowable
+        # by reading the moment again.
+        "detected_start_ms": round(float(moment.get("start_sec") or 0.0) * 1000),
+        "detected_end_ms": round(float(moment.get("end_sec") or 0.0) * 1000),
         "label": moment.get("label", ""),
         "summary": moment.get("summary", ""),
     }
@@ -2105,6 +2111,11 @@ def _cut_out(cut: dict[str, Any], order: int) -> dict[str, Any]:
         "startMs": start,
         "endMs": end,
         "label": str(cut.get("label") or ""),
+        # What the analysis found, so the editor can show a trim as a trim.
+        # Absent on a cut written before this existed, which the editor reads
+        # as "not trimmed" rather than guessing.
+        "detectedStartMs": int(cut.get("detectedStartMs") or start),
+        "detectedEndMs": int(cut.get("detectedEndMs") or end),
         # Which match this came from, denormalised so a reel row can name its
         # sources without reading every job.
         "jobTitle": str(cut.get("jobTitle") or ""),

@@ -31,8 +31,8 @@ import { chooseCard, wantsDetail } from './cards.js';
 import { currentTurn } from './transcript.js';
 import { humanMessage, jobFailure } from './errors.js';
 import {
-  MIN_CUT_MS, isPickedIn, matchCount, moveCut, msAt, msClock, nextCut, nudge,
-  pastEnd, pickKey, pctOf, reelLength, rulerTicks, togglePicked, trimWindow,
+  MIN_CUT_MS, isPickedIn, isTrimmed, matchCount, moveCut, msAt, msClock, nextCut,
+  nudge, pastEnd, pickKey, pctOf, reelLength, rulerTicks, togglePicked, trimWindow,
 } from './reels.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
@@ -1987,29 +1987,57 @@ const TRIM_FRAMES = 9;
 function trimPanel(p) {
   if (!p?.moment) return '';
   const m = p.moment;
-  const detected = { startMs: Math.round(m.startSec * 1000), endMs: Math.round(m.endSec * 1000) };
-  const cut = { startMs: Math.round(p.start * 1000), endMs: Math.round(p.end * 1000), ...detected ? {} : {} };
-  const win = trimWindow(detected.startMs, detected.endMs);
-  const left = pctOf(cut.startMs, win);
-  const right = pctOf(cut.endMs, win);
-  const moved = cut.startMs !== detected.startMs || cut.endMs !== detected.endMs;
-  const thumb = state.thumbs.urls[m.momentId];
+  return trimStrip({
+    startMs: Math.round(p.start * 1000),
+    endMs: Math.round(p.end * 1000),
+    detectedStartMs: Math.round(m.startSec * 1000),
+    detectedEndMs: Math.round(m.endSec * 1000),
+    thumb: state.thumbs.urls[m.momentId],
+    scope: 'player',
+  });
+}
+
+/**
+ * The strip itself, drawn for whichever cut is being trimmed.
+ *
+ * One renderer for both dialogs. The moment player trims the range about to be
+ * added to a reel; the reel editor trims one already in it. They are the same
+ * gesture on the same kind of thing, and two strips that drifted apart would
+ * be two answers to "where do I drag".
+ *
+ * `scope` is what tells the handlers which one they are on: the player writes
+ * through `state.playing`, the editor through the reel's cuts.
+ */
+function trimStrip({ startMs, endMs, detectedStartMs, detectedEndMs, thumb, scope, index = 0 }) {
+  const win = trimWindow(detectedStartMs, detectedEndMs);
+  const left = pctOf(startMs, win);
+  const right = pctOf(endMs, win);
+  const moved = startMs !== detectedStartMs || endMs !== detectedEndMs;
+  const at = scope === 'cut' ? `${index}:` : '';
 
   return `
     <div class="trim-card">
       <div class="trim-card-head">
         <span class="panel-label">${esc(t('trim.title'))}</span>
-        <span class="trim-hint">${esc(t('trim.hint'))}</span>
+        <span class="trim-card-head-right">
+          <span class="trim-hint">${esc(t('trim.hint'))}</span>
+          <span class="segmented" role="group" aria-label="${esc(t('reel.nudge'))}">
+            ${NUDGE_MS.map((ms) => `
+              <button class="seg-btn" data-reel-step="${ms}"
+                      aria-pressed="${ms === (state.reelPlay?.step ?? NUDGE_MS[0])}">${
+  ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`}</button>`).join('')}
+          </span>
+        </span>
       </div>
 
-      <div class="trim-strip" data-trim-strip>
+      <div class="trim-strip" data-trim-strip="${esc(scope)}:${index}">
         ${Array.from({ length: TRIM_FRAMES }, (_, i) => `
           <span class="trim-frame"${thumb ? ` style="background-image:url(${esc(thumb)})"` : ''}
                 aria-hidden="true" data-n="${i}"></span>`).join('')}
         <span class="trim-selection" style="left:${left}%;width:${Math.max(0, right - left)}%">
-          <button class="trim-handle trim-handle-in" data-trim-grab="start"
+          <button class="trim-handle trim-handle-in" data-trim-grab="${esc(scope)}:${index}:start"
                   aria-label="${esc(t('trim.dragIn'))}"><span class="grip" aria-hidden="true"></span></button>
-          <button class="trim-handle trim-handle-out" data-trim-grab="end"
+          <button class="trim-handle trim-handle-out" data-trim-grab="${esc(scope)}:${index}:end"
                   aria-label="${esc(t('trim.dragOut'))}"><span class="grip" aria-hidden="true"></span></button>
         </span>
       </div>
@@ -2018,24 +2046,21 @@ function trimPanel(p) {
       </div>
 
       <div class="trim-readout">
-        <span class="trim-edge-box">
-          <span class="field-label">${esc(t('reel.start'))}</span>
-          <button class="link-btn" data-trim="start:-1" aria-label="${esc(t('reel.earlier'))}">&minus;</button>
-          <span class="trim-at">${esc(msClock(cut.startMs))}</span>
-          <button class="link-btn" data-trim="start:1" aria-label="${esc(t('reel.later'))}">+</button>
-        </span>
-        <span class="trim-edge-box">
-          <span class="field-label">${esc(t('reel.end'))}</span>
-          <button class="link-btn" data-trim="end:-1" aria-label="${esc(t('reel.earlier'))}">&minus;</button>
-          <span class="trim-at">${esc(msClock(cut.endMs))}</span>
-          <button class="link-btn" data-trim="end:1" aria-label="${esc(t('reel.later'))}">+</button>
-        </span>
+        ${['start', 'end'].map((edge) => `
+          <span class="trim-edge-box">
+            <span class="field-label">${esc(t(`reel.${edge}`))}</span>
+            <button class="link-btn" data-${scope === 'cut' ? 'reel-trim' : 'trim'}="${at}${edge}:-1"
+                    aria-label="${esc(t('reel.earlier'))}">&minus;</button>
+            <span class="trim-at">${esc(msClock(edge === 'start' ? startMs : endMs))}</span>
+            <button class="link-btn" data-${scope === 'cut' ? 'reel-trim' : 'trim'}="${at}${edge}:1"
+                    aria-label="${esc(t('reel.later'))}">+</button>
+          </span>`).join('')}
         <span class="trim-ranges">
-          <span>${esc(t('trim.detected'))} <b>${esc(msClock(detected.endMs - detected.startMs))}</b></span>
-          <span>${esc(t('trim.trimmed'))} <b class="trim-len">${
-  esc(msClock(cut.endMs - cut.startMs))}</b></span>
+          <span>${esc(t('trim.detected'))} <b>${esc(msClock(detectedEndMs - detectedStartMs))}</b></span>
+          <span>${esc(t('trim.trimmed'))} <b class="trim-len">${esc(msClock(endMs - startMs))}</b></span>
         </span>
-        ${moved ? `<button class="link-btn trim-reset" data-trim-reset>${
+        ${moved ? `<button class="link-btn trim-reset" data-${
+    scope === 'cut' ? `reel-trim-reset="${index}"` : 'trim-reset'}>${
     esc(t('trim.reset'))}</button>` : ''}
       </div>
     </div>`;
@@ -2055,33 +2080,62 @@ function onTrimPointerDown(event) {
   // the obvious way here silently blanks the selector and fails every button
   // in the app.
   const el = event.target;
-  const handle = el.closest('[data-trim-grab]');
+  const handle = el.closest?.('[data-trim-grab]');
   if (!handle) return;
   const strip = handle.closest('[data-trim-strip]');
-  const p = state.playing;
-  if (!strip || !p?.moment) return;
+  if (!strip) return;
+  const [scope, indexRaw, edge] = handle.dataset.trimGrab.split(':');
+  const index = Number(indexRaw);
   event.preventDefault();
 
-  const edge = handle.dataset.trimGrab;
-  const win = trimWindow(Math.round(p.moment.startSec * 1000), Math.round(p.moment.endSec * 1000));
+  const onPlayer = scope === 'player';
+  const p = state.playing;
+  const cut = onPlayer ? null : state.reel?.cuts?.[index];
+  if (onPlayer ? !p?.moment : !cut) return;
+
+  const win = onPlayer
+    ? trimWindow(Math.round(p.moment.startSec * 1000), Math.round(p.moment.endSec * 1000))
+    : trimWindow(cut.detectedStartMs ?? cut.startMs, cut.detectedEndMs ?? cut.endMs);
+
+  // Held here and written once on release. A PATCH per pointer move would be
+  // a hundred requests a drag, and each one re-plans every cut in the reel.
+  let atMs = null;
 
   const move = (ev) => {
     const box = strip.getBoundingClientRect();
-    const at = msAt((ev.clientX - box.left) / (box.width || 1), win);
-    const next = edge === 'start'
-      ? { start: Math.min(at, p.end * 1000 - MIN_CUT_MS) / 1000, end: p.end }
-      : { start: p.start, end: Math.max(at, p.start * 1000 + MIN_CUT_MS) / 1000 };
-    Object.assign(p, next, { full: false, free: false });
-    renderDetailsBody();
-    syncPlayer();
+    atMs = msAt((ev.clientX - box.left) / (box.width || 1), win);
+    if (onPlayer) {
+      const next = edge === 'start'
+        ? { start: Math.min(atMs, p.end * 1000 - MIN_CUT_MS) / 1000, end: p.end }
+        : { start: p.start, end: Math.max(atMs, p.start * 1000 + MIN_CUT_MS) / 1000 };
+      Object.assign(p, next, { full: false, free: false });
+      renderDetailsBody();
+      syncPlayer();
+    } else {
+      // Draw against the reel's own copy so the strip follows the pointer,
+      // and save what it settles on.
+      const cuts = state.reel.cuts.map((c) => ({ ...c }));
+      cuts[index] = edge === 'start'
+        ? { ...cuts[index], startMs: Math.min(atMs, cuts[index].endMs - MIN_CUT_MS) }
+        : { ...cuts[index], endMs: Math.max(atMs, cuts[index].startMs + MIN_CUT_MS) };
+      state.reel = { ...state.reel, cuts };
+      renderReelEditor();
+    }
   };
+
   const up = () => {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    // Land the playhead on what was just chosen, so the edge can be judged.
-    const video = playerEl?.querySelector('video');
-    if (video) { video.currentTime = edge === 'start' ? p.start : Math.max(p.start, p.end - 1.5); }
+    if (atMs === null) return;
+    if (onPlayer) {
+      // Land the playhead on what was just chosen, so the edge can be judged.
+      const video = playerEl?.querySelector('video');
+      if (video) video.currentTime = edge === 'start' ? p.start : Math.max(p.start, p.end - 1.5);
+    } else {
+      saveReelCuts(state.reel.cuts);
+    }
   };
+
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
 }
@@ -3521,6 +3575,7 @@ function deskMomentsCard(msg, index) {
       </div>
       <div class="tile-row">${rows.map((row, k) =>
         momentTile(camel(row), { game: row.game || {}, open: `${index}:${k}` })).join('')}</div>
+      ${reelBar()}
       ${note}
     </div>`;
 }
@@ -4772,6 +4827,7 @@ let reelUrls = {};
 let reelHls = null;
 let reelVideo = null;
 let reelLoadedJob = null;
+let reelPreviewError = '';
 
 // How far a nudge moves an edge. Milliseconds, because that is what a cut is
 // stored in; 1s to find the moment, 100ms to land on it.
@@ -4879,6 +4935,7 @@ function closeReelEditor() {
   if (reelHls) { reelHls.destroy(); reelHls = null; }
   reelVideo = null;
   reelLoadedJob = null;
+  reelPreviewError = '';
   reelUrls = {};
   state.reel = null;
   state.reelPlay = null;
@@ -4915,7 +4972,23 @@ function reelActions(reel) {
 
 function reelMeta(reel) {
   const matches = matchCount(reel.cuts);
+  const at = state.reelPlay?.at ?? 0;
+  const cut = reel.cuts[at];
+  // One strip, for the cut in hand, rather than fifty down the list: the list
+  // is the running order and the strip is the close work, and a filmstrip on
+  // every row would make neither readable.
+  const strip = cut ? trimStrip({
+    startMs: cut.startMs,
+    endMs: cut.endMs,
+    detectedStartMs: cut.detectedStartMs ?? cut.startMs,
+    detectedEndMs: cut.detectedEndMs ?? cut.endMs,
+    thumb: state.thumbs.urls[cut.momentId],
+    scope: 'cut',
+    index: at,
+  }) : '';
   return `
+    ${reelPreviewError ? `<div class="error-note">${esc(reelPreviewError)}</div>` : ''}
+    ${strip}
     <div class="reel-meta">
       <label class="field-label" for="reel-name">${esc(t('reel.name'))}</label>
       <input class="input" id="reel-name" maxlength="100" data-reel-field="title"
@@ -4933,15 +5006,10 @@ function reelCutList(reel) {
   if (!reel.cuts.length) {
     return `<div class="ride-group-empty">${esc(t('reel.noCuts'))}</div>`;
   }
-  const step = state.reelPlay?.step ?? NUDGE_MS[0];
   return `
     <div class="reel-cuts-head">
       <span class="panel-label">${esc(t('reel.order'))}</span>
-      <span class="segmented" role="group" aria-label="${esc(t('reel.nudge'))}">
-        ${NUDGE_MS.map((ms) => `
-          <button class="seg-btn" data-reel-step="${ms}" aria-pressed="${ms === step}">${
-  ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`}</button>`).join('')}
-      </span>
+      <span class="reel-cuts-total">${esc(msClock(reelLength(reel.cuts)))}</span>
     </div>
     ${reel.cuts.map((c, i) => reelCutRow(c, i, reel.cuts.length)).join('')}`;
 }
@@ -4959,15 +5027,15 @@ function reelCutRow(cut, i, total) {
         <span class="reel-cut-len">${esc(msClock(cut.endMs - cut.startMs))}</span>
       </div>
       <div class="reel-cut-edges">
-        ${['start', 'end'].map((edge) => `
-          <span class="reel-edge">
-            <span class="reel-edge-label">${esc(t(`reel.${edge}`))}</span>
-            <button class="link-btn" data-reel-trim="${i}:${edge}:-1"
-                    aria-label="${esc(t('reel.earlier'))}">&minus;</button>
-            <span class="reel-edge-at">${esc(msClock(edge === 'start' ? cut.startMs : cut.endMs))}</span>
-            <button class="link-btn" data-reel-trim="${i}:${edge}:1"
-                    aria-label="${esc(t('reel.later'))}">+</button>
-          </span>`).join('')}
+        <span class="reel-edge">
+          <span class="reel-edge-label">${esc(t('reel.start'))}</span>
+          <span class="reel-edge-at">${esc(msClock(cut.startMs))}</span>
+        </span>
+        <span class="reel-edge">
+          <span class="reel-edge-label">${esc(t('reel.end'))}</span>
+          <span class="reel-edge-at">${esc(msClock(cut.endMs))}</span>
+        </span>
+        ${isTrimmed(cut) ? `<span class="reel-edge-trimmed">${esc(t('trim.trimmed'))}</span>` : ''}
       </div>
       <div class="reel-cut-move">
         <button class="btn-ghost btn-step" data-reel-move="${i}:-1" ${i === 0 ? 'disabled' : ''}
@@ -5023,6 +5091,15 @@ function reelTrim(i, edge, dir) {
   const cut = cuts[i];
   if (!cut) return;
   cuts[i] = nudge(cut, edge, (state.reelPlay?.step ?? NUDGE_MS[0]) * dir);
+  saveReelCuts(cuts);
+}
+
+/** Put one cut back to the range the analysis found. */
+function reelResetCut(i) {
+  const cuts = state.reel.cuts.map((c) => ({ ...c }));
+  const cut = cuts[i];
+  if (!cut || cut.detectedStartMs == null) return;
+  cuts[i] = { ...cut, startMs: cut.detectedStartMs, endMs: cut.detectedEndMs };
   saveReelCuts(cuts);
 }
 
@@ -5087,6 +5164,7 @@ function onReelTick() {
 async function playReelCut(i) {
   const cut = state.reel?.cuts?.[i];
   if (!cut || !reelVideo) return;
+  reelPreviewError = '';
   state.reelPlay = { ...(state.reelPlay || {}), at: i, playing: true };
   renderReelEditor();
   try {
@@ -5107,7 +5185,11 @@ async function playReelCut(i) {
     reelVideo.currentTime = cut.startMs / 1000;
     await reelVideo.play();
   } catch (err) {
-    $('reel-under').innerHTML = `<div class="error-note">${esc(humanError(err, 'reel.previewFailed'))}</div>`;
+    // Held in state and rendered by reelMeta, never written straight into
+    // #reel-under: that region also holds the trim strip and the reel's name,
+    // and a preview that failed is no reason to take the editing controls away.
+    reelPreviewError = humanError(err, 'reel.previewFailed');
+    renderReelEditor();
   }
 }
 
@@ -5825,7 +5907,7 @@ document.addEventListener('click', (event) => {
     + '[data-pick],[data-pick-clear],[data-reel-build],[data-reel-append],'
     // Dragged rather than clicked, but it is a <button> and the check
     // rightly wants to know something handles it.
-    + '[data-trim-grab],'
+    + '[data-trim-grab],[data-reel-trim-reset],'
     + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
     + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
     + '[data-job-events]');
@@ -6009,6 +6091,10 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.reelTrim) {
     const [i, edge, dir] = hit.dataset.reelTrim.split(':');
     reelTrim(Number(i), edge, Number(dir));
+    return;
+  }
+  if (hit.dataset.reelTrimReset !== undefined) {
+    reelResetCut(Number(hit.dataset.reelTrimReset));
     return;
   }
   if (hit.dataset.reelMove) {
@@ -6293,6 +6379,7 @@ $('close-reel')?.addEventListener('click', closeReelEditor);
 // pointer move, so a listener on a handle would be removed out from under
 // the gesture that started it.
 $('details')?.addEventListener('pointerdown', onTrimPointerDown);
+$('reel')?.addEventListener('pointerdown', onTrimPointerDown);
 $('reel')?.addEventListener('click', (event) => {
   if (event.target.id === 'reel') closeReelEditor();
 });

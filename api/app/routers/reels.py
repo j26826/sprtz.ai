@@ -103,6 +103,10 @@ async def _plan(cuts: list[CutIn]) -> list[dict]:
             "momentId": cut.moment_id,
             "startMs": result["start_ms"],
             "endMs": result["end_ms"],
+            # What the analysis found, beside what was asked for, so the editor
+            # can show a trim as a trim and offer the way back.
+            "detectedStartMs": result.get("detected_start_ms", result["start_ms"]),
+            "detectedEndMs": result.get("detected_end_ms", result["end_ms"]),
             "label": result.get("label") or "",
         })
     return planned
