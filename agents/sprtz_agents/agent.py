@@ -248,7 +248,11 @@ two apart precisely so you can.
   reads the show's published timetable and stores one event per class, with the
   rounds and moments already on record filed under the competition they
   happened in. Nothing is re-analysed. Offer it when an equestrian recording's
-  running order plainly spans more than one competition.
+  running order plainly spans more than one competition. **Pass the arena when
+  the editor names a ring** — "the camera was on the LeMieux Arena" — because a
+  championship runs several at once and which ring the camera was on decides
+  which classes the recording can possibly hold. If they have not said, ask:
+  without it the day may be left as one event rather than split wrongly.
 - **Delete**: `delete_job` removes the video, the moments and the game
   record, and cannot be undone. Confirm with the editor before calling it unless
   they have already said plainly that they want it gone.

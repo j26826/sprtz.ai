@@ -1053,7 +1053,8 @@ async def record_game_facts(
         logger.warning("could not write the interim game record for %s", job_id, exc_info=True)
 
 
-def _classes_for(job: dict, game: GameDetails, context_urls: list[str]) -> list[Any]:
+def _classes_for(job: dict, game: GameDetails, context_urls: list[str],
+                 arena: str = "") -> list[Any]:
     """The competitions a recording turned out to hold.
 
     Empty when it held one, which is every handball match and every day that
@@ -1070,7 +1071,10 @@ def _classes_for(job: dict, game: GameDetails, context_urls: list[str]) -> list[
         # arenas it never pointed at. Thirty-one of thirty-six were, on the
         # twelfth. What someone typed on the booking wins; failing that the
         # scoreboards are asked, and failing that the day stays one event.
-        arena = str(job.get("arena") or "")
+        # What the caller named wins over what the booking said: a recording
+        # made before the booking had an arena field cannot be corrected at the
+        # booking, because a booking is frozen once its recorder has started.
+        arena = arena or str(job.get("arena") or "")
         show, classes = equipe.find_classes(
             job=job, context_urls=context_urls or [], arena=arena,
             competition=game.competition or game.title, discipline=game.discipline)
@@ -1384,7 +1388,7 @@ async def _store_classes(job_id: str, game: GameDetails, runs: list[Any],
                 classes=len(runs))
 
 
-async def split_event_classes(job_id: str) -> dict:
+async def split_event_classes(job_id: str, arena: str = "") -> dict:
     """Split a recording that was stored as one event into the classes it held.
 
     A live URL points at an arena, and the camera runs through class after
@@ -1398,8 +1402,19 @@ async def split_event_classes(job_id: str) -> dict:
     are the ones already on record, filed under the competition they happened
     in. A recording that held one class is left exactly as it is.
 
+    **Which ring the camera was on decides which classes it can possibly
+    hold.** A championship runs several arenas at once and a fixed camera
+    points at one, so without a ring the day's rounds get filed under classes
+    in arenas the camera never saw. Pass the arena when the editor names one —
+    "the camera was on the LeMieux Arena". Without it the scoreboards are read
+    instead, and a showground of several rings that they cannot settle is left
+    as one event rather than split by a guess.
+
     Args:
         job_id: Identifier of the recording to split.
+        arena: The ring the camera was on, as the show names it, for example
+            "LeMieux Arena". Empty reads the recording's own booking, then the
+            scoreboards.
 
     Returns:
         dict naming the classes it was split into, or saying why it was not.
@@ -1428,11 +1443,13 @@ async def split_event_classes(job_id: str) -> dict:
                 "message": "Only a competition day is split into classes, and this has no rounds."}
 
     moments = [Moment.model_validate(m) for m in _moments_from(stored)]
-    runs = _classes_for(job, game, list(job.get("contextUrls") or []))
+    runs = _classes_for(job, game, list(job.get("contextUrls") or []), arena=arena)
     if not runs:
         return {"status": "idle", "job_id": job_id,
-                "message": ("This recording covers one class, or its show could not be found "
-                            "on the published timetable. Nothing was changed.")}
+                "message": ("Nothing was changed. Either this recording covers one class, or "
+                            "its show could not be found on the published timetable, or the "
+                            "show ran several arenas at once and nothing said which one the "
+                            "camera was on — in that last case, say which ring and ask again.")}
 
     await _store_classes(job_id, game, runs, moments)
     return {
