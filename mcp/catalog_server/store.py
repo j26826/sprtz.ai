@@ -217,8 +217,14 @@ def delete_job(job_id: str) -> dict[str, Any]:
     for name in ("moments", "clips", "events", "chunks"):
         removed[name] = _delete_collection(job_ref(job_id).collection(name))
 
-    game = game_ref(job_id).get()
-    if game.exists:
+    # Every game record of this job: a recording split into its classes has
+    # one per class, and a delete that took only the first would leave the
+    # rest unreachable, still indexed, and still on the desk for a job that no
+    # longer exists.
+    for doc in game_docs(job_id) or []:
+        doc.reference.delete()
+        removed["game"] += 1
+    if not removed["game"] and game_ref(job_id).get().exists:
         game_ref(job_id).delete()
         removed["game"] = 1
 
@@ -256,9 +262,15 @@ def clear_analysis(job_id: str) -> dict[str, Any]:
         # Left behind by a job analysed before clip generation was withdrawn.
         "clips": _delete_collection(job_ref(job_id).collection("clips")),
     }
-    if game_ref(job_id).get().exists:
+    cleared = 0
+    for doc in game_docs(job_id) or []:
+        doc.reference.delete()
+        cleared += 1
+    if not cleared and game_ref(job_id).get().exists:
         game_ref(job_id).delete()
-        removed["game"] = 1
+        cleared = 1
+    if cleared:
+        removed["game"] = cleared
 
     job_ref(job_id).update({
         "counts": {"moments": 0},
@@ -308,12 +320,71 @@ def cancel_requested(job_id: str) -> bool:
 # inside it share most of their vocabulary.
 
 
-def game_ref(job_id: str):
-    return db().collection("games").document(job_id)
+# A recording is not a competition. A live URL points at an arena, and the
+# camera runs through class after class — so one job can hold several events,
+# and each of them is a game record of its own: its own name, judges, start
+# list, rides and Equipe page.
+#
+# The id says which: `{job}` while a recording holds one competition, which is
+# every handball match and every single-class day, and `{job}__{classId}` once
+# it holds more. Nothing already on the desk changes id, so nothing needs
+# migrating and the single-game path is exactly what it was.
+CLASS_SEPARATOR = "__"
 
 
-def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict[str, Any]:
-    """Write the match-level record with its own embedding."""
+def game_id(job_id: str, class_id: str | int = "") -> str:
+    """The document id for one job's game, or for one class of it."""
+    return f"{job_id}{CLASS_SEPARATOR}{class_id}" if class_id else job_id
+
+
+def game_ref(job_id: str, class_id: str | int = ""):
+    return db().collection("games").document(game_id(job_id, class_id))
+
+
+def job_of(game_doc_id: str) -> str:
+    """The job a game document belongs to, from its id."""
+    return str(game_doc_id).split(CLASS_SEPARATOR, 1)[0]
+
+
+def game_docs(job_id: str) -> list[Any]:
+    """Every game document of one job, in the order the classes ran.
+
+    Read by the `jobId` field rather than by guessing ids: the field is written
+    on every record, and a query answers whether a recording was split without
+    the caller having to know the class ids to ask for.
+    """
+    from google.cloud import firestore
+
+    docs = list(db().collection("games")
+                .where(filter=firestore.FieldFilter("jobId", "==", job_id)).stream())
+    return sorted(docs, key=_class_order)
+
+
+def _class_order(doc: Any) -> tuple:
+    data = doc.to_dict() or {}
+    # By when the class was due, then by the id, so the order is the running
+    # order and is stable for two classes with the same start.
+    return (str(data.get("classStartAt") or ""), str(doc.id))
+
+
+def canonical_game(job_id: str) -> str:
+    """The class a question about the whole recording is answered by.
+
+    The first to run. A recording that was never split is its own answer, and
+    this is what every reader that knows only a job id falls back to.
+    """
+    docs = game_docs(job_id)
+    return docs[0].id if docs else job_id
+
+
+def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "",
+                class_id: str | int = "") -> dict[str, Any]:
+    """Write the match-level record with its own embedding.
+
+    ``class_id`` names one competition inside a recording that held several.
+    Empty is the whole recording, which is every sport but equestrian and every
+    day that ran one class.
+    """
     from google.cloud.firestore_v1.vector import Vector
 
     owner_uid = get_job(job_id).get("ownerUid", "")
@@ -379,11 +450,22 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "") -> dict
         "groundedAwayTeam": game.get("grounded_away_team", ""),
         "matchDate": game.get("match_date", ""),
         "groundingSources": game.get("grounding_sources", []),
+        # Which competition of the recording this is. Absent on a record that
+        # is the whole recording, which is how a reader tells the two apart.
+        "classId": str(class_id or ""),
+        "classStartAt": game.get("class_start_at", ""),
+        "classUrl": game.get("class_url", ""),
+        # "schedule" when the published timetable placed these rides, "caption"
+        # when what was read in the arena moved them. A boundary that was
+        # published and one that was observed are different kinds of fact.
+        "classDecidedBy": game.get("class_decided_by", ""),
+        "showId": game.get("show_id", 0),
+        "showUrl": game.get("show_url", ""),
         "embedding": Vector(vector),
         "updatedAt": now(),
     }
-    game_ref(job_id).set(payload)
-    return {"job_id": job_id, "indexed": True}
+    game_ref(job_id, class_id).set(payload)
+    return {"job_id": job_id, "game_id": game_id(job_id, class_id), "indexed": True}
 
 
 def _game_out(data: dict[str, Any]) -> dict[str, Any]:
@@ -433,38 +515,105 @@ def get_games_by_ids(job_ids: list[str]) -> dict[str, dict[str, Any]]:
     for chunk in _chunks(wanted):
         for doc in db().collection("games").where(filter=FieldFilter("jobId", "in", chunk)).stream():
             data = doc.to_dict() or {}
-            found[data.get("jobId") or doc.id] = {
-                "job_id": data.get("jobId") or doc.id,
+            job_id = data.get("jobId") or job_of(doc.id)
+            entry = {
+                "job_id": job_id,
+                "class_id": data.get("classId", ""),
                 "title": data.get("title", ""),
                 "sport": data.get("sport", ""),
                 "discipline": data.get("discipline", ""),
             }
+            # A recording split into classes has several records under one job
+            # id, and this is keyed by job. Keying by the document instead
+            # would change what every caller gets back; what matters to them is
+            # a name for the recording, so the first class to run supplies it
+            # rather than whichever document happened to stream last.
+            previous = found.get(job_id)
+            if previous is None or _earlier(data, previous.get("_at", "")):
+                entry["_at"] = str(data.get("classStartAt") or "")
+                found[job_id] = entry
+    for entry in found.values():
+        entry.pop("_at", None)
     return found
 
 
-def get_game(job_id: str) -> dict[str, Any]:
-    snapshot = game_ref(job_id).get()
+def _earlier(data: dict[str, Any], against: str) -> bool:
+    at = str(data.get("classStartAt") or "")
+    if not against:
+        return False
+    return bool(at) and at < against
+
+
+def get_game(job_id: str, class_id: str | int = "") -> dict[str, Any]:
+    """One game record. Without a class, the recording's first competition."""
+    snapshot = game_ref(job_id, class_id).get()
+    if not snapshot.exists and not class_id:
+        # A recording that was split has no record under the bare job id; the
+        # first class is what a question about "the match" is asking for.
+        snapshot = db().collection("games").document(canonical_game(job_id)).get()
     if not snapshot.exists:
         raise KeyError(f"No game record for job {job_id!r}.")
     return _game_out(snapshot.to_dict())
 
 
-def get_rides(job_id: str) -> list[dict[str, Any]]:
+def list_games(job_id: str) -> list[dict[str, Any]]:
+    """Every competition this recording holds, in running order.
+
+    One entry for a day that held one class, several for a day that held
+    several — which is what a live URL pointed at an arena produces.
+    """
+    out = []
+    for doc in game_docs(job_id):
+        data = doc.to_dict() or {}
+        game = _game_out(data)
+        game["gameId"] = doc.id
+        game["classId"] = data.get("classId", "")
+        game["className"] = data.get("title", "")
+        game["classStartAt"] = data.get("classStartAt", "")
+        game["classUrl"] = data.get("classUrl", "")
+        game["rideCount"] = len(data.get("rides") or [])
+        out.append(game)
+    return out
+
+
+def get_rides(job_id: str, class_id: str | int = "") -> list[dict[str, Any]]:
     """The competition day's rides, exactly as the game record stores them.
 
     Read from the raw document because _game_out, the shape the agents'
     context wants for a game, leaves the rides behind — which is how
     list_rides answered "no rides recorded" for every event that had them.
     One document read; the moments are not touched.
+
+    Without a class this is every ride of the recording, gathered from each of
+    its competitions in running order — a question about the day is about the
+    day, whether or not it was one class.
     """
-    snapshot = game_ref(job_id).get()
-    if not snapshot.exists:
+    snapshot = game_ref(job_id, class_id).get()
+    if snapshot.exists:
+        return [dict(r) for r in (snapshot.to_dict() or {}).get("rides") or []
+                if isinstance(r, dict)]
+    if class_id:
+        raise KeyError(f"No game record for job {job_id!r} class {class_id!r}.")
+
+    # No record under the bare job id: the recording was split into its
+    # classes, so the day's rides are the classes' rides in running order. The
+    # direct read above is what an unsplit recording costs — one document,
+    # as before.
+    docs = game_docs(job_id)
+    if not docs:
         raise KeyError(f"No game record for job {job_id!r}.")
-    rides = (snapshot.to_dict() or {}).get("rides") or []
-    return [dict(r) for r in rides if isinstance(r, dict)]
+    rides: list[dict[str, Any]] = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        for ride in data.get("rides") or []:
+            if isinstance(ride, dict):
+                rides.append({**ride, "class_id": data.get("classId", ""),
+                              "class_name": data.get("title", "")})
+    return rides
 
 
-def event_tree(job_id: str, moment_limit: int = 2000) -> dict[str, Any]:
+def event_tree(job_id: str, moment_limit: int = 2000,
+               class_id: str | int = "") -> dict[str, Any]:
     """The event, its rides, and the moments in each — see event_tree.py.
 
     Reads the raw game document rather than get_game, because _game_out is the
@@ -474,7 +623,9 @@ def event_tree(job_id: str, moment_limit: int = 2000) -> dict[str, Any]:
     from catalog_server.event_tree import build_event_tree
 
     job = get_job(job_id)
-    snapshot = game_ref(job_id).get()
+    snapshot = game_ref(job_id, class_id).get()
+    if not snapshot.exists and not class_id:
+        snapshot = db().collection("games").document(canonical_game(job_id)).get()
     game = (snapshot.to_dict() or {}) if snapshot.exists else {}
     docs = (
         job_ref(job_id).collection("moments")
@@ -482,7 +633,15 @@ def event_tree(job_id: str, moment_limit: int = 2000) -> dict[str, Any]:
         .limit(moment_limit)
         .stream()
     )
-    return build_event_tree(job_id, job, game, [d.to_dict() or {} for d in docs])
+    moments = [d.to_dict() or {} for d in docs]
+    # One class of a day is one event: its own rides, and only the moments that
+    # happened inside them. A moment carries the class it was in, so the split
+    # is a filter rather than a second grouping rule that could disagree with
+    # the one the rides were split by.
+    this_class = str(game.get("classId") or "")
+    if this_class:
+        moments = [m for m in moments if str(m.get("classId") or "") == this_class]
+    return build_event_tree(job_id, job, game, moments)
 
 
 def _title_key(text: str) -> str:
@@ -612,11 +771,31 @@ def rename_job(job_id: str, title: str) -> dict[str, Any]:
     # The game record is a separate top-level document and may not exist yet:
     # it is written when the analysis has something to say. When it arrives it
     # will read titleSource off the job and keep this name.
-    game = db().collection("games").document(job_id)
-    renamed_game = bool(game.get().exists)
-    if renamed_game:
-        game.update({"title": title, "updatedAt": now()})
-    return {"job_id": job_id, "title": title, "renamed_game": renamed_game}
+    # Every class of the recording, not just the first. A day split into three
+    # competitions is three records of one recording, and renaming the
+    # recording that answers with one name for one class and another for the
+    # next is the exact failure this function exists to prevent.
+    #
+    # A class keeps its own name where it has one: the class *is* what that
+    # record is called, and "FAIRFAX SADDLES PSG FREESTYLE GOLD" is a better
+    # name for it than anything typed about the day. What the rename gives it
+    # is the day's name as its show title.
+    renamed = 0
+    for doc in game_docs(job_id) or []:
+        data = doc.to_dict() or {}
+        patch: dict[str, Any] = {"updatedAt": now()}
+        if data.get("classId"):
+            patch["showTitle"] = title
+        else:
+            patch["title"] = title
+        doc.reference.update(patch)
+        renamed += 1
+    if not renamed:
+        game = db().collection("games").document(job_id)
+        if game.get().exists:
+            game.update({"title": title, "updatedAt": now()})
+            renamed = 1
+    return {"job_id": job_id, "title": title, "renamed_game": bool(renamed)}
 
 
 def update_live_booking(job_id: str, event_start: str = "", event_end: str = "",
