@@ -540,6 +540,37 @@ def _entered_in(ride: dict, classes: list[ShowClass],
     return named or list(classes)
 
 
+# How long after the next class was due a class may still be running. A
+# timetable slips and a class over-runs its slot, so the ring is not free the
+# moment the next one is published to start — but it is free long before the
+# afternoon. This bounds the start list, which knows who rode and nothing at
+# all about when.
+OVERRUN = datetime.timedelta(minutes=30)
+
+
+def _ended_before(show_class: ShowClass, at: datetime.datetime,
+                  classes: list[ShowClass]) -> bool:
+    """Whether the ring had moved on from this class by the time of a ride.
+
+    A class ends when the next one in its own ring begins, give or take the
+    over-run. The last class of the day never ends, because nothing follows it
+    to say that it has.
+    """
+    if show_class.start_at is None:
+        return False
+    after = [c.start_at for c in classes
+             if c.start_at and c.start_at > show_class.start_at]
+    return bool(after) and at >= min(after) + OVERRUN
+
+
+def _still_running(pool: list[ShowClass], at: datetime.datetime | None,
+                   classes: list[ShowClass]) -> list[ShowClass]:
+    """The pool without the classes the day had already finished with."""
+    if at is None:
+        return list(pool)
+    return [c for c in pool if not _ended_before(c, at, classes)]
+
+
 def assign_classes(rides: list[dict], classes: list[ShowClass], *,
                    recorded_from: datetime.datetime | None,
                    entrants: dict[int, list[str]] | None = None) -> list[ClassRun]:
@@ -565,6 +596,17 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
     Prix's first was filed under the young horses. One ride each day, both in
     the published list of exactly one class.
 
+    **Both settle a boundary, and neither may cross the day.** A start list
+    knows who rode and nothing about when; a caption knows what a graphic said
+    and nothing about when either. A rider down for a morning class and an
+    afternoon one gets narrowed onto whichever the clock then finds — and the
+    clock, asked only about that class, answers it — while a recap card cut in
+    between rounds names a class that finished hours ago perfectly clearly. So
+    a class the ring has finished with is dropped before either is asked. It is
+    finished with once the next class in the ring has started and the over-run
+    allowance has passed; the last class of the day is never finished with,
+    because nothing follows it to say so.
+
     A ride with no absolute time cannot be placed by the clock at all. That is
     an uploaded file rather than a live event, and the answer there is the
     caption alone; with neither, the day stays one event, which is what it was
@@ -578,9 +620,19 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
 
     for ride in rides or []:
         at = _ride_time(ride, recorded_from)
-        # The start lists first: everything below asks its question of the
-        # classes this rider could actually have been in.
-        pool = _entered_in(ride, classes, entrants or {})
+        # What the ring could still have been running. Neither of the signals
+        # below knows the time of day: a start list names who rode, and a
+        # caption names what the graphic said. Both were reading a class the
+        # day had finished with — three rounds of the 12th's afternoon
+        # freestyle were filed under a young horses class that ended at
+        # breakfast because their riders were down for it too, and a fourth
+        # under a Grand Prix four hours over, off a recap card the broadcast
+        # cut to between rounds. Neither is a boundary correction; both are
+        # jumps across the day.
+        live = _still_running(classes, at, classes) or list(classes)
+        # The start lists narrow what is left: everything below asks its
+        # question of the classes this rider could actually have been in.
+        pool = _entered_in(ride, live, entrants or {})
         by_clock = _class_at(at, pool) if at is not None else None
         named, score = _class_named_in(ride, pool)
         chosen = None
@@ -608,8 +660,8 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
             chosen = by_id[pool[0].class_id] if pool else runs[0]
         # Say so when the start list is what moved it. The clock's own answer
         # over every class is what the record would have said before.
-        if len(pool) < len(classes) and at is not None:
-            unnarrowed = _class_at(at, classes)
+        if len(pool) < len(live) and at is not None:
+            unnarrowed = _class_at(at, live)
             if unnarrowed is not None and unnarrowed.class_id != chosen.show_class.class_id:
                 chosen.decided_by = "start list"
         chosen.rides.append(ride)

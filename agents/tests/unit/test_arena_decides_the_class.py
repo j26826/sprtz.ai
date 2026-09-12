@@ -352,3 +352,100 @@ class TestTheGameIsUnderGame:
         out = await pipeline.split_event_classes("j")
         assert out["status"] == "error"
         assert "no game record" in out["error"]
+
+
+class TestTheStartListMayNotCrossTheDay:
+    """A start list names who rode, and says nothing whatever about when.
+
+    So narrowing by it and *then* asking the clock asks the clock a question it
+    cannot refuse: the last class in the pool to have started, when the pool
+    holds one class from the morning, is that morning class however many hours
+    ago it ended. The afternoon capture of 12 September came back with three of
+    its rounds filed under a young horses class that finished at breakfast and
+    a Grand Prix that finished at lunch — every one of their riders down for
+    those lists too, as most of a championship's riders are.
+
+    The camera ran 14:00-17:00 and only the 13:50 freestyle was in the ring.
+    """
+
+    # The afternoon capture: 13:00 UTC is 14:00 at the show.
+    AFTERNOON = datetime.datetime(2026, 9, 12, 13, 0, tzinfo=datetime.UTC)
+
+    def _afternoon(self, rides, entrants=None):
+        show = _show()
+        return equipe.assign_classes(
+            rides, equipe.classes_on(show, "2026-09-12", arena=CAMERA),
+            recorded_from=self.AFTERNOON, entrants=entrants)
+
+    def _ride(self, order, minute, rider):
+        return {"order": order, "rider": rider,
+                "start_sec": minute * 60, "end_sec": minute * 60 + 300}
+
+    def test_a_morning_class_cannot_claim_an_afternoon_ride(self):
+        # Riders taken from the two morning start lists, riding in the
+        # afternoon. Every one of them was moved by the narrowing before.
+        morning = ENTRANTS[1278778] + ENTRANTS[1278779]
+        rides = [self._ride(i + 1, 25 + i * 10, morning[i]) for i in range(6)]
+        runs = self._afternoon(rides, ENTRANTS)
+        assert [r.show_class.class_id for r in runs] == [1278780]
+        assert len(runs[0].rides) == 6
+
+    def test_the_clock_alone_would_have_said_the_same(self):
+        # The bound restores the answer the clock gives over every class, which
+        # is the one the ring supports: nothing else had started by then.
+        morning = ENTRANTS[1278778] + ENTRANTS[1278779]
+        rides = [self._ride(i + 1, 25 + i * 10, morning[i]) for i in range(6)]
+        assert (_spans(self._afternoon(rides, ENTRANTS))
+                == _spans(self._afternoon(rides)))
+
+    def test_a_class_is_over_when_the_next_one_starts_and_not_before(self):
+        classes = equipe.classes_on(_show(), "2026-09-12", arena=CAMERA)
+        young, gold, freestyle = classes
+        at = lambda h, m: datetime.datetime(  # noqa: E731
+            2026, 9, 12, h, m, tzinfo=equipe.show_offset(_show()))
+        # The young horses run to 10:05, and over-run is allowed for.
+        assert not equipe._ended_before(young, at(10, 20), classes)
+        assert equipe._ended_before(young, at(11, 0), classes)
+        # The last class of the day has nothing after it to end it.
+        assert not equipe._ended_before(freestyle, at(23, 0), classes)
+        assert equipe._ended_before(gold, at(16, 23), classes)
+
+    def test_the_boundary_ride_is_still_settled(self):
+        # What the start list is for, and it still does it: a ride four minutes
+        # before the freestyle's published start, by a rider down for it alone.
+        # The clock says the Grand Prix; the list moves it forward one class.
+        rider = ENTRANTS[1278779][0]
+        ride = self._ride(1, 46, rider)          # 14:46 at the show
+        entrants = {1278780: [rider]}
+        runs = self._afternoon([ride], entrants)
+        assert [r.show_class.class_id for r in runs] == [1278780]
+        # A class that has not started yet is not a class the day is past.
+        classes = equipe.classes_on(_show(), "2026-09-12", arena=CAMERA)
+        early = datetime.datetime(2026, 9, 12, 9, 0, tzinfo=equipe.show_offset(_show()))
+        assert not equipe._ended_before(classes[2], early, classes)
+
+    def test_a_recap_card_does_not_reopen_a_finished_class(self):
+        # 14:25, half an hour into the freestyle. The graphic names the Grand
+        # Prix that ended at lunch, and names it perfectly clearly — it is a
+        # recap the broadcast cut to between rounds, and the published results
+        # confirm the rider rode that class four hours earlier. A caption is
+        # evidence of what was on the screen, not of what was in the ring.
+        ride = self._ride(4, 25, "Charlotte Dujardin")
+        ride["scoreboard"] = ("LeMieux Grand Prix Gold (544) Charlotte Dujardin "
+                              "Braveheart II T Wilaras Owner Ellie McCarthy Bordeaux")
+        runs = self._afternoon([ride], ENTRANTS)
+        assert [r.show_class.class_id for r in runs] == [1278780]
+
+    def test_a_caption_still_settles_a_class_the_ring_is_on(self):
+        # The bound takes nothing from the caption where the class is live:
+        # the freestyle has started and its own card moves a ride the clock
+        # would have left with the class before.
+        # 13:40, ten minutes before the freestyle was due: the clock still says
+        # the Grand Prix, and the arena's own card says otherwise.
+        ride = self._ride(1, 10, "Someone Unlisted")
+        ride["scoreboard"] = "D&H GOLD CHAMPIONSHIP - FEI Intermediate I Freestyle"
+        runs = equipe.assign_classes(
+            [ride], equipe.classes_on(_show(), "2026-09-12", arena=CAMERA),
+            recorded_from=datetime.datetime(2026, 9, 12, 12, 30, tzinfo=datetime.UTC))
+        assert [r.show_class.class_id for r in runs] == [1278780]
+        assert runs[0].decided_by == "caption"
