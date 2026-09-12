@@ -3337,6 +3337,189 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 
 /* ── The reels on the desk ────────────────────────────────────────────────
+   A reel uses the moments' own tile: same grid, same frame, same play button,
+   same footer of two facts. They are the same kind of object here — a thing
+   you watch and then do something with — and a second card shape for the
+   second one would say they are not.
+
+   The frame is the one difference. A moment has one still and a reel is
+   several moments, so it shows the first three side by side: that reads as a
+   reel without a label saying so. */
+.reel-strip {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 1px;
+}
+.reel-strip-cell {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--color-neutral-900);
+}
+.reel-strip-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* The strip is one picture cut in three, not three pictures: dimming the
+   outer cells lets the first cut read as the subject. */
+.reel-strip-cell:not(:first-child) { opacity: 0.75; }
+
+.reel-tile .thumb { position: relative; }
+.reel-tile-shapes { display: flex; flex-wrap: wrap; gap: 4px; }
+.reel-tile-none {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-neutral-600);
+}
+/* Ready is the one state worth the accent: it is the difference between a
+   reel you can cut shapes from or publish, and one you cannot. */
+.reel-tile .tile-kind[data-state="ready"] { color: var(--color-accent-700); }
+
+/* ── Cutting the reel to another shape ────────────────────────────────────
+   The guide is the mockup's idea — the target's window drawn on the source
+   frame with its aspect tagged — with one change: it slides. A centre crop of
+   a wide arena shot frames an empty half as often as the play. */
+.crop-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) 0 var(--space-3);
+  border-top: var(--rule-hair) solid var(--color-rule);
+  margin-top: var(--space-3);
+}
+.crop-source {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-width: 320px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  /* The video's own ground, which does not follow the page: a frame is a
+     picture and a picture sits on black under either theme. */
+  background: var(--color-neutral-900);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.crop-frame {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(90deg,
+      transparent 0 22px,
+      color-mix(in srgb, var(--color-neutral-700) 40%, transparent) 22px 23px);
+}
+.crop-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: var(--rule) solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  box-sizing: border-box;
+}
+.crop-tag {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-accent);
+  /* Ink on amber, never white. */
+  color: var(--color-on-accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.crop-hint { font-size: 11px; color: var(--color-neutral-600); }
+.crop-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.crop-actions .btn-step { margin-left: auto; }
+.crop-done { display: flex; gap: var(--space-2); }
+.crop-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-neutral-700);
+}
+
+/* ── While the reel is busy ───────────────────────────────────────────────
+   A render is minutes of someone else's encoder and a publish is an upload.
+   Both leave the editor looking idle while the thing under it is not, and an
+   edit made in that window either applies to a render already superseded or
+   is thrown away when the reply lands. So the surface says so, in a band that
+   cannot be missed, and everything it would be pointless to press goes flat. */
+.reel-busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-accent-100);
+  border-bottom: var(--rule-hair) solid var(--color-accent-300);
+  font-size: 12px;
+  color: var(--color-accent-900);
+}
+.reel-busy-spin {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-accent-300);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: loading-spin 700ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .reel-busy-spin { animation: none; } }
+
+/* Disabled is the state that carries this, so it needs to read as disabled
+   rather than merely as unclickable — the default 0.4 on a seg-btn or a
+   link-btn is too easy to mistake for "quiet". */
+#reel[data-busy]:not([data-busy=""]) .seg-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .link-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-ghost:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-quiet:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-primary:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+/* The two dragged controls have no disabled attribute to carry it, so the
+   whole panel is dimmed and made inert instead. */
+#reel[data-busy]:not([data-busy=""]) .trim-strip,
+#reel[data-busy]:not([data-busy=""]) .crop-source {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* What is going up, above the fields, in the same voice as the trim readings. */
+.reel-publish-what {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.reel-publish-what .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.reel-publish-what b {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}
+
+/* ── The reels on the desk ────────────────────────────────────────────────
    A row per reel: what it is called, what is in it, and how far it has got.
    The whole row opens it, for the reason a moment tile has no buttons — one
    target is easier to hit than three, and there is only one thing to do. */

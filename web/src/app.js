@@ -5150,7 +5150,7 @@ function reelsCard(msg, index) {
     : `<span class="list-count">${all.length}</span>`}
         </div>
       </div>
-      <div class="reel-rows">${view.slice.map(reelRow).join('')}</div>
+      <div class="tile-row">${view.slice.map(reelTile).join('')}</div>
       ${pagerRow(view, index)}
     </div>`;
 }
@@ -5164,28 +5164,66 @@ function reelNamedIn(asked, reel) {
   return title.trim().split(' ').length > 1 && norm(asked).includes(title.trim());
 }
 
-function reelRow(reel) {
+/**
+ * A reel as a card, in the same shape as a moment.
+ *
+ * A reel is a video, and a row of text is a filename. It uses the tile the
+ * moments use — same grid, same frame, same play button, same footer of two
+ * facts — because they are the same kind of object on this desk: a thing you
+ * watch and then do something with.
+ *
+ * What differs is the frame. A moment has one still; a reel is several
+ * moments, so it shows the first three side by side. That reads as a reel at a
+ * glance without a label saying so, and it costs nothing: the stills are the
+ * cuts' own, requested by the same batching that fills the moment tiles.
+ */
+function reelTile(reel) {
+  const cuts = reel.cuts || [];
   const render = reel.render || {};
   const shapes = Object.keys(reel.crops || {}).sort();
   const published = (reel.publish || {}).url;
+  const matches = (reel.jobIds || []).length;
+
+  const meta = [
+    cutCount(cuts.length),
+    matches > 1 ? t('reel.fromMatches').replace('{n}', String(matches)) : '',
+  ].filter(Boolean).join(' \u00b7 ');
+
   return `
-    <button class="reel-row" data-reel-open="${esc(reel.reelId)}">
-      <span class="reel-row-main">
-        <span class="reel-row-name">${esc(reel.title || t('reel.untitled'))}</span>
-        <span class="reel-row-facts">
-          <span>${esc(cutCount((reel.cuts || []).length))}</span>
-          <span class="reel-row-len">${esc(msClock(reel.durationMs || 0))}</span>
-          ${(reel.jobIds || []).length > 1
-    ? `<span>${esc(t('reel.fromMatches').replace('{n}', String(reel.jobIds.length)))}</span>` : ''}
+    <div class="tile reel-tile">
+      <button class="thumb" data-reel-open="${esc(reel.reelId)}"
+              title="${esc(t('reels.open'))}"
+              aria-label="${esc(`${t('reels.open')}: ${reel.title || t('reel.untitled')}`)}">
+        <span class="reel-strip" aria-hidden="true">
+          ${cuts.slice(0, 3).map((c) => {
+    const url = state.thumbs.urls[c.momentId];
+    return `<span class="reel-strip-cell"${url ? '' : ` data-thumb="${esc(c.momentId)}"${
+      c.jobId ? ` data-thumb-job="${esc(c.jobId)}"` : ''}`}>${
+      url ? `<img src="${esc(url)}" alt="" loading="lazy">` : '<span class="thumb-stripes"></span>'
+    }</span>`;
+  }).join('') || '<span class="reel-strip-cell"><span class="thumb-stripes"></span></span>'}
         </span>
-      </span>
-      <span class="reel-row-state">
-        ${render.status ? `<span class="reel-row-render" data-state="${esc(render.status)}">${
-    esc(t(`reel.render.${render.status}`) || render.status)}</span>` : ''}
-        ${shapes.map((a) => `<span class="crop-chip">${esc(a)}</span>`).join('')}
-        ${published ? `<span class="reel-row-live">${esc(t('reels.published'))}</span>` : ''}
-      </span>
-    </button>`;
+        ${published ? `<span class="tile-beta" aria-hidden="true"><span>${
+    esc(t('reels.published'))}</span></span>` : ''}
+        <span class="thumb-play" aria-hidden="true"></span>
+        <span class="thumb-clock">${esc(shortClock((reel.durationMs || 0) / 1000))}</span>
+      </button>
+      <div class="tile-name">${esc(reel.title || t('reel.untitled'))}</div>
+      <div class="tile-meta">${esc(meta)}</div>
+      <dl class="tile-facts">
+        <div class="tile-fact">
+          <dt>${esc(t('reels.state'))}</dt>
+          <dd class="tile-kind" data-state="${esc(render.status || 'none')}">${
+  esc(render.status ? (t(`reel.render.${render.status}`) || render.status) : t('reels.draft'))}</dd>
+        </div>
+        <div class="tile-fact">
+          <dt>${esc(t('reels.shapes'))}</dt>
+          <dd class="reel-tile-shapes">${shapes.length
+    ? shapes.map((a) => `<span class="crop-chip">${esc(a)}</span>`).join('')
+    : '<span class="reel-tile-none">16:9</span>'}</dd>
+        </div>
+      </dl>
+    </div>`;
 }
 
 /** Open a reel that already exists, by id. */

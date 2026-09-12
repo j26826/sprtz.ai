@@ -16,6 +16,10 @@ const BASE = 'en-GB';
 
 const STRINGS = {
   'en-GB': {
+    'reels.open': 'Open this reel',
+    'reels.state': 'State',
+    'reels.draft': 'Draft',
+    'reels.shapes': 'Shapes',
     'reels.title': 'Reels',
     'reels.none': 'No reels yet. Pick some moments and build one.',
     'reels.published': 'On YouTube',
@@ -557,6 +561,10 @@ const STRINGS = {
   },
 
   de: {
+    'reels.open': 'Dieses Reel öffnen',
+    'reels.state': 'Status',
+    'reels.draft': 'Entwurf',
+    'reels.shapes': 'Formate',
     'reels.title': 'Reels',
     'reels.none': 'Noch keine Reels. Wählen Sie Momente aus und erstellen Sie eines.',
     'reels.published': 'Auf YouTube',
@@ -1076,6 +1084,10 @@ const STRINGS = {
   },
 
   it: {
+    'reels.open': 'Apri questo reel',
+    'reels.state': 'Stato',
+    'reels.draft': 'Bozza',
+    'reels.shapes': 'Formati',
     'reels.title': 'Reel',
     'reels.none': 'Nessun reel. Seleziona dei momenti e creane uno.',
     'reels.published': 'Su YouTube',
@@ -1593,6 +1605,10 @@ const STRINGS = {
   },
 
   fr: {
+    'reels.open': 'Ouvrir ce reel',
+    'reels.state': 'État',
+    'reels.draft': 'Brouillon',
+    'reels.shapes': 'Formats',
     'reels.title': 'Reels',
     'reels.none': 'Aucun reel. Sélectionnez des moments et créez-en un.',
     'reels.published': 'Sur YouTube',
@@ -2113,6 +2129,10 @@ const STRINGS = {
   },
 
   es: {
+    'reels.open': 'Abrir este reel',
+    'reels.state': 'Estado',
+    'reels.draft': 'Borrador',
+    'reels.shapes': 'Formatos',
     'reels.title': 'Reels',
     'reels.none': 'Aún no hay reels. Selecciona momentos y crea uno.',
     'reels.published': 'En YouTube',
