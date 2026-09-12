@@ -29,6 +29,9 @@ router = APIRouter(prefix="/api/reels", tags=["reels"])
 # as `_MOMENT_ID` next door: anything outside this set is refused rather than
 # rewritten, because a rewritten id addresses somebody else's object.
 _REEL_ID = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
+
+# The shapes a reel can be cut to. 16:9 is the render's own and is not a crop.
+CROP_ASPECTS = ("9:16", "4:5", "1:1")
 _MOMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
 
 
@@ -239,6 +242,60 @@ async def render_reel(reel_id: str, user: CallerIdentity = Depends(current_user)
     await clients.call_mcp("catalog", "set_reel_render",
                            {"reel_id": reel_id, "render": render})
     return {"reel_id": reel_id, "render": render}
+
+
+class CropRequest(BaseModel):
+    aspect: str
+    # "crop" takes a window out of the picture; "blur" keeps the whole frame
+    # over a blurred copy of itself.
+    fill: str = "crop"
+    # Where the middle of the window sits, 0 at the left edge and 1 at the
+    # right. Bounded here as well as in the media server: it lands in an ffmpeg
+    # filter string, and a value outside the picture is a failed encode rather
+    # than a bad framing.
+    focus_x: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+@router.post("/{reel_id}/crop")
+async def crop_reel(reel_id: str, body: CropRequest,
+                    user: CallerIdentity = Depends(current_user)) -> dict:
+    """Cut the rendered reel to another shape.
+
+    Derived from the render, so there has to be one: cutting a 9:16 out of a
+    reel that was never rendered would be cutting it out of nothing.
+    """
+    reel = await _reel(reel_id)
+    if body.aspect not in CROP_ASPECTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Choose one of {', '.join(CROP_ASPECTS)}.")
+
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Render the reel first — the other shapes are cut from it.")
+
+    result = await clients.call_mcp("media", "reframe_reel", {
+        "reel_uri": render["reelUri"],
+        "reel_id": reel_id,
+        "aspect": body.aspect,
+        "fill": body.fill,
+        "focus_x": body.focus_x,
+    })
+    if result.get("status") != "success":
+        raise _upstream(result, "That shape could not be cut just now.")
+
+    crop = {
+        "uri": result.get("reel_uri", ""),
+        "fill": body.fill,
+        "focusX": body.focus_x,
+        "bytes": result.get("bytes", 0),
+    }
+    saved = await clients.call_mcp("catalog", "set_reel_crop",
+                                   {"reel_id": reel_id, "aspect": body.aspect, "crop": crop})
+    return {"reel_id": reel_id, "aspect": body.aspect, "crop": crop,
+            "reel": saved.get("reel") or reel}
 
 
 @router.get("/{reel_id}/render")

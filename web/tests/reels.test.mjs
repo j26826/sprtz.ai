@@ -15,8 +15,8 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
-  MIN_CUT_MS, isPickedIn, matchCount, moveCut, msClock, nextCut, nudge,
-  parsePickKey, pastEnd, pickKey, reelLength, togglePicked,
+  CROP_ASPECTS, MIN_CUT_MS, cropBand, focusFrom, isPickedIn, matchCount, moveCut,
+  msClock, nextCut, nudge, parsePickKey, pastEnd, pickKey, reelLength, togglePicked,
 } from '../src/reels.js';
 
 const cut = (jobId, startMs, endMs) => ({ jobId, momentId: `${jobId}-m`, startMs, endMs });
@@ -174,5 +174,54 @@ describe('running from one cut to the next', () => {
     assert.equal(pastEnd(cuts[0], 1.999), false);
     assert.equal(pastEnd(cuts[0], 2.0), true);
     assert.equal(pastEnd(null, 99), false);
+  });
+});
+
+describe('the crop window drawn on the frame', () => {
+  it('is the same fraction the encoder will actually cut', () => {
+    // The guide and the crop are two copies of one sum. If they drift, the
+    // preview lies about its own output — 9:16 out of 16:9 is (9/16)/(16/9).
+    assert.ok(Math.abs(cropBand('9:16').width - 0.3164) < 0.001);
+    assert.ok(Math.abs(cropBand('4:5').width - 0.45) < 0.001);
+    assert.ok(Math.abs(cropBand('1:1').width - 0.5625) < 0.001);
+  });
+
+  it('centres by default', () => {
+    const b = cropBand('9:16');
+    assert.ok(Math.abs(b.left - (1 - b.width) / 2) < 1e-9);
+  });
+
+  it('never leaves the frame at either extreme', () => {
+    for (const a of Object.keys(CROP_ASPECTS)) {
+      for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+        const b = cropBand(a, f);
+        assert.ok(b.left >= -1e-9, `${a}@${f} left`);
+        assert.ok(b.left + b.width <= 1 + 1e-9, `${a}@${f} right`);
+      }
+    }
+  });
+
+  it('brings an out-of-range focus back rather than drawing off the frame', () => {
+    assert.equal(cropBand('9:16', -3).left, 0);
+    assert.ok(Math.abs(cropBand('9:16', 9).left - (1 - cropBand('9:16').width)) < 1e-9);
+  });
+
+  it('is null for a shape it does not know', () => {
+    assert.equal(cropBand('21:9'), null);
+  });
+
+  it('turns a pointer position into the focus that centres the window there', () => {
+    // Dragging to the middle must mean the middle, or the guide jumps away
+    // from the cursor on the first move.
+    assert.ok(Math.abs(focusFrom(0.5, '9:16') - 0.5) < 1e-9);
+    assert.equal(focusFrom(0, '9:16'), 0);
+    assert.equal(focusFrom(1, '9:16'), 1);
+  });
+
+  it('round-trips: a focus drawn, then read back from its own centre', () => {
+    for (const f of [0, 0.2, 0.5, 0.8, 1]) {
+      const b = cropBand('4:5', f);
+      assert.ok(Math.abs(focusFrom(b.left + b.width / 2, '4:5') - f) < 1e-9);
+    }
   });
 });

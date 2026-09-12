@@ -186,3 +186,35 @@ export function isTrimmed(cut) {
   if (!cut || cut.detectedStartMs == null) return false;
   return cut.startMs !== cut.detectedStartMs || cut.endMs !== cut.detectedEndMs;
 }
+
+/* ── Cutting a reel to another shape ──────────────────────────────────────
+   The render is 16:9. Every shape a phone feed wants is narrower than that,
+   so a crop is a window of the width — and where that window sits is a real
+   decision in sport, where the play is rarely in the middle of the arena. */
+
+export const CROP_ASPECTS = { '9:16': 9 / 16, '4:5': 4 / 5, '1:1': 1 };
+export const SOURCE_ASPECT = 16 / 9;
+
+/**
+ * The crop window as a fraction of the source's width, and where it sits.
+ *
+ * The same arithmetic the media server does on pixels, done here on
+ * percentages so the guide drawn over the frame is the window that will
+ * actually be cut. Two of these that disagreed would be a preview that lies.
+ */
+export function cropBand(aspect, focusX = 0.5) {
+  const target = CROP_ASPECTS[aspect];
+  if (!target) return null;
+  const width = Math.min(1, target / SOURCE_ASPECT);
+  const focus = Math.max(0, Math.min(1, Number(focusX) ?? 0.5));
+  return { width, left: (1 - width) * focus };
+}
+
+/** Where a pointer at `fraction` across the frame puts the window's middle. */
+export function focusFrom(fraction, aspect) {
+  const band = cropBand(aspect);
+  if (!band || band.width >= 1) return 0.5;
+  const half = band.width / 2;
+  const f = Math.max(0, Math.min(1, Number(fraction) || 0));
+  return Math.max(0, Math.min(1, (f - half) / (1 - band.width)));
+}

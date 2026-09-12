@@ -213,36 +213,95 @@ def cut(source: str | Path, dest: Path, start_sec: float, end_sec: float,
     _run(cmd)
 
 
-def reframe(source: Path, dest: Path, aspect: str = "9:16", blur_pad: bool = True) -> None:
-    """Reframe to a vertical aspect.
+# The shapes a reel can be cut to, as width:height in pixels. 16:9 is the
+# render's own shape and is not reframed; the other three are what a social
+# desk actually posts — a full-height vertical, the tall-but-not-full 4:5 that
+# fills a phone feed without being a Short, and the square.
+ASPECTS = {
+    "9:16": (1080, 1920),
+    "4:5": (1080, 1350),
+    "1:1": (1080, 1080),
+}
 
-    Centre-crops to the target aspect over a blurred, filled background so a
-    wide arena shot still reads on a phone instead of becoming letterboxed.
 
-    This runs on a *rendered reel*, never on a match. That is what makes it safe
-    here: the input is one file of tens of megabytes that Transcoder has already
-    concatenated and normalised, so it is the same size of work as `mux_chunk`
-    rather than the multi-gigabyte in-container encode this service is scarred
-    by. Transcoder cannot do it — its preprocessing has crop and pad, but no
-    blur — which is the whole reason there is a second pass at all.
+def crop_window(source_w: int, source_h: int, aspect: str, focus_x: float = 0.5) -> tuple[int, int, int, int]:
+    """The rectangle to take out of the source, as (w, h, x, y).
+
+    Pure, and tested, because a crop that is a few percent wrong is not an
+    error anyone sees — it is a reel that cuts the ball off the side of every
+    shot, discovered after it is posted.
+
+    ``focus_x`` is where the middle of the window sits across the source, 0 at
+    the left edge and 1 at the right. Sport is the reason it exists: the action
+    is rarely in the middle of an arena, and a centre crop of a wide shot is as
+    likely to frame an empty half as the play. It is clamped so the window can
+    never leave the picture, which is why the caller may pass anything.
+
+    The window is always the full height of the source when the target is
+    narrower than it — every one of these targets is — so only the horizontal
+    position is a decision.
     """
-    w, h = (1080, 1920) if aspect == "9:16" else (1080, 1080)
+    target_w, target_h = ASPECTS.get(aspect, ASPECTS["9:16"])
+    target_ratio = target_w / target_h
+    source_ratio = (source_w / source_h) if source_h else target_ratio
+
+    if source_ratio > target_ratio:
+        # Wider than the target: full height, a window of the width.
+        w = round(source_h * target_ratio)
+        h = source_h
+    else:
+        # Taller than the target: full width, a window of the height.
+        w = source_w
+        h = round(source_w / target_ratio)
+
+    # H.264 wants even dimensions.
+    w -= w % 2
+    h -= h % 2
+    focus = min(1.0, max(0.0, float(focus_x)))
+    x = round((source_w - w) * focus)
+    y = round((source_h - h) / 2)
+    return w, h, max(0, x), max(0, y)
+
+
+def reframe(source: Path, dest: Path, aspect: str = "9:16", fill: str = "crop",
+            focus_x: float = 0.5, probe_size: tuple[int, int] | None = None) -> None:
+    """Cut a rendered reel to another shape.
+
+    Two ways, because they answer different questions. ``crop`` takes a window
+    out of the picture and throws the rest away, which is what a phone-first
+    post wants: the play fills the frame. ``blur`` keeps the whole frame,
+    scaled to fit, over a blurred copy of itself — nothing is lost, and a wide
+    arena shot still reads, at the cost of bars that are obviously bars.
+
+    This runs on a *rendered reel*, never on a match. That is what makes it
+    safe here: the input is one file of tens of megabytes that Transcoder has
+    already concatenated and normalised, so it is the same size of work as
+    `mux_chunk` rather than the multi-gigabyte in-container encode this service
+    is scarred by. Transcoder cannot do the blurred fill at all — its
+    preprocessing has crop and pad, but no blur — which is why there is a
+    second pass rather than one more Transcoder config.
+    """
+    w, h = ASPECTS.get(aspect, ASPECTS["9:16"])
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    if blur_pad:
+    if fill == "blur":
         vf = (
             f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
             f"crop={w}:{h},boxblur=luma_radius=40:luma_power=2[bg];"
             f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
         )
-        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
-               "-i", str(source), "-filter_complex", vf]
+    elif probe_size:
+        # A window chosen on the source's own pixels, then scaled to the target.
+        cw, ch, cx, cy = crop_window(probe_size[0], probe_size[1], aspect, focus_x)
+        vf = f"[0:v]crop={cw}:{ch}:{cx}:{cy},scale={w}:{h}"
     else:
-        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
-               "-i", str(source), "-vf", vf]
+        # No probe: fall back to a centre crop expressed in ffmpeg's own terms,
+        # which needs no knowledge of the source's dimensions.
+        vf = f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
 
+    cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
+           "-i", str(source), "-filter_complex", vf]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(dest)]
     _run(cmd)

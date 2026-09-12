@@ -16,6 +16,15 @@ const BASE = 'en-GB';
 
 const STRINGS = {
   'en-GB': {
+    'crop.title': 'Shape',
+    'crop.drag': 'Drag the guide to move the crop',
+    'crop.needsRender': 'Render the reel first — the other shapes are cut from it',
+    'crop.fill': 'How to fill',
+    'crop.fill.crop': 'Crop',
+    'crop.fill.blur': 'Blurred fill',
+    'crop.cut': 'Cut {a}',
+    'crop.cutting': 'Cutting…',
+    'crop.failed': 'That shape could not be cut.',
     'trim.title': 'Trim the cut',
     'trim.hint': 'drag the handles',
     'trim.detected': 'Detected',
@@ -536,6 +545,15 @@ const STRINGS = {
   },
 
   de: {
+    'crop.title': 'Format',
+    'crop.drag': 'Ziehen Sie den Rahmen, um den Ausschnitt zu verschieben',
+    'crop.needsRender': 'Zuerst das Reel rendern — die anderen Formate werden daraus geschnitten',
+    'crop.fill': 'Füllung',
+    'crop.fill.crop': 'Beschneiden',
+    'crop.fill.blur': 'Unscharfe Füllung',
+    'crop.cut': '{a} schneiden',
+    'crop.cutting': 'Wird geschnitten…',
+    'crop.failed': 'Dieses Format konnte nicht geschnitten werden.',
     'trim.title': 'Schnitt anpassen',
     'trim.hint': 'Griffe ziehen',
     'trim.detected': 'Erkannt',
@@ -1034,6 +1052,15 @@ const STRINGS = {
   },
 
   it: {
+    'crop.title': 'Formato',
+    'crop.drag': 'Trascina la guida per spostare il ritaglio',
+    'crop.needsRender': 'Prima renderizza il reel — gli altri formati si ricavano da lì',
+    'crop.fill': 'Riempimento',
+    'crop.fill.crop': 'Ritaglia',
+    'crop.fill.blur': 'Sfondo sfocato',
+    'crop.cut': 'Ritaglia {a}',
+    'crop.cutting': 'Ritaglio…',
+    'crop.failed': 'Non è stato possibile ritagliare questo formato.',
     'trim.title': 'Regola il taglio',
     'trim.hint': 'trascina le maniglie',
     'trim.detected': 'Rilevato',
@@ -1530,6 +1557,15 @@ const STRINGS = {
   },
 
   fr: {
+    'crop.title': 'Format',
+    'crop.drag': 'Faites glisser le repère pour déplacer le recadrage',
+    'crop.needsRender': 'Générez d\'abord le reel — les autres formats en sont issus',
+    'crop.fill': 'Remplissage',
+    'crop.fill.crop': 'Recadrer',
+    'crop.fill.blur': 'Fond flouté',
+    'crop.cut': 'Recadrer en {a}',
+    'crop.cutting': 'Recadrage…',
+    'crop.failed': 'Ce format n\'a pas pu être recadré.',
     'trim.title': 'Ajuster la séquence',
     'trim.hint': 'faites glisser les poignées',
     'trim.detected': 'Détecté',
@@ -2029,6 +2065,15 @@ const STRINGS = {
   },
 
   es: {
+    'crop.title': 'Formato',
+    'crop.drag': 'Arrastra la guía para mover el recorte',
+    'crop.needsRender': 'Renderiza el reel primero — los demás formatos se recortan de él',
+    'crop.fill': 'Relleno',
+    'crop.fill.crop': 'Recortar',
+    'crop.fill.blur': 'Fondo difuminado',
+    'crop.cut': 'Recortar {a}',
+    'crop.cutting': 'Recortando…',
+    'crop.failed': 'No se pudo recortar este formato.',
     'trim.title': 'Ajustar el corte',
     'trim.hint': 'arrastra los tiradores',
     'trim.detected': 'Detectado',

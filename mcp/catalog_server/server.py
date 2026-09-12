@@ -910,6 +910,21 @@ def set_reel_render(reel_id: str, render: dict) -> dict:
 
 
 @mcp.tool
+def set_reel_crop(reel_id: str, aspect: str, crop: dict) -> dict:
+    """Record one cut shape against a reel.
+
+    Args:
+        reel_id: Reel the shape was cut from.
+        aspect: "9:16", "4:5" or "1:1".
+        crop: Where the file is and how it was framed.
+    """
+    try:
+        return {"status": "success", "reel": store.set_reel_crop(reel_id, aspect, crop)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id, aspect=aspect)
+
+
+@mcp.tool
 def set_reel_publish(reel_id: str, publish: dict) -> dict:
     """Record a reel's publish attempt and its outcome.
 

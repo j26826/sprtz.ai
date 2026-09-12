@@ -2152,6 +2152,79 @@ def _brief_moments(moments: list[dict], limit: int) -> list[dict]:
     return out
 
 
+CROP_ASPECTS = ("9:16", "4:5", "1:1")
+
+
+async def list_reels(limit: int = 20) -> dict:
+    """The reels on the desk, most recently worked on first.
+
+    Args:
+        limit: How many to return.
+    """
+    found = await mcp_client.call_tool("catalog", "list_reels", {"limit": limit})
+    reels = found.get("reels") or []
+    # Cut down for a model's context the way list_rides is: a reel's fifty cuts
+    # are not what is being asked about when someone asks which reels exist.
+    return {"reels": [{
+        "reel_id": r.get("reelId"),
+        "title": r.get("title"),
+        "cuts": r.get("cutCount"),
+        "duration_ms": r.get("durationMs"),
+        "matches": len(r.get("jobIds") or []),
+        "render": (r.get("render") or {}).get("status") or "none",
+        "shapes": sorted((r.get("crops") or {}).keys()),
+    } for r in reels]}
+
+
+async def reframe_reel(reel_id: str, aspect: str, focus_x: float = 0.5,
+                       fill: str = "crop") -> dict:
+    """Cut an existing reel to another shape: 9:16, 4:5 or 1:1.
+
+    For a reel that has already been rendered — the other shapes are cut from
+    that render, so there has to be one. This does not choose what goes in a
+    reel and does not publish it; it makes a rendered reel a shape a phone feed
+    wants.
+
+    Args:
+        reel_id: The reel to cut. It must already be rendered.
+        aspect: "9:16" for a Short, "4:5" for a feed post, "1:1" for a square.
+        focus_x: Where the middle of the crop sits across the picture, 0 at the
+            left edge and 1 at the right. Sport is why this exists — the action
+            is rarely in the middle of an arena. Leave it at 0.5 unless the
+            editor has said which side the play is on.
+        fill: "crop" fills the frame and loses the sides; "blur" keeps the
+            whole picture over a blurred copy of itself and loses nothing.
+    """
+    if aspect not in CROP_ASPECTS:
+        return {"status": "error", "reel_id": reel_id,
+                "error": f"Choose one of {', '.join(CROP_ASPECTS)}."}
+
+    found = await mcp_client.call_tool("catalog", "get_reel", {"reel_id": reel_id})
+    reel = found.get("reel") or {}
+    if not reel:
+        return {"status": "error", "reel_id": reel_id, "error": f"No reel {reel_id}."}
+
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        return {"status": "error", "reel_id": reel_id,
+                "error": "That reel has not been rendered yet, and the other "
+                         "shapes are cut from the render."}
+
+    result = await mcp_client.call_tool("media", "reframe_reel", {
+        "reel_uri": render["reelUri"], "reel_id": reel_id,
+        "aspect": aspect, "fill": fill, "focus_x": focus_x,
+    })
+    if result.get("status") != "success":
+        return {"status": "error", "reel_id": reel_id,
+                "error": result.get("error") or "The reframe did not succeed."}
+
+    crop = {"uri": result.get("reel_uri", ""), "fill": fill,
+            "focusX": focus_x, "bytes": result.get("bytes", 0)}
+    await mcp_client.call_tool("catalog", "set_reel_crop",
+                               {"reel_id": reel_id, "aspect": aspect, "crop": crop})
+    return {"status": "success", "reel_id": reel_id, "aspect": aspect, **crop}
+
+
 async def get_event(job_id: str, riders: str = "", max_moments_per_ride: int = 5) -> dict:
     """Return an event as event → rides → moments: every ride (a rider on one
     horse) in running order, with the moments that happened while they were in

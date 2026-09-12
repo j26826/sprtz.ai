@@ -2151,6 +2151,7 @@ def _reel_out(data: dict[str, Any]) -> dict[str, Any]:
         "durationMs": int(data.get("durationMs") or 0),
         "thumbnail": data.get("thumbnail") or {},
         "render": data.get("render") or {},
+        "crops": data.get("crops") or {},
         "publish": data.get("publish") or {},
         "ownerUid": data.get("ownerUid", ""),
         "createdAt": data.get("createdAt"),
@@ -2188,6 +2189,11 @@ def create_reel(owner_uid: str, title: str, cuts: list[dict[str, Any]],
         "durationMs": total,
         "thumbnail": {},
         "render": {},
+        # One entry per shape that has been cut, keyed by aspect. Derived from
+        # the render rather than from the cuts, so changing the cuts clears
+        # them along with it: a 9:16 of a reel that no longer exists is a file
+        # that will be posted by mistake.
+        "crops": {},
         "publish": {},
         "createdAt": now(),
         "updatedAt": now(),
@@ -2265,8 +2271,10 @@ def update_reel(reel_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         writes["cuts"] = ordered
         writes["durationMs"] = total
         writes["jobIds"] = sorted({c["jobId"] for c in ordered if c["jobId"]})
-        # A reel whose cuts changed is no longer the reel that was rendered.
+        # A reel whose cuts changed is no longer the reel that was rendered,
+        # and every shape cut from that render is equally stale.
         writes["render"] = {}
+        writes["crops"] = {}
 
     if writes:
         writes["updatedAt"] = now()
@@ -2281,6 +2289,16 @@ def update_reel(reel_id: str, patch: dict[str, Any]) -> dict[str, Any]:
 def set_reel_render(reel_id: str, render: dict[str, Any]) -> dict[str, Any]:
     """Record where a render got to. Written by the machinery, not the editor."""
     reel_ref(reel_id).update({"render": render, "updatedAt": now()})
+    return get_reel(reel_id)
+
+
+def set_reel_crop(reel_id: str, aspect: str, crop: dict[str, Any]) -> dict[str, Any]:
+    """Record one cut shape against the reel.
+
+    Merged rather than replaced: a reel may carry a 9:16 and a 1:1 at once, and
+    cutting the second is not a statement about the first.
+    """
+    reel_ref(reel_id).update({f"crops.{aspect}": crop, "updatedAt": now()})
     return get_reel(reel_id)
 
 

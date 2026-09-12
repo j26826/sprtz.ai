@@ -1189,38 +1189,64 @@ def reel_status(transcoder_job: str, reel_uri: str = "") -> dict:
 
 
 @mcp.tool
-def reframe_reel(reel_uri: str, reel_id: str, aspect: str = "9:16") -> dict:
-    """Make the vertical cut of a rendered reel, for Shorts.
+def reframe_reel(reel_uri: str, reel_id: str, aspect: str = "9:16",
+                 fill: str = "crop", focus_x: float = 0.5) -> dict:
+    """Cut a rendered reel to another shape, for a phone-first feed.
 
-    Centre-crop over a blurred fill, so a wide arena shot still reads on a
-    phone. Done here rather than on Transcoder because a blurred background is
-    not something its preprocessing can express, and done to the *rendered
-    reel* rather than to the matches: the input is one already-concatenated
-    file of tens of megabytes, which is the size of work this service can do
-    in a request.
+    Runs on the *rendered reel* rather than on the matches: the input is one
+    already-concatenated file of tens of megabytes, which is the size of work
+    this service can safely do in a request. Transcoder cannot do the blurred
+    fill at all, which is why this is a second pass rather than one more
+    Transcoder config.
 
     Args:
         reel_uri: gs:// URI of the rendered 16:9 reel.
         reel_id: Reel this belongs to; becomes the object prefix.
-        aspect: "9:16" or "1:1".
+        aspect: "9:16", "4:5" or "1:1".
+        fill: "crop" takes a window out of the picture; "blur" keeps the whole
+            frame over a blurred copy of itself and loses nothing.
+        focus_x: Where the middle of the crop window sits, 0 at the left edge
+            and 1 at the right. Sport is why it exists — the action is rarely
+            in the middle of an arena. Ignored when filling with blur.
     """
     if not MEDIA_BUCKET:
         return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
-    if aspect not in ("9:16", "1:1"):
-        return {"status": "error", "error": f"Cannot reframe to {aspect}.", "reel_id": reel_id}
+    if aspect not in ffmpeg_ops.ASPECTS:
+        return {"status": "error", "reel_id": reel_id,
+                "error": f"Cannot reframe to {aspect}. "
+                         f"Choose one of {', '.join(ffmpeg_ops.ASPECTS)}."}
+    if fill not in ("crop", "blur"):
+        return {"status": "error", "reel_id": reel_id,
+                "error": f"Unknown fill {fill}. Choose crop or blur."}
 
     safe_id = _SAFE_ID.sub("_", reel_id)[:120]
     work = _scratch()
     try:
         local = work / "reel.mp4"
         gcs.download(reel_uri, local)
-        tall = work / "reel-tall.mp4"
-        ffmpeg_ops.reframe(local, tall, aspect=aspect)
-        name = "reel-9x16.mp4" if aspect == "9:16" else "reel-1x1.mp4"
+
+        # The window is chosen on the source's own pixels, so the source has to
+        # be measured first. A probe that fails is not fatal: reframe falls
+        # back to a centre crop expressed in ffmpeg's own terms, which is what
+        # focus_x defaults to anyway.
+        size = None
+        try:
+            info = ffmpeg_ops.probe(local)
+            if info.get("width") and info.get("height"):
+                size = (int(info["width"]), int(info["height"]))
+        except Exception:  # noqa: BLE001
+            logger.warning("could not measure %s; centre-cropping", reel_uri)
+
+        name = f"reel-{aspect.replace(':', 'x')}.mp4"
+        out = work / name
+        ffmpeg_ops.reframe(local, out, aspect=aspect, fill=fill,
+                           focus_x=focus_x, probe_size=size)
         out_uri = f"gs://{MEDIA_BUCKET}/reels/{safe_id}/{name}"
-        gcs.upload(tall, out_uri, content_type="video/mp4")
+        gcs.upload(out, out_uri, content_type="video/mp4")
         return {"status": "success", "reel_id": reel_id, "aspect": aspect,
-                "reel_uri": out_uri, "bytes": tall.stat().st_size}
+                "fill": fill, "focus_x": focus_x, "reel_uri": out_uri,
+                "bytes": out.stat().st_size,
+                "source_size": list(size) if size else None}
     except Exception as exc:  # noqa: BLE001
         logger.exception("could not reframe reel %s", reel_id)
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "reel_id": reel_id}

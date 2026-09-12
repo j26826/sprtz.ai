@@ -31,8 +31,9 @@ import { chooseCard, wantsDetail } from './cards.js';
 import { currentTurn } from './transcript.js';
 import { humanMessage, jobFailure } from './errors.js';
 import {
-  MIN_CUT_MS, isPickedIn, isTrimmed, matchCount, moveCut, msAt, msClock, nextCut,
-  nudge, pastEnd, pickKey, pctOf, reelLength, rulerTicks, togglePicked, trimWindow,
+  CROP_ASPECTS, MIN_CUT_MS, cropBand, focusFrom, isPickedIn, isTrimmed, matchCount,
+  moveCut, msAt, msClock, nextCut, nudge, pastEnd, pickKey, pctOf, reelLength,
+  rulerTicks, togglePicked, trimWindow,
 } from './reels.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
@@ -2080,6 +2081,37 @@ function onTrimPointerDown(event) {
   // the obvious way here silently blanks the selector and fails every button
   // in the app.
   const el = event.target;
+
+  // The crop guide is dragged on the same gesture, on the frame rather than on
+  // a handle: the window is the whole control, and a 32%-wide band with grips
+  // on it would be mostly grips.
+  const source = el.closest?.('[data-crop-source]');
+  if (source) {
+    const aspect = state.reelCrop?.aspect || '9:16';
+    // Measured once, here. Every move re-renders the panel, which replaces
+    // this element — and a detached element's rect is all zeros, so reading it
+    // mid-drag divides by nothing and pins the guide to one end. The box
+    // cannot move during a drag anyway.
+    const box = source.getBoundingClientRect();
+    const slide = (ev) => {
+      state.reelCrop = {
+        ...(state.reelCrop || {}),
+        aspect,
+        focusX: focusFrom((ev.clientX - box.left) / (box.width || 1), aspect),
+      };
+      renderReelEditor();
+    };
+    const drop = () => {
+      window.removeEventListener('pointermove', slide);
+      window.removeEventListener('pointerup', drop);
+    };
+    event.preventDefault();
+    slide(event);
+    window.addEventListener('pointermove', slide);
+    window.addEventListener('pointerup', drop);
+    return;
+  }
+
   const handle = el.closest?.('[data-trim-grab]');
   if (!handle) return;
   const strip = handle.closest('[data-trim-strip]');
@@ -2101,8 +2133,12 @@ function onTrimPointerDown(event) {
   // a hundred requests a drag, and each one re-plans every cut in the reel.
   let atMs = null;
 
+  // Measured once, for the same reason as the crop guide below: every move
+  // re-renders the panel this strip lives in, and reading the rect off the
+  // replaced element gives zeros.
+  const box = strip.getBoundingClientRect();
+
   const move = (ev) => {
-    const box = strip.getBoundingClientRect();
     atMs = msAt((ev.clientX - box.left) / (box.width || 1), win);
     if (onPlayer) {
       const next = edge === 'start'
@@ -4998,6 +5034,61 @@ function reelMeta(reel) {
         <span class="reel-len">${esc(msClock(reelLength(reel.cuts)))}</span>
         ${matches > 1 ? `<span>${esc(t('reel.fromMatches').replace('{n}', String(matches)))}</span>` : ''}
       </div>
+    </div>
+    ${cropPanel(reel)}`;
+}
+
+/**
+ * Cutting the reel to another shape.
+ *
+ * The render is 16:9 and every shape a feed wants is narrower, so a crop is a
+ * window of the width — and the window is draggable, because in sport the play
+ * is rarely in the middle of the arena and a centre crop of a wide shot frames
+ * an empty half as often as the action.
+ *
+ * The guide is drawn from the same arithmetic the encoder uses, in
+ * `reels.js`. Two copies of that sum that disagreed would be a preview that
+ * lies about its own output, which is worse than no preview.
+ */
+function cropPanel(reel) {
+  const render = reel.render || {};
+  const ready = render.status === 'ready';
+  const chosen = state.reelCrop?.aspect || '9:16';
+  const focus = state.reelCrop?.focusX ?? 0.5;
+  const fill = state.reelCrop?.fill || 'crop';
+  const band = cropBand(chosen, focus);
+  const done = reel.crops || {};
+  const busy = state.reelCrop?.busy;
+
+  return `
+    <div class="crop-card">
+      <div class="trim-card-head">
+        <span class="panel-label">${esc(t('crop.title'))}</span>
+        <span class="segmented" role="group" aria-label="${esc(t('crop.title'))}">
+          ${Object.keys(CROP_ASPECTS).map((a) => `
+            <button class="seg-btn" data-crop-aspect="${a}" aria-pressed="${a === chosen}">${
+  esc(a)}${done[a] ? ' ✓' : ''}</button>`).join('')}
+        </span>
+      </div>
+
+      <div class="crop-source" data-crop-source>
+        <span class="crop-frame" aria-hidden="true"></span>
+        ${band ? `<span class="crop-guide" style="left:${band.left * 100}%;width:${
+  band.width * 100}%"><span class="crop-tag">${esc(chosen)}</span></span>` : ''}
+      </div>
+      <div class="crop-hint">${esc(ready ? t('crop.drag') : t('crop.needsRender'))}</div>
+
+      <div class="crop-actions">
+        <span class="segmented" role="group" aria-label="${esc(t('crop.fill'))}">
+          ${['crop', 'blur'].map((f) => `
+            <button class="seg-btn" data-crop-fill="${f}" aria-pressed="${f === fill}">${
+  esc(t(`crop.fill.${f}`))}</button>`).join('')}
+        </span>
+        <button class="btn-primary btn-step" data-crop-go="1" ${ready && !busy ? '' : 'disabled'}>${
+  esc(busy ? t('crop.cutting') : t('crop.cut').replace('{a}', chosen))}</button>
+      </div>
+      ${Object.keys(done).length ? `<div class="crop-done">${
+    Object.keys(done).sort().map((a) => `<span class="crop-chip">${esc(a)}</span>`).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -5202,6 +5293,25 @@ function reelControl(kind) {
   }
   if (kind === 'prev') playReelCut(Math.max(0, (play.at ?? 0) - 1));
   if (kind === 'next') playReelCut(Math.min(state.reel.cuts.length - 1, (play.at ?? 0) + 1));
+}
+
+/** Cut the rendered reel to the chosen shape. */
+async function cutReelShape() {
+  const c = state.reelCrop || {};
+  const aspect = c.aspect || '9:16';
+  state.reelCrop = { ...c, busy: true };
+  renderReelEditor();
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/crop`, {
+      method: 'POST',
+      body: JSON.stringify({ aspect, fill: c.fill || 'crop', focus_x: c.focusX ?? 0.5 }),
+    });
+    state.reel = out.reel || state.reel;
+  } catch (err) {
+    say(humanError(err, 'crop.failed'));
+  }
+  state.reelCrop = { ...state.reelCrop, busy: false };
+  renderReelEditor();
 }
 
 /* ── Rendering ────────────────────────────────────────────────────────── */
@@ -5908,6 +6018,7 @@ document.addEventListener('click', (event) => {
     // Dragged rather than clicked, but it is a <button> and the check
     // rightly wants to know something handles it.
     + '[data-trim-grab],[data-reel-trim-reset],'
+    + '[data-crop-aspect],[data-crop-fill],[data-crop-go],'
     + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
     + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
     + '[data-job-events]');
@@ -6074,6 +6185,17 @@ document.addEventListener('click', (event) => {
     appendToReel();
     return;
   }
+  if (hit.dataset.cropAspect) {
+    state.reelCrop = { ...(state.reelCrop || {}), aspect: hit.dataset.cropAspect };
+    renderReelEditor();
+    return;
+  }
+  if (hit.dataset.cropFill) {
+    state.reelCrop = { ...(state.reelCrop || {}), fill: hit.dataset.cropFill };
+    renderReelEditor();
+    return;
+  }
+  if (hit.dataset.cropGo) { cutReelShape(); return; }
   if (hit.dataset.reelPc) { reelControl(hit.dataset.reelPc); return; }
   if (hit.dataset.reelRender !== undefined) { startReelRender(); return; }
   if (hit.dataset.reelAdd !== undefined) {
