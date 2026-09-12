@@ -2469,8 +2469,12 @@ function liveForm(u, busy) {
       <div class="ingest-foot">
         <button class="btn-accent btn-accent-lg" data-schedule-live="1"
                 ${ready && !busy ? '' : 'disabled'}>
-          ${esc(u.status === 'scheduling' ? t('ingest.scheduling') : t('ingest.schedule'))}
+          ${esc(u.status === 'scheduling'
+    ? (l.editing ? t('ingest.saving') : t('ingest.scheduling'))
+    : (l.editing ? t('ingest.saveBooking') : t('ingest.schedule')))}
         </button>
+        ${l.editing ? `<button class="link-btn" data-cancel-edit-live="1">${
+    esc(t('ingest.cancelEdit'))}</button>` : ''}
         <span class="ingest-ready">${esc(err ? t(err)
     : ready ? `${t('ingest.ready')} — ${u.sport}, ${t('ingest.readyMoments')}`
       : t('ingest.liveNeeds'))}</span>
@@ -3373,6 +3377,9 @@ function liveJobRow(j) {
           </div>` : `
           <div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
         <div class="job-actions">
+          ${live.state === 'scheduled'
+            ? `<button class="link-btn" data-edit-live="${esc(j.id)}">${esc(t('live.edit'))}</button>`
+            : ''}
           ${active
             ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
             : ''}
@@ -4679,6 +4686,94 @@ async function scheduleLiveEvent() {
 }
 
 
+/**
+ * Reopen a booking that has not started, in the panel it was made in.
+ *
+ * A live event is booked hours ahead and the two things most likely to be
+ * wrong by the time it comes round are the window and the playlist URL — a
+ * class running late, a link whose token has turned over. Deleting and
+ * re-booking was the only remedy, and it threw away the title and the context
+ * links with it.
+ *
+ * The panel is the same one, with the booking's id on it: `state.upload.live.
+ * editing`. Once the recorder has started the API refuses, and the row stops
+ * offering this.
+ */
+function editLiveBooking(jobId) {
+  const job = state.jobs.find((j) => j.id === jobId);
+  if (!job) return;
+  const live = job.live || {};
+  const u = state.upload;
+  u.live = {
+    editing: jobId,
+    title: job.title || '',
+    hlsUrl: job.hlsUrl || '',
+    // The inputs are `datetime-local`, which reads and writes local wall time
+    // with no zone; the stored value is UTC.
+    start: localInputValue(live.eventStart),
+    end: localInputValue(live.eventEnd),
+  };
+  u.sport = job.sport || u.sport;
+  u.contextUrls = (job.contextUrls || []).join('\n');
+  u.status = 'idle';
+  // Into the message that is on screen, so the panel opens where the editor is
+  // looking rather than at the top of a transcript they have scrolled away from.
+  const [m] = currentTurn(state.msgs).slice(-1)[0] || [];
+  if (m) { m.showIngest = true; m.ingestKind = 'live'; }
+  else say(t('live.editing'), { showIngest: true, ingestKind: 'live' });
+  render();
+}
+
+
+/** A stored UTC time as the local wall time a datetime-local input wants. */
+function localInputValue(iso) {
+  const at = toDate(iso);
+  if (!at) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+    + `T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+
+/** Save a booking that has not started yet. */
+async function saveLiveBooking() {
+  const u = state.upload;
+  const l = u.live;
+  const err = validateLiveEvent({ hlsUrl: l.hlsUrl, start: l.start, end: l.end });
+  if (err) { say(t(err)); return; }
+
+  u.status = 'scheduling';
+  render();
+  try {
+    const startIso = new Date(l.start).toISOString();
+    await api(`/api/jobs/${l.editing}/live`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        hls_url: l.hlsUrl.trim(),
+        title: l.title.trim() || undefined,
+        sport: u.sport,
+        event_start: startIso,
+        event_end: new Date(l.end).toISOString(),
+        metadata_language: getSettings().metadataLanguage,
+        stall_minutes: getSettings().liveStallMinutes,
+        context_urls: contextUrlList(),
+      }),
+    });
+    u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.contextUrls = '';
+    u.status = 'idle';
+    const when = new Date(startIso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    say(t('live.rescheduledMsg').replace('{start}', when), { showJobs: true });
+  } catch (err) {
+    u.status = 'idle';
+    // The API refuses once the recorder is running, and that is the answer
+    // rather than a failure: the event is under way.
+    say(`${t('live.editFailed')} ${err.message}`);
+  }
+  render();
+}
+
+
 async function resumeUpload(jobId) {
   const pending = state.pendingUploads.find((p) => p.job_id === jobId);
   if (!pending) return;
@@ -4778,6 +4873,7 @@ document.addEventListener('click', (event) => {
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
     + '[data-pc],[data-player-range],[data-watch-ride],'
     + '[data-detail-act],[data-trim],[data-trim-reset],[data-publish-to],'
+    + '[data-edit-live],[data-cancel-edit-live],'
     + '[data-youtube-act],'
     + '[data-ride-tab],[data-type-menu],[data-type-pick]');
 
@@ -4801,6 +4897,13 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.playerRange) { setPlayerRange(hit.dataset.playerRange); return; }
   if (hit.dataset.watchRide) { openRide(hit.dataset.watchRide); return; }
 
+  if (hit.dataset.editLive) { editLiveBooking(hit.dataset.editLive); return; }
+  if (hit.dataset.cancelEditLive) {
+    state.upload.live = { title: '', hlsUrl: '', start: '', end: '' };
+    state.upload.contextUrls = '';
+    render();
+    return;
+  }
   if (hit.dataset.detailAct) {
     if (hit.dataset.detailAct === 'download') downloadMoment();
     // A second press closes the panel again: the button reads as a toggle
@@ -4856,7 +4959,13 @@ document.addEventListener('click', (event) => {
       || 'scopeGame' in hit.dataset || 'scopeDone' in hit.dataset || 'scopeBack' in hit.dataset
       || 'scopeChange' in hit.dataset) { onScopeClick(hit); return; }
   if (hit.dataset.registerHls) { registerFromHls(); return; }
-  if (hit.dataset.scheduleLive) { scheduleLiveEvent(); return; }
+  if (hit.dataset.scheduleLive) {
+    // One button, two jobs: the panel is the booking form and the edit form,
+    // and which it is doing is on the booking it was opened from.
+    if (state.upload.live.editing) saveLiveBooking();
+    else scheduleLiveEvent();
+    return;
+  }
   if (hit.dataset.ingestSrc) { state.upload.src = hit.dataset.ingestSrc; render(); return; }
   if (hit.dataset.opener) { onOpenerClick(hit); return; }
   if (hit.dataset.openerBack) { onOpenerBack(hit); return; }

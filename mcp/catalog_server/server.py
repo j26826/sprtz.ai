@@ -361,6 +361,35 @@ def list_moments(job_id: str, limit: int, min_score: float) -> dict:
 
 
 @mcp.tool
+def update_live_booking(job_id: str, event_start: str = "", event_end: str = "",
+                        hls_url: str = "", title: str = "", sport: str = "",
+                        metadata_language: str = "", stall_minutes: float = 0,
+                        context_urls: list[str] | None = None) -> dict:
+    """Change a live event's booking, before it starts.
+
+    Args:
+        job_id: Identifier of the job.
+        event_start: New ISO 8601 start, or empty to leave it.
+        event_end: New ISO 8601 end, or empty to leave it.
+        hls_url: New playlist URL, or empty to leave it.
+        title: New title, or empty to leave it.
+        sport: New sport, or empty to leave it.
+        metadata_language: New metadata language, or empty to leave it.
+        stall_minutes: New stall limit, or 0 to leave it.
+        context_urls: Replacement context links, or null to leave them.
+    """
+    try:
+        return {"status": "success", **store.update_live_booking(
+            job_id, event_start=event_start, event_end=event_end, hls_url=hls_url,
+            title=title, sport=sport, metadata_language=metadata_language,
+            stall_minutes=stall_minutes, context_urls=context_urls)}
+    except (KeyError, ValueError) as exc:
+        return {"status": "error", "error": str(exc), "job_id": job_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def get_config(name: str) -> dict:
     """Read one deployment configuration document, such as "youtube".
 
