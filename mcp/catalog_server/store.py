@@ -1749,3 +1749,324 @@ def reset_live_chunk(job_id: str, index: int, stale_after_minutes: int = 0) -> d
 
     done, attempts = reset(db().transaction())
     return {"job_id": job_id, "index": int(index), "reset": bool(done), "attempts": attempts}
+
+
+# --- Bounding a cut -----------------------------------------------------------
+#
+# What "this moment" is allowed to mean. The rule lived only in the API route,
+# which was enough while the editor's own button was the only door. It is not
+# enough now: a reel renders many cuts at once and the agent can be asked to
+# publish one, and neither goes through that route. A second door that skipped
+# the bound would let "publish the pirouette" become an hour of the match under
+# a moment's name.
+#
+# So it lives here, where the record is. The arithmetic is unchanged from the
+# route it came from — the same clamps in the same order — because the editor's
+# trim already behaves this way and a silent change to it would be a worse bug
+# than the one being fixed.
+
+# How far either end may be dragged from the moment's own in and out points.
+TRIM_SLACK_SEC = 120.0
+
+# The longest single cut. `MAX_REEL_SEC` bounds a whole reel; this bounds one
+# piece of one.
+MAX_CUT_SEC = 600.0
+
+
+def clamp_cut(own_start: float, own_end: float,
+              start: float | None = None, end: float | None = None) -> tuple[float, float]:
+    """Bound a requested trim against the moment on record.
+
+    Clamps rather than refuses, throughout: a handle dragged to its limit should
+    stop, not start failing. Pure, so the boundary conditions are testable
+    without Firestore or a running route.
+    """
+    own_start = max(0.0, float(own_start or 0.0))
+    own_end = max(own_start, float(own_end or 0.0))
+    at_start = own_start if start is None else float(start)
+    at_end = own_end if end is None else float(end)
+
+    at_start = max(0.0, min(at_start, max(0.0, own_start - TRIM_SLACK_SEC) + 2 * TRIM_SLACK_SEC))
+    at_start = max(max(0.0, own_start - TRIM_SLACK_SEC), min(at_start, own_end))
+    at_end = min(own_end + TRIM_SLACK_SEC, max(at_end, own_start))
+    if at_end <= at_start:
+        at_end = at_start + 1.0
+    at_end = min(at_end, at_start + MAX_CUT_SEC)
+    return round(at_start, 3), round(at_end, 3)
+
+
+def plan_cut(job_id: str, moment_id: str,
+             start_sec: float | None = None, end_sec: float | None = None) -> dict[str, Any]:
+    """Resolve a requested trim against the record, in seconds and milliseconds.
+
+    The record is the source of truth, never the request. Milliseconds are
+    returned alongside because a reel's cut points are stored as integers: a cut
+    is a decision someone made by dragging a handle, and re-rounding it on every
+    save would let it walk.
+    """
+    moment = get_moment(job_id, moment_id)
+    if moment is None:
+        raise KeyError(f"No moment {moment_id} in job {job_id}")
+    start, end = clamp_cut(
+        float(moment.get("start_sec") or 0.0),
+        float(moment.get("end_sec") or 0.0),
+        start_sec, end_sec,
+    )
+    return {
+        "job_id": job_id,
+        "moment_id": moment_id,
+        "start_sec": start,
+        "end_sec": end,
+        "start_ms": round(start * 1000),
+        "end_ms": round(end * 1000),
+        "label": moment.get("label", ""),
+        "summary": moment.get("summary", ""),
+    }
+
+
+# --- Reels --------------------------------------------------------------------
+#
+# A reel is an ordered list of cuts and the copy that will go out with it. It is
+# top-level rather than a subcollection of a job because a reel may draw on
+# several matches: a season's best pirouettes are four events, and hanging that
+# document under one of them would make the other three second-class.
+#
+# The old `clips` subcollection is a different shape and still sits on jobs
+# analysed before September 2026. Nothing here touches it; the name is
+# deliberately not reused.
+
+# The cuts live on the reel document as an array rather than in a subcollection.
+# Reordering is the commonest edit and an array makes it one atomic write where
+# a subcollection would make it one write per cut with an ordering field to keep
+# consistent. The ceiling is what keeps that defensible.
+MAX_REEL_CUTS = 50
+
+# The whole reel, not one cut. `_MAX_CUT_SEC` in the API bounds a single moment;
+# without a total, fifty of them under one reel's name is fifty times that.
+MAX_REEL_SEC = 900.0
+
+# A Short is a different product, not a shorter video: YouTube treats 9:16 at or
+# under this length as one, and over it as an ordinary video that happens to be
+# tall.
+MAX_SHORT_SEC = 60.0
+
+REEL_ASPECTS = ("16:9", "9:16")
+
+# What an editor may change. `render` and `publish` are written by the machinery
+# that does those things and are not the editor's to set; `ownerUid` and
+# `createdAt` are provenance. Same reasoning as the clip allow-list that
+# preceded this: a caller that could rewrite them would break the audit trail
+# silently rather than loudly.
+_REEL_WRITABLE = {
+    "title", "description", "tags", "hashtags", "categoryId",
+    "privacy", "aspect", "cuts", "thumbnail",
+}
+
+
+def reel_ref(reel_id: str):
+    return db().collection("reels").document(reel_id)
+
+
+def _cut_out(cut: dict[str, Any], order: int) -> dict[str, Any]:
+    """One cut, normalised.
+
+    Times are integer milliseconds throughout. The records store float seconds
+    and the player reads float seconds, but a cut point is a decision someone
+    made by dragging a handle, and rounding it on every save would let it walk.
+    """
+    start = max(0, int(cut.get("startMs") or 0))
+    end = max(start + 1, int(cut.get("endMs") or 0))
+    return {
+        "cutId": str(cut.get("cutId") or f"c{order:03d}"),
+        "order": order,
+        "jobId": str(cut.get("jobId") or ""),
+        "momentId": str(cut.get("momentId") or ""),
+        "startMs": start,
+        "endMs": end,
+        "label": str(cut.get("label") or ""),
+        # Which match this came from, denormalised so a reel row can name its
+        # sources without reading every job.
+        "jobTitle": str(cut.get("jobTitle") or ""),
+    }
+
+
+def normalise_cuts(cuts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Order the cuts, renumber them, and total their length.
+
+    Pure, so the ordering and the ceiling can be tested without Firestore.
+    """
+    ordered = [_cut_out(c, i) for i, c in enumerate(cuts[:MAX_REEL_CUTS])]
+    total = sum(c["endMs"] - c["startMs"] for c in ordered)
+    return ordered, total
+
+
+def _reel_out(data: dict[str, Any]) -> dict[str, Any]:
+    """Firestore document -> the shape the API and the agents read."""
+    cuts = data.get("cuts") or []
+    return {
+        "type": "Reel",
+        "reelId": data.get("reelId", ""),
+        "title": data.get("title", ""),
+        "description": data.get("description", ""),
+        "tags": list(data.get("tags") or []),
+        "hashtags": list(data.get("hashtags") or []),
+        "categoryId": data.get("categoryId", ""),
+        "privacy": data.get("privacy", "private"),
+        "aspect": data.get("aspect", "16:9"),
+        "cuts": cuts,
+        "cutCount": len(cuts),
+        "jobIds": list(data.get("jobIds") or []),
+        "durationMs": int(data.get("durationMs") or 0),
+        "thumbnail": data.get("thumbnail") or {},
+        "render": data.get("render") or {},
+        "publish": data.get("publish") or {},
+        "ownerUid": data.get("ownerUid", ""),
+        "createdAt": data.get("createdAt"),
+        "updatedAt": data.get("updatedAt"),
+    }
+
+
+def create_reel(owner_uid: str, title: str, cuts: list[dict[str, Any]],
+                aspect: str = "16:9", reel_id: str = "") -> dict[str, Any]:
+    """Open a reel from a set of chosen moments."""
+    import uuid
+
+    rid = reel_id or uuid.uuid4().hex[:12]
+    ordered, total = normalise_cuts(cuts)
+    payload = {
+        "reelId": rid,
+        # Provenance, not a gate. Any signed-in editor can open and change a
+        # reel, the same rule jobs follow: this is one desk.
+        "ownerUid": owner_uid,
+        "title": title,
+        "description": "",
+        "tags": [],
+        "hashtags": [],
+        # 17 is Sports. YouTube requires a category and there is exactly one
+        # right answer for everything this desk cuts.
+        "categoryId": "17",
+        # Never public on creation. Publishing is irreversible and the reel has
+        # not been watched yet.
+        "privacy": "private",
+        "aspect": aspect if aspect in REEL_ASPECTS else "16:9",
+        "cuts": ordered,
+        # Denormalised from the cuts so "which reels use this match" is an
+        # equality filter with no ordering, which needs no composite index.
+        "jobIds": sorted({c["jobId"] for c in ordered if c["jobId"]}),
+        "durationMs": total,
+        "thumbnail": {},
+        "render": {},
+        "publish": {},
+        "createdAt": now(),
+        "updatedAt": now(),
+    }
+    reel_ref(rid).set(payload)
+    return _reel_out(payload)
+
+
+def get_reel(reel_id: str) -> dict[str, Any]:
+    doc = reel_ref(reel_id).get()
+    if not doc.exists:
+        raise KeyError(f"No reel {reel_id}")
+    return _reel_out(doc.to_dict() or {})
+
+
+def list_reels(limit: int = 50) -> list[dict[str, Any]]:
+    """The desk's reels, most recently worked on first.
+
+    Ordering on one field with no filter is served by the automatic single-field
+    index, so this needs nothing declared in firestore.tf.
+    """
+    from google.cloud import firestore
+
+    query = (
+        db().collection("reels")
+        .order_by("updatedAt", direction=firestore.Query.DESCENDING)
+        .limit(limit)
+    )
+    return [_reel_out(d.to_dict() or {}) for d in query.stream()]
+
+
+def reels_using_job(job_id: str) -> list[dict[str, Any]]:
+    """Reels holding a cut from this match.
+
+    Equality-only and unordered on purpose: `array_contains` plus an ordering
+    would be a composite index, and the caller — deleting a match — wants to
+    know *whether* any reel is affected far more than it wants them sorted.
+    """
+    from google.cloud import firestore
+
+    query = db().collection("reels").where(
+        filter=firestore.FieldFilter("jobIds", "array_contains", job_id))
+    return [_reel_out(d.to_dict() or {}) for d in query.stream()]
+
+
+def update_reel(reel_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Change a reel's copy or its cuts.
+
+    Anything outside the allow-list is reported back rather than written: a
+    caller that could set `render` would be claiming a render happened, and one
+    that could set `ownerUid` would be rewriting who made it.
+    """
+    doc = reel_ref(reel_id).get()
+    if not doc.exists:
+        raise KeyError(f"No reel {reel_id}")
+
+    writes: dict[str, Any] = {}
+    rejected: list[str] = []
+    for key, value in patch.items():
+        if key not in _REEL_WRITABLE:
+            rejected.append(key)
+            continue
+        writes[key] = value
+
+    if "aspect" in writes and writes["aspect"] not in REEL_ASPECTS:
+        writes.pop("aspect")
+        rejected.append("aspect")
+    if "privacy" in writes and writes["privacy"] not in ("private", "unlisted", "public"):
+        writes.pop("privacy")
+        rejected.append("privacy")
+
+    # The cuts decide two derived fields, so they cannot be written alone.
+    if "cuts" in writes:
+        ordered, total = normalise_cuts(list(writes["cuts"] or []))
+        writes["cuts"] = ordered
+        writes["durationMs"] = total
+        writes["jobIds"] = sorted({c["jobId"] for c in ordered if c["jobId"]})
+        # A reel whose cuts changed is no longer the reel that was rendered.
+        writes["render"] = {}
+
+    if writes:
+        writes["updatedAt"] = now()
+        reel_ref(reel_id).update(writes)
+
+    out = _reel_out((reel_ref(reel_id).get().to_dict()) or {})
+    if rejected:
+        out["rejected"] = sorted(rejected)
+    return out
+
+
+def set_reel_render(reel_id: str, render: dict[str, Any]) -> dict[str, Any]:
+    """Record where a render got to. Written by the machinery, not the editor."""
+    reel_ref(reel_id).update({"render": render, "updatedAt": now()})
+    return get_reel(reel_id)
+
+
+def set_reel_publish(reel_id: str, publish: dict[str, Any]) -> dict[str, Any]:
+    """Record a publish attempt and its outcome."""
+    reel_ref(reel_id).update({"publish": publish, "updatedAt": now()})
+    return get_reel(reel_id)
+
+
+def delete_reel(reel_id: str) -> dict[str, Any]:
+    """Remove a reel.
+
+    Never the moments it was cut from, and never the matches: a reel is a
+    proposal about footage, and withdrawing the proposal says nothing about the
+    footage. Same rule the withdrawn clip code carried.
+    """
+    doc = reel_ref(reel_id).get()
+    if not doc.exists:
+        raise KeyError(f"No reel {reel_id}")
+    reel_ref(reel_id).delete()
+    return {"reel_id": reel_id, "deleted": True}

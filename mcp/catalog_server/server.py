@@ -761,6 +761,156 @@ def reset_live_chunk(job_id: str, index: int, stale_after_minutes: int = 0) -> d
         return _fail(exc, job_id=job_id, index=index)
 
 
+@mcp.tool
+def plan_cut(job_id: str, moment_id: str,
+             start_sec: float | None = None, end_sec: float | None = None) -> dict:
+    """Bound a requested trim against the moment on record.
+
+    The one place a cut's in and out points are decided. Whoever asks — the
+    editor's own trim, a reel being assembled, an agent asked to publish — the
+    record is what the request is measured against, so "this moment" cannot
+    become an hour of the match under a moment's name. Clamps rather than
+    refuses: a handle dragged to its limit should stop, not fail.
+
+    Args:
+        job_id: Match the moment belongs to.
+        moment_id: Moment being cut.
+        start_sec: Requested in point. Omitted means the moment's own.
+        end_sec: Requested out point. Omitted means the moment's own.
+    """
+    try:
+        return {"status": "success", **store.plan_cut(job_id, moment_id, start_sec, end_sec)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "job_id": job_id, "moment_id": moment_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id, moment_id=moment_id)
+
+
+@mcp.tool
+def create_reel(owner_uid: str, title: str, cuts: list[dict], aspect: str = "16:9") -> dict:
+    """Open a reel from a set of chosen moments.
+
+    Cuts may name several matches: a reel is top-level rather than a job's,
+    because a season's best rounds are four events and hanging that under one
+    of them would make the other three second-class.
+
+    Args:
+        owner_uid: Who made it. Provenance; any signed-in editor may edit it.
+        title: What to call it.
+        cuts: Ordered cuts, each with jobId, momentId, startMs, endMs, label.
+        aspect: "16:9" or "9:16".
+    """
+    try:
+        return {"status": "success", "reel": store.create_reel(owner_uid, title, cuts, aspect)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
+@mcp.tool
+def get_reel(reel_id: str) -> dict:
+    """One reel, with its cuts and its copy.
+
+    Args:
+        reel_id: Reel to read.
+    """
+    try:
+        return {"status": "success", "reel": store.get_reel(reel_id)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "reel_id": reel_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id)
+
+
+@mcp.tool
+def list_reels(limit: int = 50) -> dict:
+    """The desk's reels, most recently worked on first.
+
+    Args:
+        limit: How many to return.
+    """
+    try:
+        return {"status": "success", "reels": store.list_reels(limit)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
+@mcp.tool
+def update_reel(reel_id: str, patch: dict) -> dict:
+    """Change a reel's copy or its cuts.
+
+    Anything outside the writable set comes back under `rejected` rather than
+    being written: `render` and `publish` are records of what happened, not
+    fields an editor sets.
+
+    Args:
+        reel_id: Reel to change.
+        patch: Fields to write.
+    """
+    try:
+        return {"status": "success", "reel": store.update_reel(reel_id, patch)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "reel_id": reel_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id)
+
+
+@mcp.tool
+def set_reel_render(reel_id: str, render: dict) -> dict:
+    """Record where a reel's render got to.
+
+    Args:
+        reel_id: Reel being rendered.
+        render: Status, transcoder job, output URI, error.
+    """
+    try:
+        return {"status": "success", "reel": store.set_reel_render(reel_id, render)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id)
+
+
+@mcp.tool
+def set_reel_publish(reel_id: str, publish: dict) -> dict:
+    """Record a reel's publish attempt and its outcome.
+
+    Args:
+        reel_id: Reel being published.
+        publish: Status, video id, url, error.
+    """
+    try:
+        return {"status": "success", "reel": store.set_reel_publish(reel_id, publish)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id)
+
+
+@mcp.tool
+def delete_reel(reel_id: str) -> dict:
+    """Remove a reel. Never the moments it was cut from, nor the matches.
+
+    Args:
+        reel_id: Reel to remove.
+    """
+    try:
+        return {"status": "success", **store.delete_reel(reel_id)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "reel_id": reel_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id)
+
+
+@mcp.tool
+def reels_using_job(job_id: str) -> dict:
+    """Reels holding a cut from this match, so deleting it can say what breaks.
+
+    Args:
+        job_id: Match to check.
+    """
+    try:
+        return {"status": "success", "reels": store.reels_using_job(job_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+
 def main() -> None:
     mcp.run(
         transport="http",
