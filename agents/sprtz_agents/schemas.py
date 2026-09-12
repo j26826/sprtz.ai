@@ -560,6 +560,32 @@ class GameDetails(BaseModel):
     show_title: str = ""
     location: str = ""
     equipe_url: str = ""
+    # Which competition of a recording this record is. A live URL points at an
+    # arena rather than at a contest, so a day's capture crosses class after
+    # class — and each is an event of its own, named for the class, holding
+    # only its own rides. Empty for a recording that held one competition,
+    # which is every handball match and every single-class day.
+    class_id: str = ""
+    class_name: str = ""
+    class_url: str = ""
+    class_start_at: str = ""
+    # "schedule" when the published timetable placed these rides, "caption"
+    # when what was read in the arena moved them. A boundary that was published
+    # and one that was observed are different kinds of fact.
+    class_decided_by: str = ""
+    show_id: int = 0
+    show_url: str = ""
+    # The rest of what the published record says about this class: how the
+    # organiser numbered it, where it ran, the test that was ridden and the
+    # movements it was marked on — a 7 for a piaffe at coefficient 2 is not a 7
+    # for an entry, and the sheet is what the marks mean.
+    class_no: str = ""
+    arena: str = ""
+    test_name: str = ""
+    test_movements: list[dict] = Field(default_factory=list)
+    # Whether the results are final or the class was still being judged when
+    # this was read. A placing that can still move is not a placing.
+    results_final: bool = False
     judges: list[dict] = Field(default_factory=list)
     start_list: list[dict] = Field(default_factory=list)
     # How the start list was placed against the video: how many named rounds

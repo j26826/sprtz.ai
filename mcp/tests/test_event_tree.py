@@ -172,8 +172,11 @@ class TestTheStoreRead:
 
         with patch.object(store, "get_job", return_value={"title": "Upload", "sport": "equestrian"}), \
              patch.object(store, "game_ref") as game_ref, \
+             patch.object(store, "canonical_game", return_value="j1"), \
+             patch.object(store, "db") as fake_db, \
              patch.object(store, "job_ref", return_value=job):
             game_ref.return_value.get.return_value = missing
+            fake_db.return_value.collection.return_value.document.return_value.get.return_value = missing
             tree = store.event_tree("j1")
 
         assert tree["event"]["title"] == "Upload"
@@ -183,8 +186,13 @@ class TestTheStoreRead:
 class TestTheRidesRead:
     """list_game_rides reads the rides the game summary shape leaves out."""
 
-    def _read(self, snapshot):
-        with patch.object(store, "game_ref") as game_ref:
+    def _read(self, snapshot, split=()):
+        # `game_docs` is the fallback: no record under the bare job id means
+        # the recording may have been split into its classes, and the day's
+        # rides are then gathered from those. Empty here is a job that simply
+        # has no record yet.
+        with patch.object(store, "game_ref") as game_ref, \
+                patch.object(store, "game_docs", return_value=list(split)):
             game_ref.return_value.get.return_value = snapshot
             return store.get_rides("j1")
 
@@ -208,6 +216,24 @@ class TestTheRidesRead:
     def test_no_game_record_is_an_error_not_an_empty_day(self):
         with pytest.raises(KeyError):
             self._read(MagicMock(exists=False))
+
+    def test_a_split_day_reads_its_classes_in_running_order(self):
+        # A recording that crossed three classes has no record under the job
+        # id; it has one per class, and the day's rides are all of them.
+        def doc(class_id, rides, title):
+            snap = MagicMock(id=f"j1__{class_id}")
+            snap.to_dict.return_value = {"classId": class_id, "title": title, "rides": rides}
+            return snap
+
+        rides = self._read(MagicMock(exists=False), split=[
+            doc("1278777", [{"order": 7, "rider": "Olivia Oakeley"}], "Silver"),
+            doc("1278771", [{"order": 14, "rider": "Kimberley Siddorn"}], "Gold"),
+        ])
+
+        assert [r["order"] for r in rides] == [7, 14]
+        # Each ride says which competition it was in, because a day's list is
+        # read across classes and an order alone no longer identifies one.
+        assert [r["class_name"] for r in rides] == ["Silver", "Gold"]
 
 
 class TestTheChunkKeepsItsRides:

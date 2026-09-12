@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -74,4 +74,42 @@ test('search and desk filters follow the scope', () => {
   assert.deepEqual(scopeFilters({ kind: 'category', sport: 'equestrian', disciplines: ['Dressage'] }, games),
     { sport: '', jobIds: ['b', 'd'] });
   assert.deepEqual(scopeFilters({ kind: 'games', jobIds: ['c'] }, games), { sport: '', jobIds: ['c'] });
+});
+
+
+describe('one recording, several events', () => {
+  // A day's live capture crosses class after class, and each class is a record
+  // of its own carrying the same jobId. Identity is the document; the
+  // recording is a second question.
+  const silver = { id: 'job1__1278777', jobId: 'job1', title: 'PSG Silver', sport: 'equestrian' };
+  const gold = { id: 'job1__1278771', jobId: 'job1', title: 'PSG Freestyle Gold', sport: 'equestrian' };
+  const other = { id: 'job2', jobId: 'job2', title: 'Handball', sport: 'handball' };
+  const desk = [silver, gold, other];
+
+  it('scoping to one class takes that class alone', () => {
+    const inScope = gamesInScope({ kind: 'games', jobIds: ['job1__1278771'] }, desk);
+    assert.deepEqual(inScope.map((g) => g.id), ['job1__1278771']);
+  });
+
+  it('scoping to the recording takes every class in it', () => {
+    const inScope = gamesInScope({ kind: 'games', jobIds: ['job1'] }, desk);
+    assert.deepEqual(inScope.map((g) => g.id), ['job1__1278777', 'job1__1278771']);
+  });
+
+  it('the agent is sent recordings, because its filter is over jobs', () => {
+    // A class id would match no job at all, and the answer would come back
+    // empty for a scope that plainly names something.
+    const filters = scopeFilters({ kind: 'games', jobIds: ['job1__1278771'] }, desk);
+    assert.deepEqual(filters.jobIds, ['job1']);
+  });
+
+  it('a recording scoped whole is sent once, not once per class', () => {
+    const filters = scopeFilters({ kind: 'games', jobIds: ['job1'] }, desk);
+    assert.deepEqual(filters.jobIds, ['job1']);
+  });
+
+  it('a scope naming something the desk has not loaded is left as it is', () => {
+    const filters = scopeFilters({ kind: 'games', jobIds: ['job9'] }, desk);
+    assert.deepEqual(filters.jobIds, ['job9']);
+  });
 });

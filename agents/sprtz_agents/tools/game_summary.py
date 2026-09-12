@@ -246,5 +246,39 @@ def embed_text(game: GameDetails) -> str:
         game.mood,
         game.sentiment,
         game.summary,
+        # What the published record adds, for a record that is one class of a
+        # show. These are the words an equestrian desk searches by and none of
+        # them appear above: the class itself, the show it belonged to, the
+        # test that was ridden, the arena it ran in, the panel that judged it,
+        # and who won — "the freestyle Sandy Phillips judged", "Dannie Morgan's
+        # winning ride", "the Gold championship in the LeMieux Arena".
+        game.class_name,
+        game.show_title,
+        game.test_name,
+        game.arena,
+        ", ".join(j.get("name", "") for j in game.judges if isinstance(j, dict)),
+        _placings(game),
     ]
     return ". ".join(p.strip() for p in parts if p and p.strip())
+
+
+def _placings(game: GameDetails) -> str:
+    """The first few placings, as words.
+
+    A class is remembered by who won it. The top three cover how people ask —
+    beyond that a list of fifteen names dilutes every other word in the vector.
+    """
+    placed = [r for r in game.rides
+              if isinstance(r, dict) and isinstance(r.get("final_place"), int)]
+    placed.sort(key=lambda r: r["final_place"])
+    said = []
+    for ride in placed[:3]:
+        who = " ".join(x for x in (ride.get("grounded_rider") or ride.get("rider"),
+                                   ride.get("grounded_horse") or ride.get("horse")) if x)
+        if who:
+            said.append(f"{_ordinal(ride['final_place'])} {who}")
+    return ", ".join(said)
+
+
+def _ordinal(place: int) -> str:
+    return {1: "won by", 2: "second", 3: "third"}.get(place, f"placed {place}")

@@ -244,6 +244,11 @@ two apart precisely so you can.
   moments leaves the desk showing "No games yet" beside hundreds of
   detections; this rebuilds the record without re-analysing anything. It is
   also how a live event gets its full record before the event ends.
+- **A day recorded as one event that was really several**: `split_event_classes`
+  reads the show's published timetable and stores one event per class, with the
+  rounds and moments already on record filed under the competition they
+  happened in. Nothing is re-analysed. Offer it when an equestrian recording's
+  running order plainly spans more than one competition.
 - **Delete**: `delete_job` removes the video, the moments and the game
   record, and cannot be undone. Confirm with the editor before calling it unless
   they have already said plainly that they want it gone.
@@ -311,6 +316,7 @@ def _build_tools() -> list:
         pipeline.cancel_job,
         pipeline.delete_job,
         pipeline.summarise_match,
+        pipeline.split_event_classes,
         pipeline.prepare_playback,
         pipeline.generate_thumbnails,
         pipeline.search_moments,

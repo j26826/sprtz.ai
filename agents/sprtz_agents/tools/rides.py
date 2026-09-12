@@ -302,6 +302,11 @@ def match_watchlist(rides: list[dict], watchlist: list[str]) -> list[dict]:
 _GROUND_TOLERANCE = 0.05
 
 
+def _snake(name: str) -> str:
+    """"technicalPct" -> "technical_pct", for callers that send either."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
 def apply_grounding(rides: list[dict], published: list[dict], *, source: str) -> list[dict]:
     """Attach published results to the rides they belong to.
 
@@ -361,6 +366,19 @@ def apply_grounding(rides: list[dict], published: list[dict], *, source: str) ->
         grounded_total = float(total) if isinstance(total, (int, float)) else None
         ride["grounded_total_pct"] = grounded_total
         ride["grounded_source"] = source
+        # The rest of what a published result says, where the source carries
+        # it: each judge's own percentage by where they sat, and the technical
+        # and artistic halves of a freestyle. Never merged into the observed
+        # marks — a broadcast shows five numbers for five seconds and a results
+        # page is the record, and telling them apart is the whole arrangement.
+        marks = hit.get("judgeMarks", hit.get("judge_marks"))
+        if isinstance(marks, dict) and marks:
+            ride["grounded_judge_marks"] = {str(k): float(v) for k, v in marks.items()}
+        for key, published_key in (("grounded_technical_pct", "technicalPct"),
+                                   ("grounded_artistic_pct", "artisticPct")):
+            value = hit.get(published_key, hit.get(_snake(published_key)))
+            if isinstance(value, (int, float)):
+                ride[key] = float(value)
 
         if grounded_total is not None:
             if ride.get("total_pct") is None:
