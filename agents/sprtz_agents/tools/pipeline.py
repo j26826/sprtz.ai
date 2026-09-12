@@ -2176,6 +2176,31 @@ async def list_reels(limit: int = 20) -> dict:
     } for r in reels]}
 
 
+async def find_reels(query: str, limit: int = 5) -> dict:
+    """Find a reel the editor named, by comparing the name rather than its meaning.
+
+    A name is what a vector search is worst at, and a reel's name is usually a
+    match's name with a word on the end, so its embedding would sit on top of
+    the event it was cut from. Use this when the editor names one; use
+    `list_reels` when they ask what exists.
+
+    Args:
+        query: The editor's words, which may contain a reel's name.
+        limit: How many to return.
+    """
+    found = await mcp_client.call_tool("catalog", "find_reels",
+                                       {"query": query, "limit": limit})
+    return {"reels": [{
+        "reel_id": r.get("reelId"),
+        "title": r.get("title"),
+        "cuts": r.get("cutCount"),
+        "duration_ms": r.get("durationMs"),
+        "render": (r.get("render") or {}).get("status") or "none",
+        "shapes": sorted((r.get("crops") or {}).keys()),
+        "published": bool((r.get("publish") or {}).get("url")),
+    } for r in (found.get("reels") or [])]}
+
+
 async def reframe_reel(reel_id: str, aspect: str, focus_x: float = 0.5,
                        fill: str = "crop") -> dict:
     """Cut an existing reel to another shape: 9:16, 4:5 or 1:1.

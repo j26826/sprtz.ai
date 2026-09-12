@@ -3335,3 +3335,69 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   font-variant-numeric: tabular-nums;
   color: var(--color-neutral-800);
 }
+
+/* ── The reels on the desk ────────────────────────────────────────────────
+   A row per reel: what it is called, what is in it, and how far it has got.
+   The whole row opens it, for the reason a moment tile has no buttons — one
+   target is easier to hit than three, and there is only one thing to do. */
+.reel-rows { display: flex; flex-direction: column; gap: var(--space-2); }
+.reel-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  text-align: left;
+  background: var(--color-neutral-200);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+.reel-row:hover { border-color: var(--color-accent); }
+.reel-row-main { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.reel-row-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Counts and durations are readings, so they take the mono and the same
+   colour every other reading on this desk takes. */
+.reel-row-facts {
+  display: flex;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-700);
+}
+.reel-row-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+.reel-row-render {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+/* Ready and published are the two states worth the accent: one says the reel
+   can be cut into shapes, the other that it has left the desk. */
+.reel-row-render[data-state="ready"] { color: var(--color-accent-700); }
+.reel-row-live {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  /* Ink on amber, never white. */
+  color: var(--color-on-accent);
+}

@@ -137,6 +137,7 @@ const state = {
   // for the same reason a scope does: a half-built reel should survive a
   // reload, and the transcript is rebuilt wholesale on every Firestore write.
   pick: [],
+  reels: [],               // every reel on the desk, from its own listener
   reel: null,             // the reel open in the editor, once one is built
   details: null,          // the moment whose popup is open, and playing inside it
   // The title being edited: { jobId, value, at }. The transcript re-renders on
@@ -619,6 +620,7 @@ onAuthStateChanged(auth, async (user) => {
   render();
   watchJobs();
   watchGames();
+  watchReels();
   // An empty screen is not a starting point. With nothing stored this used to
   // paint a blank transcript and wait for the editor to find the + in the
   // rail; the opener is the thing that says what this desk can do, and it only
@@ -661,6 +663,21 @@ function watchGames() {
       render();
     },
     (err) => console.error('games listener', err),
+  );
+}
+
+
+function watchReels() {
+  // Reels are top-level and shared like everything else on this desk. Ordered
+  // by updatedAt alone, which the automatic single-field index serves — the
+  // same reason watchJobs orders by createdAt alone.
+  onSnapshot(
+    query(collection(db, 'reels'), orderBy('updatedAt', 'desc'), limit(50)),
+    (snap) => {
+      state.reels = snap.docs.map((d) => ({ reelId: d.id, ...d.data() }));
+      render();
+    },
+    (err) => console.error('reels listener', err),
   );
 }
 
@@ -4451,6 +4468,9 @@ function cardAnswersIt(m) {
   // Only a card with rides in it answers; "no ride matched" leaves the
   // agent's own reply on screen, which may know why.
   if (m.showRides) return Boolean(ridesFor(m).asked);
+  // An empty desk leaves the agent's reply on screen, which can say what to
+  // do about it; a list of reels answers on its own.
+  if (m.showReels) return (state.reels || []).length > 0;
   if (m.showGames) return state.games.length > 0;
   if (m.showGame) return Boolean(state.game);
   return false;
@@ -4512,6 +4532,7 @@ function render() {
       ${m.showSearch ? searchPanel(m, i) + searchCard(m, i) : ''}
       ${m.showDeskMoments ? deskMomentsCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
+      ${m.showReels ? reelsCard(m, i) : ''}
       ${m.showRides ? ridesCard(m, i) : ''}
       ${m.showIngest ? ingestCard(m) : ''}
       ${m.showJobs ? jobsCard(m, i) : ''}
@@ -5100,6 +5121,90 @@ function reelMeta(reel) {
 }
 
 /**
+ * The reels on the desk, and the way back into one.
+ *
+ * Until this existed a reel was durable and unreachable: it persisted in
+ * Firestore, the agent could list it, and the editor could be opened only by
+ * building a new one. A reel made yesterday could not be found from the app at
+ * all, which made every other thing about it — the render, the shapes, the
+ * copy — worth much less than it looked.
+ */
+function reelsCard(msg, index) {
+  const asked = String(msg.reelQuery || '').trim();
+  const all = state.reels || [];
+  // Named in the question, or all of them. The same idea as the rides board:
+  // the question narrows what is shown, and the head says when it has.
+  const named = asked ? all.filter((r) => reelNamedIn(asked, r)) : [];
+  const rows = named.length ? named : all;
+  if (!rows.length) return emptyCard(t('reels.none'));
+
+  const view = pageOf(rows, msg.page, 6);
+  return `
+    <div class="list">
+      <div class="list-head">
+        <div class="panel-head-title">${esc(t('reels.title'))}</div>
+        <div class="panel-head-meta">
+          ${named.length && named.length !== all.length
+    ? `<span class="list-count">${named.length} ${esc(t('pager.of'))} ${all.length}</span>
+       <button class="link-btn" data-reels-all="${index}">${esc(t('list.showAll'))}</button>`
+    : `<span class="list-count">${all.length}</span>`}
+        </div>
+      </div>
+      <div class="reel-rows">${view.slice.map(reelRow).join('')}</div>
+      ${pagerRow(view, index)}
+    </div>`;
+}
+
+/** Whether a question names this reel. Whole words, never half a title. */
+function reelNamedIn(asked, reel) {
+  const norm = (x) => ` ${String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const title = norm(reel.title);
+  // One word is not a name: "Highlights" is the default title for a reel that
+  // spans several events, and would otherwise answer every question.
+  return title.trim().split(' ').length > 1 && norm(asked).includes(title.trim());
+}
+
+function reelRow(reel) {
+  const render = reel.render || {};
+  const shapes = Object.keys(reel.crops || {}).sort();
+  const published = (reel.publish || {}).url;
+  return `
+    <button class="reel-row" data-reel-open="${esc(reel.reelId)}">
+      <span class="reel-row-main">
+        <span class="reel-row-name">${esc(reel.title || t('reel.untitled'))}</span>
+        <span class="reel-row-facts">
+          <span>${esc(cutCount((reel.cuts || []).length))}</span>
+          <span class="reel-row-len">${esc(msClock(reel.durationMs || 0))}</span>
+          ${(reel.jobIds || []).length > 1
+    ? `<span>${esc(t('reel.fromMatches').replace('{n}', String(reel.jobIds.length)))}</span>` : ''}
+        </span>
+      </span>
+      <span class="reel-row-state">
+        ${render.status ? `<span class="reel-row-render" data-state="${esc(render.status)}">${
+    esc(t(`reel.render.${render.status}`) || render.status)}</span>` : ''}
+        ${shapes.map((a) => `<span class="crop-chip">${esc(a)}</span>`).join('')}
+        ${published ? `<span class="reel-row-live">${esc(t('reels.published'))}</span>` : ''}
+      </span>
+    </button>`;
+}
+
+/** Open a reel that already exists, by id. */
+async function openSavedReel(reelId) {
+  try {
+    const out = await api(`/api/reels/${reelId}`);
+    state.reel = out.reel;
+    state.reelPlay = null;
+    state.reelPublish = null;
+    state.reelCrop = null;
+    openReelEditor();
+    render();
+  } catch (err) {
+    say(humanError(err, 'reels.openFailed'));
+  }
+}
+
+
+/**
  * Cutting the reel to another shape.
  *
  * The render is 16:9 and every shape a feed wants is narrower, so a crop is a
@@ -5654,6 +5759,12 @@ function attachCards(index, question) {
     msg.searchResults = null;
   } else if (card === 'activity') {
     msg.showActivity = true;
+  } else if (card === 'reels') {
+    // Which reels exist, narrowed by any name the question carries. Nothing
+    // is selected and no listener is re-pointed: a reel is not a match, and
+    // asking about one should not change what the desk is showing.
+    msg.showReels = true;
+    msg.reelQuery = question;
   } else if (card === 'rides') {
     // The rides of one event, narrowed by the rider, horse or score bar the
     // question names. Which event: the one that ran the named rider — the
@@ -6183,6 +6294,7 @@ document.addEventListener('click', (event) => {
     + '[data-trim-grab],[data-reel-trim-reset],'
     + '[data-crop-aspect],[data-crop-fill],[data-crop-go],'
     + '[data-reel-publish],[data-reel-publish-to],'
+    + '[data-reel-open],[data-reels-all],'
     + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
     + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
     + '[data-job-events]');
@@ -6357,6 +6469,12 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.cropFill) {
     state.reelCrop = { ...(state.reelCrop || {}), fill: hit.dataset.cropFill };
     renderReelEditor();
+    return;
+  }
+  if (hit.dataset.reelOpen) { openSavedReel(hit.dataset.reelOpen); return; }
+  if (hit.dataset.reelsAll) {
+    const msg = state.msgs[Number(hit.dataset.reelsAll)];
+    if (msg) { msg.reelQuery = ''; msg.page = 0; render(); }
     return;
   }
   if (hit.dataset.reelPublish) {

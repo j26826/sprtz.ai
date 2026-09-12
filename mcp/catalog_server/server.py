@@ -910,6 +910,20 @@ def set_reel_render(reel_id: str, render: dict) -> dict:
 
 
 @mcp.tool
+def find_reels(query: str, limit: int = 5) -> dict:
+    """Find reels a question names, by comparing the name rather than its meaning.
+
+    Args:
+        query: The editor's words, which may contain a reel's name.
+        limit: How many to return.
+    """
+    try:
+        return {"status": "success", "reels": store.match_reels_by_title(query, limit)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
+@mcp.tool
 def set_reel_crop(reel_id: str, aspect: str, crop: dict) -> dict:
     """Record one cut shape against a reel.
 

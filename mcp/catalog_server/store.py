@@ -2292,6 +2292,41 @@ def set_reel_render(reel_id: str, render: dict[str, Any]) -> dict[str, Any]:
     return get_reel(reel_id)
 
 
+def match_reels_by_title(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Find reels whose name appears in ``query``, longest name first.
+
+    The same argument as `match_games_by_title`, for the same reason: a name is
+    what a vector search is worst at, and a reel's name is usually a match's
+    name with a word on the end — "Preview CDI 3* — Grand Prix Freestyle —
+    Highlights" — so its embedding would sit on top of the event it was cut
+    from. Comparing the text answers exactly or not at all.
+
+    One word is not a name here either: a reel called "Highlights" would
+    otherwise answer any question containing the word, and "Highlights" is
+    exactly what the default title is when a reel spans several events.
+    """
+    asked = _title_key(query)
+    if not asked:
+        return []
+
+    hits: list[tuple[int, str]] = []
+    for doc in db().collection("reels").select(["reelId", "title"]).stream():
+        data = doc.to_dict() or {}
+        key = _title_key(data.get("title") or "")
+        if len(key.split()) > 1 and key in asked:
+            hits.append((len(key), data.get("reelId") or doc.id))
+
+    hits.sort(key=lambda hit: hit[0], reverse=True)
+
+    reels: list[dict[str, Any]] = []
+    for _, reel_id in hits[:limit]:
+        try:
+            reels.append(get_reel(reel_id))
+        except KeyError:
+            continue
+    return reels
+
+
 def set_reel_crop(reel_id: str, aspect: str, crop: dict[str, Any]) -> dict[str, Any]:
     """Record one cut shape against the reel.
 

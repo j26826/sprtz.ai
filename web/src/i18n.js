@@ -16,6 +16,10 @@ const BASE = 'en-GB';
 
 const STRINGS = {
   'en-GB': {
+    'reels.title': 'Reels',
+    'reels.none': 'No reels yet. Pick some moments and build one.',
+    'reels.published': 'On YouTube',
+    'reels.openFailed': 'That reel could not be opened.',
     'reel.cutCount.one': '1 cut',
     'reel.publishTitle': 'Publish this reel',
     'reel.rerender': 'Render again',
@@ -553,6 +557,10 @@ const STRINGS = {
   },
 
   de: {
+    'reels.title': 'Reels',
+    'reels.none': 'Noch keine Reels. Wählen Sie Momente aus und erstellen Sie eines.',
+    'reels.published': 'Auf YouTube',
+    'reels.openFailed': 'Dieses Reel konnte nicht geöffnet werden.',
     'reel.cutCount.one': '1 Schnitt',
     'reel.publishTitle': 'Dieses Reel veröffentlichen',
     'reel.rerender': 'Erneut rendern',
@@ -1068,6 +1076,10 @@ const STRINGS = {
   },
 
   it: {
+    'reels.title': 'Reel',
+    'reels.none': 'Nessun reel. Seleziona dei momenti e creane uno.',
+    'reels.published': 'Su YouTube',
+    'reels.openFailed': 'Non è stato possibile aprire questo reel.',
     'reel.cutCount.one': '1 taglio',
     'reel.publishTitle': 'Pubblica questo reel',
     'reel.rerender': 'Renderizza di nuovo',
@@ -1581,6 +1593,10 @@ const STRINGS = {
   },
 
   fr: {
+    'reels.title': 'Reels',
+    'reels.none': 'Aucun reel. Sélectionnez des moments et créez-en un.',
+    'reels.published': 'Sur YouTube',
+    'reels.openFailed': 'Ce reel n\'a pas pu être ouvert.',
     'reel.cutCount.one': '1 séquence',
     'reel.publishTitle': 'Publier ce reel',
     'reel.rerender': 'Générer à nouveau',
@@ -2097,6 +2113,10 @@ const STRINGS = {
   },
 
   es: {
+    'reels.title': 'Reels',
+    'reels.none': 'Aún no hay reels. Selecciona momentos y crea uno.',
+    'reels.published': 'En YouTube',
+    'reels.openFailed': 'No se pudo abrir este reel.',
     'reel.cutCount.one': '1 corte',
     'reel.publishTitle': 'Publicar este reel',
     'reel.rerender': 'Renderizar de nuevo',

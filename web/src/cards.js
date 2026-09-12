@@ -92,6 +92,23 @@ const GAME = anyOf(
 // "giro", "vuelta" and "Runde" all mean a round and all mean five other things,
 // and this route is checked before the games list and the desk search, so a
 // false match here costs a whole screen.
+// A reel is a thing that exists on the desk now, so a question naming one is
+// about that object rather than about the moments inside it. The route was
+// removed with clip generation and the comment below still marks where; this
+// is not that route brought back — that one answered "cut me a reel" with a
+// card of proposals. This one answers "where is the reel I made".
+//
+// "reel" is deliberately not matched on its own in every language: it is a
+// real word in English for a spool and in French for "réel". The plural and
+// the possessive phrasings are what people actually type.
+const REELS = anyOf(
+  'reel|reels|montage|montages|highlight reel|highlight reels',
+  'reel|reels|zusammenschnitt|zusammenschnitte|highlight reel',
+  'reel|reels|montaggio|montaggi',
+  'reel|reels|montage|montages|best of',
+  'reel|reels|montaje|montajes|resumen|resumenes',
+);
+
 const RIDES = anyOf(
   'ride|rides|rider|riders',
   'ritt|ritte|reiter|reiterin|reiterinnen|reitern',
@@ -272,6 +289,12 @@ export function chooseCard(question) {
   // is about rides. Getting one in is still ingesting, whatever it is a ride of.
   const acting = RULES.filter(([card]) => card === 'ingest')
     .some(([, pattern]) => pattern.test(q));
+  // Reels before rides and before the moments fallthrough: "the reel for
+  // Gareth Hughes" is a reel, and until this existed it answered with his
+  // moments — with the agent's own answer hidden, because a card that claims
+  // the answer suppresses the prose.
+  if (REELS.test(q) && !acting) return 'reels';
+
   if (RIDES.test(q) && !acting) return 'rides';
 
   // A search across the desk, before the games route sees "games" or "which

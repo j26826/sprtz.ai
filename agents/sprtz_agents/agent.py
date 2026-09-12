@@ -257,8 +257,10 @@ two apart precisely so you can.
 
 A reel is an ordered set of cuts the editor chooses on screen and renders into
 one video. **You do not decide what goes in one.** Choosing the moments is the
-editor's, in the reel editor; `list_reels` is how you see which exist and what
-state each is in.
+editor's, in the reel editor. `list_reels` is how you see which exist and what
+state each is in, and `find_reels` is how you resolve one the editor names —
+a reel's name is usually a match's name with a word on the end, so searching
+for it by meaning lands on the event it was cut from rather than on the reel.
 
 - **Reframing**: `reframe_reel` cuts a reel that has already been rendered to
   9:16, 4:5 or 1:1. This one you may do when asked, without checking back — it
@@ -333,6 +335,7 @@ def _build_tools() -> list:
         pipeline.search_moments,
         pipeline.describe_taxonomy,
         pipeline.list_reels,
+        pipeline.find_reels,
         pipeline.reframe_reel,
     ]
 
