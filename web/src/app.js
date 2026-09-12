@@ -1048,7 +1048,7 @@ function momentTile(m, opts = {}) {
 
   return `
     <div class="tile">
-      <span class="tile-beta" aria-hidden="true"><span>${esc(t('moment.beta'))}</span></span>
+      <span class="tile-beta" aria-hidden="true"><span>${esc(t('preview.badge'))}</span></span>
       <button class="thumb" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-play="${esc(m.momentId)}"`}
               title="${esc(t('moment.play'))}" aria-label="${esc(`${t('moment.play')}: ${m.summary || kind}`)}"
               ${m.thumbUri && !state.thumbs.urls[m.momentId]
@@ -1761,7 +1761,7 @@ function renderDetailsBody() {
   const over = $('details-player').querySelector('.player-over');
   if (over) over.innerHTML = panel ? panel.over : '';
   const under = $('details-player').querySelector('.player-under');
-  if (under) under.innerHTML = panel ? panel.summary : '';
+  if (under) under.innerHTML = previewNotice() + (panel ? panel.summary : '');
   const actions = $('details-actions');
   if (actions) actions.innerHTML = detailActions();
   const body = $('details-body');
@@ -1969,6 +1969,28 @@ async function publishToYouTube() {
     state.share = { ...state.share, status: 'error', error: err.message };
   }
   renderDetailsBody();
+}
+
+
+/**
+ * What an editor should know before acting on an equestrian moment.
+ *
+ * The taxonomy, the timings and the confidence behind an equestrian moment are
+ * newer than the rest of the analysis and are still being tuned against real
+ * footage, so the record says so where the record is read — under the player,
+ * next to the clip it is about — rather than in a release note nobody opens.
+ * Only for equestrian: saying it of a handball match would be untrue, and a
+ * notice that is on everything is a notice nobody reads.
+ */
+function previewNotice() {
+  const sport = (state.game?.sport
+    || state.jobs.find((j) => j.id === state.jobId)?.sport || '').toLowerCase();
+  if (sport !== 'equestrian') return '';
+  return `
+    <aside class="preview-notice">
+      <span class="preview-notice-tag">${esc(t('preview.badge'))}</span>
+      <p>${esc(t('preview.notice'))}</p>
+    </aside>`;
 }
 
 
@@ -3731,8 +3753,50 @@ function cardAnswersIt(m) {
 const animatedMsgs = new WeakSet();
 
 
+/**
+ * Which event everything on screen is about, said in the two places someone
+ * looks: at the top of the rail, and over the box they type the next question
+ * into.
+ *
+ * The rail is a list of conversations and the composer is a blank box, so
+ * neither said which match the cards under them belong to — and the answer to
+ * "show me the best moments" is a different answer for a different event. The
+ * rail block opens the event's record, as its name suggests; with nothing
+ * open it says so rather than disappearing, because an empty card and an
+ * unopened event look identical from the outside.
+ */
+function renderOpenEvent() {
+  const game = state.game;
+  const job = state.jobs.find((j) => j.id === state.jobId);
+  const title = (game && gameHeadline(game)) || job?.title || '';
+  const meta = game
+    ? [game.discipline || game.sport, game.competition || game.groundedCompetition]
+      .filter(Boolean).join(' · ')
+    : (job?.sport || '');
+
+  const block = $('open-event');
+  if (block) {
+    block.dataset.open = String(Boolean(title));
+    block.disabled = !game;
+    $('open-event-label').textContent = title ? t('context.nowShowing') : t('context.noEvent');
+    $('open-event-title').textContent = title;
+    $('open-event-meta').textContent = title ? meta : '';
+  }
+
+  const strip = $('composer-context');
+  if (strip) {
+    strip.hidden = !title;
+    strip.innerHTML = title
+      ? `<span class="composer-context-label">${esc(t('context.asking'))}</span>
+         <span class="composer-context-title">${esc(title)}</span>`
+      : '';
+  }
+}
+
+
 function render() {
   renderSessions();
+  renderOpenEvent();
   $('transcript').innerHTML = currentTurn(state.msgs).map(([m, i]) => {
     const agent = m.who === 'agent';
     const fresh = agent && !animatedMsgs.has(m);
