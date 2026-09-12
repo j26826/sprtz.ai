@@ -488,17 +488,82 @@ class ClassRun:
     decided_by: str = "schedule"
 
 
+def _same_person(left: str, right: str) -> bool:
+    """Whether two names are the same rider.
+
+    Normalised equality, plus whole-word prefix either way, because a lower
+    third truncates: the arena graphic says "Alexander Harrison" where the
+    start list says "Alexander Harrison-West". Prefixes must be whole words and
+    at least two of them, so "Sue Carson" cannot answer for "Sue Carson-Smith"
+    on one word alone.
+
+    Deliberately no fuzzy bar. A near-miss here does not degrade the answer, it
+    moves a ride into a class it was not in — where failing to match simply
+    leaves the ride to the clock, which is what decided it before.
+    """
+    a, b = normalise(left), normalise(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short.split()) >= 2 and long.startswith(f"{short} ")
+
+
+def entrants_for(show_class: ShowClass, get=None) -> list[str]:
+    """Who was down to ride in a class, from its published start list.
+
+    The strongest thing there is about which class a ride belongs to: it is
+    the organiser's own record of who was in the ring, against a timetable that
+    only says when a class was *due*.
+    """
+    results = results_for(show_class, get=get)
+    return [st.rider for st in (results.starts if results else []) if st.rider]
+
+
+def _entered_in(ride: dict, classes: list[ShowClass],
+                entrants: dict[int, list[str]]) -> list[ShowClass]:
+    """The classes whose start list names this ride's rider.
+
+    Narrowing, not deciding — a rider can be down for two classes on one day
+    and at this show most of them are, so the start lists rule out far more
+    than they rule in. What is left goes to the clock exactly as before.
+
+    A rider nobody can name, or a class whose list could not be read, narrows
+    nothing: every class stays a candidate, which is where this started.
+    """
+    rider = str(ride.get("rider") or "")
+    if not rider or not entrants:
+        return list(classes)
+    named = [c for c in classes
+             if any(_same_person(rider, entry) for entry in entrants.get(c.class_id, []))]
+    return named or list(classes)
+
+
 def assign_classes(rides: list[dict], classes: list[ShowClass], *,
-                   recorded_from: datetime.datetime | None) -> list[ClassRun]:
+                   recorded_from: datetime.datetime | None,
+                   entrants: dict[int, list[str]] | None = None) -> list[ClassRun]:
     """Split a day's rides into the classes they belong to.
 
-    Two signals, and they answer different failures. **The clock places every
-    ride**: a class has a published start and a ride has an absolute time, so
-    each ride belongs to the last class that had started. **The caption
-    corrects it**: timetables slip, and a class that ran forty minutes late
-    would otherwise take its first rides from the class before it. Where a run
-    of rides carries a scoreboard naming a class, that naming wins — it was
-    read off the arena, which is where the competition actually was.
+    Three signals, and they answer different failures. **The start list narrows
+    it**: the organiser published who was down to ride in each class, and a
+    rider in exactly one of them was in exactly one of them — which is the only
+    signal here that is a record rather than an estimate. It narrows rather
+    than decides, because a rider can be entered in two classes on one day and
+    at this show most are. **The clock places every ride** among what is left:
+    a class has a published start and a ride has an absolute time, so each ride
+    belongs to the last class that had started. **The caption corrects it**:
+    timetables slip, and a class that ran forty minutes late would otherwise
+    take its first rides from the class before it. Where a run of rides carries
+    a scoreboard naming a class, that naming wins — it was read off the arena,
+    which is where the competition actually was.
+
+    The start list is what settles the boundary ride. A class runs over, or
+    starts early, and the clock puts the one ride either side of the change on
+    the wrong side of it: on 11 September the freestyle's first rider was filed
+    under the Intermediate I that was still running, and on the 12th the Grand
+    Prix's first was filed under the young horses. One ride each day, both in
+    the published list of exactly one class.
 
     A ride with no absolute time cannot be placed by the clock at all. That is
     an uploaded file rather than a live event, and the answer there is the
@@ -513,8 +578,11 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
 
     for ride in rides or []:
         at = _ride_time(ride, recorded_from)
-        by_clock = _class_at(at, classes) if at is not None else None
-        named, score = _class_named_in(ride, classes)
+        # The start lists first: everything below asks its question of the
+        # classes this rider could actually have been in.
+        pool = _entered_in(ride, classes, entrants or {})
+        by_clock = _class_at(at, pool) if at is not None else None
+        named, score = _class_named_in(ride, pool)
         chosen = None
         if named is not None and by_clock is not None and named.class_id != by_clock.class_id:
             # Both answered and they disagree. The caption only wins by a
@@ -534,9 +602,16 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
             chosen = by_id[by_clock.class_id]
         if chosen is None:
             # Neither the clock nor a caption could place it. The first class
-            # of the day is the honest default: it is where the recording
-            # started, and a ride filed nowhere is a ride nobody can find.
-            chosen = runs[0]
+            # it could have been entered in is the honest default: it is where
+            # the recording started, and a ride filed nowhere is a ride nobody
+            # can find.
+            chosen = by_id[pool[0].class_id] if pool else runs[0]
+        # Say so when the start list is what moved it. The clock's own answer
+        # over every class is what the record would have said before.
+        if len(pool) < len(classes) and at is not None:
+            unnarrowed = _class_at(at, classes)
+            if unnarrowed is not None and unnarrowed.class_id != chosen.show_class.class_id:
+                chosen.decided_by = "start list"
         chosen.rides.append(ride)
 
     return [run for run in runs if run.rides]

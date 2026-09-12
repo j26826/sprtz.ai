@@ -1090,8 +1090,20 @@ def _classes_for(job: dict, game: GameDetails, context_urls: list[str]) -> list[
                 return []
         if not classes:
             return []
+        # Who was down to ride in each of them. One small request per class —
+        # a day in one ring is two or three — and it is the only signal here
+        # that is a record rather than an estimate, so it is worth the calls.
+        # Never fatal: a list that cannot be read narrows nothing, and the
+        # clock decides as it did before.
+        entrants: dict[int, list[str]] = {}
+        for show_class in classes:
+            try:
+                entrants[show_class.class_id] = equipe.entrants_for(show_class)
+            except Exception:
+                logger.warning("could not read the start list for %s",
+                               show_class.class_id, exc_info=True)
         runs = equipe.assign_classes(
-            rides, classes,
+            rides, classes, entrants=entrants,
             recorded_from=equipe.recording_started(job))
         for run in runs:
             run.show = show
