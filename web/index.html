@@ -140,6 +140,21 @@
   </div>
 </div>
 
+<!-- The bar a run's progress is drawn on. It is not in the table: a row of
+     meters down a list of twenty jobs is a wall of moving parts, and only the
+     job somebody is actually waiting on is worth watching. The table says how
+     far along in words; this is where the picture lives. -->
+<div class="modal hidden" id="progress">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="progress-title">
+    <div class="modal-head">
+      <div class="modal-title" id="progress-title"></div>
+      <button class="btn-quiet detail-action" id="close-progress"
+              data-i18n="settings.close">Close</button>
+    </div>
+    <div class="progress-body" id="progress-body"></div>
+  </div>
+</div>
+
 <div class="modal hidden" id="settings">
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <div class="modal-head">
