@@ -1963,17 +1963,21 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 /* Forty rides is a scroller, not a taller card: the rail is navigation, and a
    card that grows with the class buries the conversation it sits in. It runs
-   the full height of the pane beside it rather than stopping at its own
-   content — a rail half the height of what it controls reads as a list that
-   ended, and the empty ground under it belonged to nothing. `height: 100%`
-   with `min-height: 0` is what lets the tabs scroll inside a stretched grid
-   item; without the second, the rail grows instead of scrolling. */
+   the full height of the pane beside it and no further — a rail half the
+   height of what it controls reads as a list that ended, and one taller than
+   the moments it selects makes the board a different size for every rider.
+   The pane decides, because the pane is what is being read.
+
+   `height: 0` with `min-height: 100%` is what makes that true: a grid item
+   with a real height takes part in deciding the row's, so a class of forty
+   would stretch the board to forty rows and scroll nothing. At zero it takes
+   no part, and the minimum then stretches it to whatever the moments came
+   to. */
 .ride-rail {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  max-height: none;
+  height: 0;
+  min-height: 100%;
   padding: var(--space-3) var(--space-2) var(--space-4);
   background: var(--color-bg);
   border-right: var(--rule-hair) solid var(--color-rule);
@@ -2069,6 +2073,17 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .ride-tab[aria-selected="true"] .ride-found { color: var(--color-accent-700); }
 
 .ride-pane { min-width: 0; padding: 14px 20px 22px; }
+
+/* Four across, so a page of twelve is three rows exactly. The shared
+   `.tile-row` fills by width instead, which on a wide window fitted five and
+   on a narrow one three — and the board's height then changed with the window
+   rather than with what was in it, which is what the rail is measured
+   against. Under 900px it goes back to filling, because four across a half
+   card is four thumbnails nobody can see. */
+.ride-pane .tile-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+  .ride-pane .tile-row { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
 
 /* Who, how it scored, and the way into the whole ride. Wrapping rather than
    three fixed columns: the pane is half a card on a narrow window, and a grid
@@ -2511,16 +2526,25 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 
 /* The same answer over the box the next question is typed into. One line,
-   quiet: it qualifies the question rather than competing with it. */
-/* Inset to the composer's own margin so it sits over the box it describes
-   rather than out at the column edge, and given room under the rule above it:
-   at 0 it sat right against that hairline and read as part of it. */
+   quiet: it qualifies the question rather than competing with it.
+
+   Aligned to the box below it, not to the card: the composer keeps a 48px
+   gutter and this had 2px of its own, so the label started forty-odd pixels to
+   the left of the box it is about and read as a stray line rather than as a
+   label on it. The gutter is the composer's own at every width — two numbers
+   that have to match, and they are set together here and in `.composer-inner`
+   because nothing else can keep them in step. */
 .composer-context {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  padding: 14px 48px 10px;
+  /* Five above, six below: the line needs air off the transcript's last card
+     more than it needs it off the box, which it belongs to. */
+  padding: 5px 48px 6px;
   min-width: 0;
+}
+@media (max-width: 900px) {
+  .composer-context { padding-left: 20px; padding-right: 20px; }
 }
 .composer-context-label {
   font-family: var(--font-mono);

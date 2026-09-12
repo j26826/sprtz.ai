@@ -13,6 +13,10 @@ dependencies = [
     "google-cloud-logging>=3.12.0,<4.0.0",
     "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
     "pydantic>=2.9.0",
+    # The show timetable is read straight from Equipe's own JSON API — see
+    # tools/equipe.py. It arrives transitively through google-genai anyway;
+    # named here because this package now depends on it in its own right.
+    "httpx>=0.27.0",
     "python-dotenv>=1.0.1",
     "protobuf>=6.31.1,<7.0.0",
 ]

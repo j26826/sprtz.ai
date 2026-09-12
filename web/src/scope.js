@@ -16,7 +16,13 @@
  *   { kind: 'games', jobIds: [...] }
  */
 
-const idOf = (g) => g.jobId || g.id;
+/* A game is an event; a job is a recording, and one recording can hold several
+   events. A day's live capture crosses class after class, and each class is a
+   record of its own with the same `jobId` — so identity is the document, and
+   the recording is a second question with a second answer. Scoping to either
+   works: an id that names a recording takes every competition in it. */
+const idOf = (g) => g.id || g.jobId;
+const jobIdOf = (g) => g.jobId || g.id;
 const low = (s) => (s || '').toLowerCase();
 
 /** Sports the editor can choose from: what is on the desk, plus what is configured. */
@@ -48,7 +54,7 @@ export function gamesInScope(scope, games) {
   }
   if (scope.kind === 'games') {
     const ids = new Set(scope.jobIds || []);
-    return games.filter((g) => ids.has(idOf(g)));
+    return games.filter((g) => ids.has(idOf(g)) || ids.has(jobIdOf(g)));
   }
   return games;
 }
@@ -112,8 +118,17 @@ export function scopeFilters(scope, games) {
     // A whole sport is the sport filter; some of its disciplines are the
     // matching games, because the index knows sports and not disciplines.
     return discs.length
-      ? { sport: '', jobIds: gamesInScope(scope, games).map(idOf) }
+      ? { sport: '', jobIds: [...new Set(gamesInScope(scope, games).map(jobIdOf))] }
       : { sport: scope.sport, jobIds: [] };
   }
-  return { sport: '', jobIds: [...(scope.jobIds || [])] };
+  // What goes to the agent is recordings, not events: its `job_ids` filter is
+  // over jobs, and a class id would match nothing. A scope naming one class
+  // still narrows every card here, which is where the class lives.
+  const named = gamesInScope(scope, games);
+  return {
+    sport: '',
+    jobIds: named.length
+      ? [...new Set(named.map(jobIdOf))]
+      : [...(scope.jobIds || [])],
+  };
 }

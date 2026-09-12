@@ -38,15 +38,25 @@ def _calls(job=None, tree=None):
 def test_returns_the_catalogs_tree():
     mock = _calls()
     with patch.object(jobs.clients, "call_mcp", mock):
-        out = asyncio.run(jobs.event_tree("j1", USER))
+        out = asyncio.run(jobs.event_tree("j1", user=USER))
     assert out == {"event": TREE}
-    assert mock.await_args_list[-1].args == ("catalog", "get_event_tree", {"job_id": "j1"})
+    assert mock.await_args_list[-1].args == (
+        "catalog", "get_event_tree", {"job_id": "j1", "class_id": ""})
+
+
+def test_one_class_of_a_day_is_asked_for_by_name():
+    # A recording that crossed several classes is several events, and the tree
+    # of one of them is that class's rides and only its moments.
+    mock = _calls()
+    with patch.object(jobs.clients, "call_mcp", mock):
+        asyncio.run(jobs.event_tree("j1", class_id="1278771", user=USER))
+    assert mock.await_args_list[-1].args[2]["class_id"] == "1278771"
 
 
 def test_an_unknown_job_is_404_before_the_catalog_is_asked():
     mock = _calls(job={"status": "error", "error": "No job"})
     with patch.object(jobs.clients, "call_mcp", mock), pytest.raises(HTTPException) as err:
-        asyncio.run(jobs.event_tree("nope", USER))
+        asyncio.run(jobs.event_tree("nope", user=USER))
     assert err.value.status_code == 404
     assert all(c.args[1] != "get_event_tree" for c in mock.await_args_list)
 
@@ -54,7 +64,7 @@ def test_an_unknown_job_is_404_before_the_catalog_is_asked():
 def test_a_catalog_failure_is_an_error_not_an_empty_event():
     mock = _calls(tree={"status": "error", "error": "DeadlineExceeded: Firestore unavailable"})
     with patch.object(jobs.clients, "call_mcp", mock), pytest.raises(HTTPException) as err:
-        asyncio.run(jobs.event_tree("j1", USER))
+        asyncio.run(jobs.event_tree("j1", user=USER))
     assert err.value.status_code == 502
     # What the catalog said goes to the log, not to the browser: an exception
     # rendered as text is true, useless to an editor, and a description of the

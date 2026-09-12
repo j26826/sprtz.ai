@@ -75,7 +75,11 @@ const state = {
   sessions: [],
   sessionKey: null,    // the open session, which may not have a job yet
   scope: null,         // what this session is about — see scope.js
-  jobId: null,
+  jobId: null,          // the recording
+  // The event of it that is open. One recording can hold several — a day's
+  // capture crosses class after class — and this is the game document's id,
+  // which is the job's own id for a recording that held one competition.
+  gameId: null,
   job: null,
   moments: [],
   events: [],
@@ -671,14 +675,27 @@ function ensureJobContext() {
     : null;
   if (session?.jobId) return;
   const inScope = gamesInScope(state.scope, state.games);
-  selectJob(inScope[0] ? (inScope[0].jobId || inScope[0].id) : state.jobs[0].id);
+  const first = inScope[0];
+  if (first) selectJob(first.jobId || first.id, first.id || first.jobId);
+  else selectJob(state.jobs[0].id);
 }
 
 
-function selectJob(jobId) {
+/**
+ * Open a recording, and one event of it.
+ *
+ * A job is a recording and a game is an event, and one recording can hold
+ * several: a day's live capture crosses class after class, and each class is a
+ * record of its own. So the job's listeners are the recording's — its moments,
+ * its feed — while the game listener is the open event's, by document id.
+ * Without a class named, it is the recording's own record, which is what every
+ * handball match and every single-class day has.
+ */
+function selectJob(jobId, gameId = '') {
   state.unsubscribe.forEach((fn) => fn());
   state.unsubscribe = [];
   state.jobId = jobId;
+  state.gameId = gameId || jobId;
   state.moments = [];
   state.game = null;
   state.gameFor = null;
@@ -696,9 +713,10 @@ function selectJob(jobId) {
     if (snap.exists()) { state.job = { id: snap.id, ...snap.data() }; render(); }
   }));
 
-  // The game record lives in its own top-level collection, keyed by job id, so
-  // it is a separate listener rather than part of the job document.
-  state.unsubscribe.push(onSnapshot(doc(db, 'games', jobId), (snap) => {
+  // The game record lives in its own top-level collection and is keyed by the
+  // event rather than by the recording, so it is a separate listener.
+  const gameDoc = state.gameId;
+  state.unsubscribe.push(onSnapshot(doc(db, 'games', gameDoc), (snap) => {
     state.game = snap.exists() ? snap.data() : null;
     state.gameFor = jobId;
     refreshEventTree();
@@ -742,6 +760,7 @@ function refreshEventTree() {
 
   const key = [
     jobId,
+    state.gameId || '',
     rides.map((r) => `${r.order}@${r.start_sec}-${r.end_sec}`).join(','),
     state.moments.map((m) => `${m.momentId}:${m.rideOrder ?? ''}`).join(','),
   ].join('|');
@@ -750,7 +769,12 @@ function refreshEventTree() {
   eventTreeTimer = setTimeout(async () => {
     eventTreeKey = key;
     try {
-      const { event } = await api(`/api/jobs/${encodeURIComponent(jobId)}/event`);
+      // One class of a day is one event: its own rides, and only the moments
+      // that happened inside them.
+      const forClass = state.game?.classId
+        ? `?class_id=${encodeURIComponent(state.game.classId)}` : '';
+      const { event } = await api(
+        `/api/jobs/${encodeURIComponent(jobId)}/event${forClass}`);
       if (state.jobId !== jobId) return;
       state.eventTree = { jobId, event };
       render();
@@ -1160,9 +1184,11 @@ function eventFor(msg) {
 }
 
 
-// Moments per page inside one rider's pane. Twelve rather than the list's ten:
-// the pane is the width of the board and a row holds four, so twelve is three
-// full rows and ten leaves a ragged one.
+// Moments per page inside one rider's pane: four across by three down, which
+// the pane's own grid is fixed at (`.ride-pane .tile-row`). The two are one
+// decision — the page fills the grid exactly, so the board is the same height
+// for every rider, and the rail beside it is measured against that height.
+// Change one and change both.
 const RIDE_MOMENTS_PER_PAGE = 12;
 
 // Rides per page. A ride is a heading and a row of tiles, so a page of them is
@@ -1656,6 +1682,15 @@ function playerMarkup(key) {
 // happened, then when, then who, then how sure. The row is skipped when the
 // value is empty rather than printed blank — a table half full of dashes reads
 // as broken data rather than as unreadable footage.
+/** The class a moment happened in, named from the events on the desk. */
+function classNameOf(m) {
+  if (!m?.classId) return '';
+  const game = state.games.find((g) => g.classId === m.classId
+    && (g.jobId || g.id) === (m.jobId || state.jobId));
+  return game ? (game.title || '') : '';
+}
+
+
 const DETAIL_ROWS = [
   ['moment.summary', (m) => m.summary],
   ['moment.description', (m) => m.description],
@@ -1677,6 +1712,9 @@ const DETAIL_ROWS = [
   // record exists to avoid.
   ['moment.identitySource', (m) => (m.identitySource
     ? t(`identity.${m.identitySource}`) : '')],
+  // Which competition of the day this moment happened in. A recording can
+  // cross class after class, and the same rider appears in more than one.
+  ['moment.competition', (m) => classNameOf(m)],
   ['moment.participant', (m) => m.participant],
   ['moment.participantRole', (m) => m.participantRole],
   ['moment.actionTeam', (m) => m.actionTeam],
@@ -2118,11 +2156,19 @@ function ridePanel(ride, p) {
   // knows it: the marks are read in that order off the results graphic.
   const marks = (r.judgeMarks || []).map((mark, i) =>
     [`${t('ride.judge')} ${judges[i]?.position || i + 1}`, `${Number(mark).toFixed(2)}%`]);
+  // What the results page says, beside what the screen showed. Each judge's own
+  // percentage by the letter they sat at — a mark means nothing without it —
+  // and a freestyle's two halves, which the arena graphic never shows at all.
+  const published = Object.entries(r.groundedJudgeMarks || {})
+    .map(([where, pct]) => [`${t('ride.judge')} ${where}`, `${Number(pct).toFixed(3)}%`]);
   const tiles = [
     [t('ride.total'), r.totalPct == null ? '' : `${Number(r.totalPct).toFixed(3)}%`],
     [t('ride.place'), r.place == null ? '' : String(r.place)],
     ...marks,
     [t('ride.published'), r.groundedTotalPct == null ? '' : `${Number(r.groundedTotalPct).toFixed(3)}%`],
+    ...published,
+    [t('ride.technical'), r.groundedTechnicalPct == null ? '' : `${Number(r.groundedTechnicalPct).toFixed(3)}%`],
+    [t('ride.artistic'), r.groundedArtisticPct == null ? '' : `${Number(r.groundedArtisticPct).toFixed(3)}%`],
   ].filter(([, value]) => value);
   const check = rideCheck({ score_check: r.scoreCheck });
   const who = `${ride.startNumber ? `#${ride.startNumber} ` : ''}${
@@ -2574,6 +2620,27 @@ function stageStrip(job) {
 // and one found by a web search are different kinds of claim.
 const GAME_DETAIL_ROWS = [
   ['game.title', (g) => g.title],
+  // What the show published about this class, where the recording turned out
+  // to hold several. The class is what the record *is*, so it leads; the show
+  // it belonged to is beside it, and the rest — the number the organiser gave
+  // it, the arena, the test that was ridden — is what an editor checks a class
+  // against.
+  ['game.class', (g) => g.className || (g.classId ? g.title : '')],
+  ['game.classNo', (g) => g.classNo],
+  ['game.arena', (g) => g.arena],
+  ['game.test', (g) => g.testName],
+  ['game.classStart', (g) => (g.classStartAt
+    ? new Date(g.classStartAt).toLocaleString(undefined,
+      { dateStyle: 'medium', timeStyle: 'short' }) : '')],
+  // Whether the placings can still move. A result that is not final is not a
+  // result, and the difference is invisible in the number itself.
+  ['game.resultsFinal', (g) => (g.classId
+    ? t(g.resultsFinal ? 'game.resultsFinalYes' : 'game.resultsFinalNo') : '')],
+  // Which decided the boundary: the published timetable, or what was read in
+  // the arena. A class that ran late is placed by its caption, and that is
+  // worth being able to see.
+  ['game.classDecidedBy', (g) => (g.classDecidedBy
+    ? t(`game.decided.${g.classDecidedBy}`) : '')],
   // The published name of the event and where it was, from Equipe. Beside the
   // observed title rather than in place of it: one was read off a caption and
   // one was found by a search, and they are different kinds of claim.
@@ -2744,7 +2811,9 @@ function gameStatus(g) {
  * picture arrives, which already means "no frame here".
  */
 function gameTile(g) {
-  const id = g.jobId || g.id;
+  // The event's own id, not the recording's: a day that crossed three classes
+  // is three tiles, and all three carry the same jobId.
+  const id = g.id || g.jobId;
   const meta = [
     g.sport,
     g.discipline,
@@ -2754,7 +2823,7 @@ function gameTile(g) {
 
   return `
     <button class="tile" data-open-game="${esc(id)}"
-            ${id === state.jobId ? 'aria-current="true"' : ''}>
+            ${id === state.gameId ? 'aria-current="true"' : ''}>
       <span class="tile-thumb"></span>
       <span class="tile-name">${esc(gameHeadline(g))}</span>
       <span class="tile-meta">${esc(meta || t('game.notIdentified'))}</span>
@@ -2803,7 +2872,7 @@ function gamesCard(msg, index) {
                     .filter(Boolean).join(' \u00b7 ') || t('game.notIdentified'))}</div>
                 </div>
                 <div class="moment-actions">
-                  <button class="link-btn" data-open-game="${esc(g.jobId || g.id)}">
+                  <button class="link-btn" data-open-game="${esc(g.id || g.jobId)}">
                     ${esc(t('moment.details'))}
                   </button>
                 </div>
@@ -3846,18 +3915,6 @@ const animatedMsgs = new WeakSet();
 
 
 /**
- * Which event everything on screen is about, said in the two places someone
- * looks: at the top of the rail, and over the box they type the next question
- * into.
- *
- * The rail is a list of conversations and the composer is a blank box, so
- * neither said which match the cards under them belong to — and the answer to
- * "show me the best moments" is a different answer for a different event. The
- * rail block opens the event's record, as its name suggests; with nothing
- * open it says so rather than disappearing, because an empty card and an
- * unopened event look identical from the outside.
- */
-/**
  * What the next question will be about, above the box it is typed in.
  *
  * There was a "Now showing" panel at the top of the session rail saying the
@@ -3874,7 +3931,7 @@ function renderComposerContext() {
   if (strip) {
     strip.hidden = !title;
     strip.innerHTML = title
-      ? `<span class="composer-context-label">${esc(t('context.asking'))}</span>
+      ? `<span class="composer-context-label">${esc(t('context.asking'))}:</span>
          <span class="composer-context-title">${esc(title)}</span>`
       : '';
   }
@@ -4970,7 +5027,14 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.details) { openDetails(hit.dataset.details); return; }
   if (hit.dataset.gameDetails) { openGameDetails(state.game); return; }
   if (hit.dataset.openGame) {
-    openGameDetails(state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame));
+    const game = state.games.find((g) => (g.id || g.jobId) === hit.dataset.openGame)
+      || state.games.find((g) => (g.jobId || g.id) === hit.dataset.openGame);
+    // Opening an event opens it: its rides, its moments and its record are the
+    // class's, not the whole recording's.
+    if (game && ((game.jobId || game.id) !== state.jobId || (game.id || game.jobId) !== state.gameId)) {
+      selectJob(game.jobId || game.id, game.id || game.jobId);
+    }
+    openGameDetails(game);
     return;
   }
   if (hit.dataset.registerGcs) { registerFromStorage(); return; }
