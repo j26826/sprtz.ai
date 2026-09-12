@@ -127,3 +127,62 @@ export function pastEnd(cut, atSec) {
   if (!cut) return false;
   return (Number(atSec) || 0) * 1000 >= (Number(cut.endMs) || 0);
 }
+
+/* ── The trim strip ───────────────────────────────────────────────────────
+   A cut is dragged inside a window wider than the moment itself, because the
+   point of trimming is to take in the run-up or let the reaction breathe —
+   a strip that stopped at the detected edges could only ever shorten. The
+   window is deliberately not the full slack the record allows: 120s either
+   side across a few hundred pixels is a pixel per half-second, and no amount
+   of care with a mouse lands a millisecond there. Dragging is the coarse
+   control and the nudge buttons are the fine one. */
+
+/** The smallest half-window, so a very short moment still has room to grow. */
+export const MIN_PAD_MS = 2000;
+
+/**
+ * The span the strip covers: the detected range plus half its length either
+ * side, floored at MIN_PAD_MS.
+ */
+export function trimWindow(detectedStartMs, detectedEndMs) {
+  const start = Math.max(0, Number(detectedStartMs) || 0);
+  const end = Math.max(start, Number(detectedEndMs) || 0);
+  const pad = Math.max(MIN_PAD_MS, Math.round((end - start) / 2));
+  return { fromMs: Math.max(0, start - pad), toMs: end + pad };
+}
+
+/** Where a timestamp sits in the window, as a percentage of its width. */
+export function pctOf(ms, win) {
+  const span = (win.toMs - win.fromMs) || 1;
+  return Math.max(0, Math.min(100, ((ms - win.fromMs) / span) * 100));
+}
+
+/** The timestamp a fraction across the window, for a drag. */
+export function msAt(fraction, win) {
+  const span = win.toMs - win.fromMs;
+  const clamped = Math.max(0, Math.min(1, Number(fraction) || 0));
+  return Math.round(win.fromMs + clamped * span);
+}
+
+/**
+ * Evenly spaced marks across the window, including both ends.
+ *
+ * The ruler is what makes the strip readable as time rather than as a
+ * proportion — without it a handle two-thirds along says nothing about when.
+ */
+export function rulerTicks(win, count = 7) {
+  const n = Math.max(2, count);
+  const span = win.toMs - win.fromMs;
+  return Array.from({ length: n }, (_, i) => Math.round(win.fromMs + (span * i) / (n - 1)));
+}
+
+/**
+ * Whether a cut still matches what the analysis found.
+ *
+ * The editor shows the detected range beside the trimmed one, so an editor can
+ * see at a glance what they changed and put it back.
+ */
+export function isTrimmed(cut) {
+  if (!cut || cut.detectedStartMs == null) return false;
+  return cut.startMs !== cut.detectedStartMs || cut.endMs !== cut.detectedEndMs;
+}

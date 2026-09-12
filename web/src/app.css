@@ -3007,3 +3007,135 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .reel-split { grid-template-columns: 1fr; }
   .reel-cuts { border-left: 0; border-top: var(--rule-hair) solid var(--color-rule); }
 }
+
+
+/* ── Trimming a moment, before it goes in a reel ──────────────────────────
+   A filmstrip of the moment's own window with the chosen range drawn on it.
+   Every value here is a token: the strip is one of the few places on the desk
+   where amber is load-bearing rather than decorative — the selection and its
+   two handles are the control — so nothing else in the panel takes it. */
+.trim-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 var(--space-4);
+}
+.trim-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.trim-hint { font-size: 11.5px; color: var(--color-neutral-600); }
+
+.trim-strip {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  /* A container that rounds also clips, or the selection's square corners
+     draw over the corner they are meant to sit inside. */
+  overflow: hidden;
+  background: var(--color-neutral-900);
+  touch-action: none;   /* the handles are dragged, not scrolled */
+}
+.trim-frame {
+  flex: 1;
+  min-width: 0;
+  background-color: var(--color-neutral-800);
+  background-size: cover;
+  background-position: center;
+  /* The strip is one frame repeated, not nine real ones — the stills are cut
+     at the peak and there is only ever the one. Dimming alternate frames is
+     what makes it read as a strip of film rather than as a smear. */
+  opacity: 0.85;
+}
+.trim-frame:nth-child(odd) { opacity: 0.7; }
+
+.trim-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: var(--rule) solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.trim-handle {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 14px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: var(--color-accent);
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+.trim-handle-in { left: -7px; }
+.trim-handle-out { right: -7px; }
+.trim-handle .grip {
+  width: 2px;
+  height: 16px;
+  /* Ink on amber, never white. */
+  background: var(--color-on-accent);
+  box-shadow: 3px 0 var(--color-on-accent), -3px 0 var(--color-on-accent);
+}
+.trim-handle:focus-visible { outline: 2px solid var(--color-accent-700); outline-offset: 1px; }
+
+/* Timecodes are a reading, so they are set in the mono. */
+.trim-ruler {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-600);
+}
+
+/* The two edges first, then what they add up to, then the way back. On one
+   row while it fits and stacked when it does not — the readings are the point
+   and a wrapped timecode reads as two numbers. */
+.trim-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+}
+.trim-edge-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-200);
+}
+.trim-at {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  min-width: 68px;
+  text-align: center;
+}
+.trim-ranges {
+  display: inline-flex;
+  gap: var(--space-3);
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-neutral-600);
+}
+.trim-ranges > span { display: inline-flex; gap: 5px; }
+.trim-ranges b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}
+.trim-len { color: var(--color-accent-700) !important; }
+.trim-reset { margin-left: auto; }

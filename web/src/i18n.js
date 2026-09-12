@@ -16,6 +16,13 @@ const BASE = 'en-GB';
 
 const STRINGS = {
   'en-GB': {
+    'trim.title': 'Trim the cut',
+    'trim.hint': 'drag the handles',
+    'trim.detected': 'Detected',
+    'trim.trimmed': 'Trimmed',
+    'trim.reset': 'Reset to detected range',
+    'trim.dragIn': 'Drag the in point',
+    'trim.dragOut': 'Drag the out point',
     'reel.addToOpen': 'Add to reel',
     'reel.build': 'Build reel',
     'reel.clear': 'Clear',
@@ -529,6 +536,13 @@ const STRINGS = {
   },
 
   de: {
+    'trim.title': 'Schnitt anpassen',
+    'trim.hint': 'Griffe ziehen',
+    'trim.detected': 'Erkannt',
+    'trim.trimmed': 'Angepasst',
+    'trim.reset': 'Auf erkannten Bereich zurücksetzen',
+    'trim.dragIn': 'Startpunkt ziehen',
+    'trim.dragOut': 'Endpunkt ziehen',
     'reel.addToOpen': 'Zum Reel hinzufügen',
     'reel.build': 'Reel erstellen',
     'reel.clear': 'Leeren',
@@ -1020,6 +1034,13 @@ const STRINGS = {
   },
 
   it: {
+    'trim.title': 'Regola il taglio',
+    'trim.hint': 'trascina le maniglie',
+    'trim.detected': 'Rilevato',
+    'trim.trimmed': 'Regolato',
+    'trim.reset': 'Ripristina l\'intervallo rilevato',
+    'trim.dragIn': 'Trascina il punto di inizio',
+    'trim.dragOut': 'Trascina il punto di fine',
     'reel.addToOpen': 'Aggiungi al reel',
     'reel.build': 'Crea reel',
     'reel.clear': 'Svuota',
@@ -1509,6 +1530,13 @@ const STRINGS = {
   },
 
   fr: {
+    'trim.title': 'Ajuster la séquence',
+    'trim.hint': 'faites glisser les poignées',
+    'trim.detected': 'Détecté',
+    'trim.trimmed': 'Ajusté',
+    'trim.reset': 'Revenir à la plage détectée',
+    'trim.dragIn': 'Faire glisser le point de départ',
+    'trim.dragOut': 'Faire glisser le point de fin',
     'reel.addToOpen': 'Ajouter au reel',
     'reel.build': 'Créer le reel',
     'reel.clear': 'Vider',
@@ -2001,6 +2029,13 @@ const STRINGS = {
   },
 
   es: {
+    'trim.title': 'Ajustar el corte',
+    'trim.hint': 'arrastra los tiradores',
+    'trim.detected': 'Detectado',
+    'trim.trimmed': 'Ajustado',
+    'trim.reset': 'Restablecer al rango detectado',
+    'trim.dragIn': 'Arrastrar el punto de inicio',
+    'trim.dragOut': 'Arrastrar el punto final',
     'reel.addToOpen': 'Añadir al reel',
     'reel.build': 'Crear reel',
     'reel.clear': 'Vaciar',

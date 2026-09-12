@@ -31,8 +31,8 @@ import { chooseCard, wantsDetail } from './cards.js';
 import { currentTurn } from './transcript.js';
 import { humanMessage, jobFailure } from './errors.js';
 import {
-  isPickedIn, matchCount, moveCut, msClock, nextCut, nudge, pastEnd, pickKey,
-  reelLength, togglePicked,
+  MIN_CUT_MS, isPickedIn, matchCount, moveCut, msAt, msClock, nextCut, nudge,
+  pastEnd, pickKey, pctOf, reelLength, rulerTicks, togglePicked, trimWindow,
 } from './reels.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
@@ -1959,7 +1959,7 @@ function renderDetailsBody() {
   const over = $('details-player').querySelector('.player-over');
   if (over) over.innerHTML = panel ? panel.over : '';
   const under = $('details-player').querySelector('.player-under');
-  if (under) under.innerHTML = previewNotice() + (panel ? panel.summary : '');
+  if (under) under.innerHTML = trimPanel(p) + previewNotice() + (panel ? panel.summary : '');
   const actions = $('details-actions');
   if (actions) actions.innerHTML = detailActions();
   const body = $('details-body');
@@ -1967,6 +1967,123 @@ function renderDetailsBody() {
   body.innerHTML = state.share?.mode === 'publish'
     ? publishPanel()
     : (panel ? panel.reference : '') + (p.moment ? momentRecord(p.moment, Boolean(ride)) : '');
+}
+
+
+/* ── Trimming a moment, before it goes in a reel ──────────────────────────
+   A filmstrip of the moment in its own window, with the chosen range drawn on
+   it between two handles. Dragging is the coarse control; the nudge buttons
+   beside the readout are the fine one, because 120 seconds across a few
+   hundred pixels is half a second a pixel and no mouse lands a millisecond
+   there.
+
+   The detected range is shown beside the trimmed one, and can be put back in
+   one click: what the analysis found is a fact about the footage, and an
+   editor who has dragged past the play needs a way home that does not involve
+   remembering where it was. */
+
+const TRIM_FRAMES = 9;
+
+function trimPanel(p) {
+  if (!p?.moment) return '';
+  const m = p.moment;
+  const detected = { startMs: Math.round(m.startSec * 1000), endMs: Math.round(m.endSec * 1000) };
+  const cut = { startMs: Math.round(p.start * 1000), endMs: Math.round(p.end * 1000), ...detected ? {} : {} };
+  const win = trimWindow(detected.startMs, detected.endMs);
+  const left = pctOf(cut.startMs, win);
+  const right = pctOf(cut.endMs, win);
+  const moved = cut.startMs !== detected.startMs || cut.endMs !== detected.endMs;
+  const thumb = state.thumbs.urls[m.momentId];
+
+  return `
+    <div class="trim-card">
+      <div class="trim-card-head">
+        <span class="panel-label">${esc(t('trim.title'))}</span>
+        <span class="trim-hint">${esc(t('trim.hint'))}</span>
+      </div>
+
+      <div class="trim-strip" data-trim-strip>
+        ${Array.from({ length: TRIM_FRAMES }, (_, i) => `
+          <span class="trim-frame"${thumb ? ` style="background-image:url(${esc(thumb)})"` : ''}
+                aria-hidden="true" data-n="${i}"></span>`).join('')}
+        <span class="trim-selection" style="left:${left}%;width:${Math.max(0, right - left)}%">
+          <button class="trim-handle trim-handle-in" data-trim-grab="start"
+                  aria-label="${esc(t('trim.dragIn'))}"><span class="grip" aria-hidden="true"></span></button>
+          <button class="trim-handle trim-handle-out" data-trim-grab="end"
+                  aria-label="${esc(t('trim.dragOut'))}"><span class="grip" aria-hidden="true"></span></button>
+        </span>
+      </div>
+      <div class="trim-ruler" aria-hidden="true">
+        ${rulerTicks(win, 7).map((ms) => `<span>${esc(shortClock(ms / 1000))}</span>`).join('')}
+      </div>
+
+      <div class="trim-readout">
+        <span class="trim-edge-box">
+          <span class="field-label">${esc(t('reel.start'))}</span>
+          <button class="link-btn" data-trim="start:-1" aria-label="${esc(t('reel.earlier'))}">&minus;</button>
+          <span class="trim-at">${esc(msClock(cut.startMs))}</span>
+          <button class="link-btn" data-trim="start:1" aria-label="${esc(t('reel.later'))}">+</button>
+        </span>
+        <span class="trim-edge-box">
+          <span class="field-label">${esc(t('reel.end'))}</span>
+          <button class="link-btn" data-trim="end:-1" aria-label="${esc(t('reel.earlier'))}">&minus;</button>
+          <span class="trim-at">${esc(msClock(cut.endMs))}</span>
+          <button class="link-btn" data-trim="end:1" aria-label="${esc(t('reel.later'))}">+</button>
+        </span>
+        <span class="trim-ranges">
+          <span>${esc(t('trim.detected'))} <b>${esc(msClock(detected.endMs - detected.startMs))}</b></span>
+          <span>${esc(t('trim.trimmed'))} <b class="trim-len">${
+  esc(msClock(cut.endMs - cut.startMs))}</b></span>
+        </span>
+        ${moved ? `<button class="link-btn trim-reset" data-trim-reset>${
+    esc(t('trim.reset'))}</button>` : ''}
+      </div>
+    </div>`;
+}
+
+/**
+ * Dragging a handle.
+ *
+ * Bound once on the popup rather than per render: the panel is redrawn on
+ * every pointer move, so a listener attached to the handle would be removed
+ * out from under the gesture that started it.
+ */
+function onTrimPointerDown(event) {
+  // `const el = event.target` first, deliberately. web/check.mjs reads the
+  // *first* `event.target.closest(...)` in this file as the whole delegated
+  // click selector, and this function sits above that handler — spelling it
+  // the obvious way here silently blanks the selector and fails every button
+  // in the app.
+  const el = event.target;
+  const handle = el.closest('[data-trim-grab]');
+  if (!handle) return;
+  const strip = handle.closest('[data-trim-strip]');
+  const p = state.playing;
+  if (!strip || !p?.moment) return;
+  event.preventDefault();
+
+  const edge = handle.dataset.trimGrab;
+  const win = trimWindow(Math.round(p.moment.startSec * 1000), Math.round(p.moment.endSec * 1000));
+
+  const move = (ev) => {
+    const box = strip.getBoundingClientRect();
+    const at = msAt((ev.clientX - box.left) / (box.width || 1), win);
+    const next = edge === 'start'
+      ? { start: Math.min(at, p.end * 1000 - MIN_CUT_MS) / 1000, end: p.end }
+      : { start: p.start, end: Math.max(at, p.start * 1000 + MIN_CUT_MS) / 1000 };
+    Object.assign(p, next, { full: false, free: false });
+    renderDetailsBody();
+    syncPlayer();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    // Land the playhead on what was just chosen, so the edge can be judged.
+    const video = playerEl?.querySelector('video');
+    if (video) { video.currentTime = edge === 'start' ? p.start : Math.max(p.start, p.end - 1.5); }
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
 }
 
 
@@ -1992,7 +2109,14 @@ function detailActions() {
   // idioms read as three kinds. The fill stays scarce, which is the brand's
   // rule: Publish is the action, Download and Close are the same button
   // outlined. `.detail-action` is what carries the amber to the quiet two.
+  // Add to reel is here, and the trim is under the video, because this is the
+  // screen where a moment is judged: the range that goes in the reel is the
+  // range that was just watched, trimmed to taste, rather than whatever the
+  // analysis reported for a tile nobody opened.
+  const inReel = isPickedIn(state.pick, p.moment.jobId || state.jobId || '', p.moment.momentId);
   return `
+    <button class="btn-quiet detail-action" data-detail-act="reel" aria-pressed="${inReel}">${
+  esc(t(inReel ? 'reel.removeOne' : (state.reel ? 'reel.addToOpen' : 'reel.addOne')))}</button>
     <button class="btn-quiet detail-action" data-detail-act="download" ${
       state.share?.downloading ? 'disabled' : ''}>${
       esc(state.share?.downloading ? t('share.preparing') : t('share.download'))}</button>
@@ -4656,7 +4780,13 @@ const NUDGE_MS = [1000, 100];
 /** Turn what is picked into a reel, and open it. */
 async function buildReel() {
   if (!state.pick.length) return;
-  const cuts = state.pick.map((p) => ({ job_id: p.jobId, moment_id: p.momentId }));
+  const cuts = state.pick.map((p) => ({
+    job_id: p.jobId,
+    moment_id: p.momentId,
+    // Present only for a moment trimmed in the player; the server falls back
+    // to the record's own points when they are absent.
+    ...(p.startSec == null ? {} : { start_sec: p.startSec, end_sec: p.endSec }),
+  }));
   try {
     const out = await api('/api/reels', {
       method: 'POST',
@@ -4674,6 +4804,31 @@ async function buildReel() {
   }
 }
 
+/**
+ * Put the moment being watched into the reel, at the range on screen.
+ *
+ * The trim travels with it. Everywhere else a pick carries only the moment and
+ * the server resolves its own in and out points; from here the editor has just
+ * dragged them, and throwing that away would make the trim on this screen
+ * decorative.
+ */
+function pickFromPlayer() {
+  const p = state.playing;
+  if (!p?.moment) return;
+  const jobId = p.moment.jobId || state.jobId || '';
+  state.pick = togglePicked(state.pick, {
+    jobId,
+    momentId: p.moment.momentId,
+    label: p.moment.label || p.moment.momentType || '',
+    summary: p.moment.summary || '',
+    startSec: p.start,
+    endSec: p.end,
+  });
+  persistPick();
+  renderDetailsBody();
+  render();
+}
+
 /** Add what has just been picked to the reel already open, and go back to it. */
 async function appendToReel() {
   if (!state.reel || !state.pick.length) return;
@@ -4682,7 +4837,11 @@ async function appendToReel() {
       job_id: c.jobId, moment_id: c.momentId,
       start_sec: c.startMs / 1000, end_sec: c.endMs / 1000,
     })),
-    ...state.pick.map((p) => ({ job_id: p.jobId, moment_id: p.momentId })),
+    ...state.pick.map((p) => ({
+      job_id: p.jobId,
+      moment_id: p.momentId,
+      ...(p.startSec == null ? {} : { start_sec: p.startSec, end_sec: p.endSec }),
+    })),
   ];
   try {
     const out = await api(`/api/reels/${state.reel.reelId}`, {
@@ -5664,6 +5823,9 @@ document.addEventListener('click', (event) => {
     + '[data-youtube-act],'
     + '[data-ride-tab],[data-type-menu],[data-type-pick],[data-progress],'
     + '[data-pick],[data-pick-clear],[data-reel-build],[data-reel-append],'
+    // Dragged rather than clicked, but it is a <button> and the check
+    // rightly wants to know something handles it.
+    + '[data-trim-grab],'
     + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
     + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
     + '[data-job-events]');
@@ -5696,6 +5858,7 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (hit.dataset.detailAct) {
+    if (hit.dataset.detailAct === 'reel') { pickFromPlayer(); return; }
     if (hit.dataset.detailAct === 'download') downloadMoment();
     // A second press closes the panel again: the button reads as a toggle
     // because it is pressed, and a toggle that only opens is a trap.
@@ -6126,6 +6289,10 @@ $('open-settings')?.addEventListener('click', openSettings);
 $('close-settings')?.addEventListener('click', closeSettings);
 $('close-details')?.addEventListener('click', closeDetails);
 $('close-reel')?.addEventListener('click', closeReelEditor);
+// Bound on the popup, not on the handles: the panel is redrawn on every
+// pointer move, so a listener on a handle would be removed out from under
+// the gesture that started it.
+$('details')?.addEventListener('pointerdown', onTrimPointerDown);
 $('reel')?.addEventListener('click', (event) => {
   if (event.target.id === 'reel') closeReelEditor();
 });
