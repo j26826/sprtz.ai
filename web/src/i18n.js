@@ -216,6 +216,9 @@ const STRINGS = {
     'ingest.liveHls': 'Live stream (HLS)',
     'ingest.liveStart': 'Starts',
     'ingest.liveEnd': 'Ends',
+    'ingest.arena': 'Arena',
+    'ingest.arenaPlaceholder': 'LeMieux Arena',
+    'ingest.arenaHint': 'Which ring this camera is on. A show that runs several at once publishes a timetable per arena, and this is what decides which of the day\u2019s classes the recording is split into. Leave it empty and the scoreboards are read instead.',
     'ingest.liveHint':
       'Recording starts five minutes before the start time. Each five-minute chunk '
       + 'is analysed as soon as it is captured, and the game details are written when the event ends.',
@@ -694,6 +697,9 @@ const STRINGS = {
     'ingest.liveHls': 'Live-Stream (HLS)',
     'ingest.liveStart': 'Beginn',
     'ingest.liveEnd': 'Ende',
+    'ingest.arena': 'Arena',
+    'ingest.arenaPlaceholder': 'LeMieux Arena',
+    'ingest.arenaHint': 'Auf welchem Viereck diese Kamera steht. Eine Veranstaltung mit mehreren Pl\u00e4tzen ver\u00f6ffentlicht einen Zeitplan je Arena, und danach wird entschieden, in welche Pr\u00fcfungen die Aufnahme geteilt wird. Leer lassen, dann werden die Anzeigetafeln gelesen.',
     'ingest.liveHint':
       'Die Aufnahme beginnt fünf Minuten vor der Startzeit. Jeder Fünf-Minuten-Abschnitt wird '
       + 'sofort nach der Aufnahme analysiert; die Spieldetails werden am Ende des Events geschrieben.',
@@ -1152,6 +1158,9 @@ const STRINGS = {
     'ingest.liveHls': 'Stream live (HLS)',
     'ingest.liveStart': 'Inizio',
     'ingest.liveEnd': 'Fine',
+    'ingest.arena': 'Campo',
+    'ingest.arenaPlaceholder': 'LeMieux Arena',
+    'ingest.arenaHint': 'In quale campo si trova questa telecamera. Una manifestazione con pi\u00f9 campi pubblica un programma per ciascuno, ed \u00e8 questo a decidere in quali categorie viene divisa la registrazione. Lascia vuoto e verranno letti i tabelloni.',
     'ingest.liveHint':
       "La registrazione inizia cinque minuti prima dell'orario di inizio. Ogni blocco di cinque minuti "
       + "viene analizzato appena catturato; i dettagli della gara vengono scritti alla fine dell'evento.",
@@ -1611,6 +1620,9 @@ const STRINGS = {
     'ingest.liveHls': 'Flux en direct (HLS)',
     'ingest.liveStart': 'Début',
     'ingest.liveEnd': 'Fin',
+    'ingest.arena': 'Carri\u00e8re',
+    'ingest.arenaPlaceholder': 'LeMieux Arena',
+    'ingest.arenaHint': 'Sur quelle carri\u00e8re se trouve cette cam\u00e9ra. Un concours qui en fait tourner plusieurs publie un programme par carri\u00e8re, et c\u2019est ce qui d\u00e9cide en quelles \u00e9preuves l\u2019enregistrement est d\u00e9coup\u00e9. Laissez vide et les tableaux d\u2019affichage seront lus.',
     'ingest.liveHint':
       "L'enregistrement commence cinq minutes avant l'heure de début. Chaque tranche de cinq minutes "
       + "est analysée dès sa capture ; les détails de l'épreuve sont rédigés à la fin de l'événement.",
@@ -2069,6 +2081,9 @@ const STRINGS = {
     'ingest.liveHls': 'Transmisión en directo (HLS)',
     'ingest.liveStart': 'Empieza',
     'ingest.liveEnd': 'Termina',
+    'ingest.arena': 'Pista',
+    'ingest.arenaPlaceholder': 'LeMieux Arena',
+    'ingest.arenaHint': 'En qu\u00e9 pista est\u00e1 esta c\u00e1mara. Un concurso con varias pistas publica un horario por pista, y eso decide en qu\u00e9 pruebas se divide la grabaci\u00f3n. D\u00e9jalo vac\u00edo y se leer\u00e1n los marcadores.',
     'ingest.liveHint':
       'La grabación empieza cinco minutos antes de la hora de inicio. Cada bloque de cinco minutos '
       + 'se analiza en cuanto se captura; los detalles de la prueba se escriben al terminar el evento.',

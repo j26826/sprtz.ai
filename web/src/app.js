@@ -2549,6 +2549,12 @@ function liveForm(u, busy) {
                  placeholder="https://…/live.m3u8" value="${esc(l.hlsUrl || '')}" />
           <div class="setting-hint">${esc(t('ingest.liveHint'))}</div>
         </div>
+        <div class="ingest-field ingest-wide">
+          <div class="field-label">${esc(t('ingest.arena'))}</div>
+          <input class="composer-input" data-live-arena
+                 placeholder="${esc(t('ingest.arenaPlaceholder'))}" value="${esc(l.arena || '')}" />
+          <div class="setting-hint">${esc(t('ingest.arenaHint'))}</div>
+        </div>
         ${contextField(u)}
       </div>
       <div class="ingest-foot">
@@ -5007,9 +5013,10 @@ async function scheduleLiveEvent() {
         title_source: l.title.trim() ? 'editor' : 'derived',
         stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
+        arena: (l.arena || '').trim(),
       }),
     });
-    u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.live = { title: '', hlsUrl: '', start: '', end: '', arena: '' };
     u.contextUrls = '';
     u.status = 'idle';
     selectJob(job.job_id);
@@ -5054,6 +5061,7 @@ function editLiveBooking(jobId) {
     // with no zone; the stored value is UTC.
     start: localInputValue(live.eventStart),
     end: localInputValue(live.eventEnd),
+    arena: job.arena || '',
   };
   u.sport = job.sport || u.sport;
   u.contextUrls = (job.contextUrls || []).join('\n');
@@ -5099,9 +5107,10 @@ async function saveLiveBooking() {
         metadata_language: getSettings().metadataLanguage,
         stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
+        arena: (l.arena || '').trim(),
       }),
     });
-    u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.live = { title: '', hlsUrl: '', start: '', end: '', arena: '' };
     u.contextUrls = '';
     u.status = 'idle';
     const when = new Date(startIso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -5242,7 +5251,7 @@ document.addEventListener('click', (event) => {
 
   if (hit.dataset.editLive) { editLiveBooking(hit.dataset.editLive); return; }
   if (hit.dataset.cancelEditLive) {
-    state.upload.live = { title: '', hlsUrl: '', start: '', end: '' };
+    state.upload.live = { title: '', hlsUrl: '', start: '', end: '', arena: '' };
     state.upload.contextUrls = '';
     render();
     return;
@@ -5554,6 +5563,11 @@ document.addEventListener('input', (event) => {
     u.title = el.value;
   } else if (el.matches('[data-live-title]')) {
     u.live.title = el.value;
+  } else if (el.matches('[data-live-arena]')) {
+    // Like every other field on this panel it lives on the message, because
+    // render() rebuilds the panel on every job write and an analysis running
+    // elsewhere writes often.
+    u.live.arena = el.value;
   } else if (el.matches('[data-live-hls],[data-live-start],[data-live-end]')) {
     const before = validateLiveEvent(u.live);
     if (el.matches('[data-live-hls]')) u.live.hlsUrl = el.value;
