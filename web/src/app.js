@@ -3832,18 +3832,34 @@ async function runResplit() {
   }
   const arena = open.arena.trim();
   const jobId = open.jobId;
+  // The job is the route, not a word in a sentence. Asked in the editor's own
+  // conversation this went wrong three ways in one evening: the request
+  // travelled beside a `[job_id: …]` line naming whichever match was *open*,
+  // so it split a different recording twice and reported success for it; and
+  // a session already told this recording held one class answered the next
+  // request from that rather than by calling anything at all.
+  let out;
+  try {
+    out = await api(`/api/jobs/${jobId}/split`, {
+      method: 'POST',
+      body: JSON.stringify({ arena }),
+    });
+  } catch (err) {
+    open.busy = false;
+    open.error = humanError(err, 'error.resplit');
+    render();
+    return;
+  }
   closeResplit();
-  // `ask` sends the *open* job as `job_id`, and the API puts that ahead of the
-  // prose as `[job_id: …]` — a line the model follows over the sentence. So a
-  // button pressed on one row while another match was open acted on the open
-  // one: this split 4b0e98e0cdb4403b twice while naming a different recording,
-  // and reported success for it. Every other job button selects first; this is
-  // that same line, which it should have had from the start.
+  // Re-splitting a recording is working on it, so it becomes the open match.
   selectJob(jobId);
-  ask(arena
-    ? t('resplit.ask').replace('{job}', jobId).replace('{arena}', arena)
-    : t('resplit.askNoArena').replace('{job}', jobId),
-  { showJobs: true });
+  // What the records say, not what the reply said: every way this has failed
+  // so far came back as a sentence saying it had worked.
+  const names = (out.classes || []).length;
+  say(out.changed
+    ? t('resplit.done').replace('{n}', String(names))
+    : t('resplit.unchanged'));
+  render();
 }
 
 

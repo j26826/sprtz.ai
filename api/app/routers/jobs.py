@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core import cdn, clients
 from app.core.auth import CallerIdentity, current_user
 from app.core.config import Settings, get_settings
+from app.routers.agent import _agent_engine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -692,6 +693,96 @@ async def update_context(
     if result.get("status") == "error":
         raise _upstream(result, "Those links could not be saved. Try again in a moment.")
     return result
+
+
+class SplitRequest(BaseModel):
+    """Which ring the camera was on, if the editor knows."""
+
+    arena: str = Field(default="", max_length=120)
+
+
+SPLIT_USER = "resplit"
+
+
+def _split_turn(engine, job_id: str, arena: str) -> str:
+    """One agent turn, in a session of its own, for this job and nothing else.
+
+    A session per re-split, like the live tick's, and for the same reason: a
+    conversation that has already been told this recording holds one class
+    answers the next request from that rather than by calling anything. The
+    turn that produced no tool call at all had exactly that behind it.
+    """
+    said = f"Split recording {job_id} into its classes."
+    if arena:
+        said += f" The camera was on the {arena}."
+    said += (" Call split_event_classes with this job_id now. Do not ask, do not"
+             " check first, and do not answer from what was said earlier in this"
+             " conversation.")
+    session = engine.create_session(user_id=SPLIT_USER)
+    session_id = session.get("id") if isinstance(session, dict) else session.id
+    last = ""
+    for event in engine.stream_query(
+        user_id=SPLIT_USER, session_id=session_id, message=f"[job_id: {job_id}]\n{said}",
+    ):
+        content = event.get("content") if isinstance(event, dict) else None
+        for part in (content or {}).get("parts", []) or []:
+            if isinstance(part, dict) and part.get("text"):
+                last = part["text"]
+    return last.strip()[:400]
+
+
+def _class_ids(listing: dict) -> list[str]:
+    return sorted(str(record.get("classId") or "")
+                  for record in (listing.get("games") or []) if record.get("classId"))
+
+
+@router.post("/{job_id}/split")
+async def split_into_classes(
+    job_id: str,
+    body: SplitRequest,
+    user: CallerIdentity = Depends(current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Re-file a recording under the competitions its show's timetable says it held.
+
+    The button used to ask the agent in the editor's own conversation, and the
+    request travelled as prose beside a `[job_id: …]` line naming whichever
+    match was *open* — so it split the wrong recording twice, reporting success
+    for it. Here the job is the route, which is the only part of this that was
+    ever ambiguous.
+
+    What the agent answers is not taken as the outcome. The records are read
+    before and after and compared, because every way this has failed so far
+    came back as a sentence saying it had worked.
+    """
+    before = await clients.call_mcp("catalog", "list_games", {"job_id": job_id})
+    if before.get("status") == "error":
+        raise _upstream(before, "That recording could not be read. Try again in a moment.")
+
+    try:
+        # Resolving the engine is inside this too. An engine mid-deploy refuses
+        # with "FAILED_PRECONDITION ... Current state: UPDATING", which is the
+        # state it is in for several minutes after every merge — and a
+        # traceback is not a sentence an editor can act on.
+        engine = _agent_engine(settings)
+        reply = await asyncio.to_thread(_split_turn, engine, job_id, body.arena.strip())
+    except Exception as exc:
+        logger.exception("re-split failed for %s", job_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The re-split could not be run. Try again in a moment.",
+        ) from exc
+
+    after = await clients.call_mcp("catalog", "list_games", {"job_id": job_id})
+    if after.get("status") == "error":
+        raise _upstream(after, "The re-split ran, but its result could not be read.")
+
+    was, now = _class_ids(before), _class_ids(after)
+    return {
+        "status": "success", "job_id": job_id,
+        "classes": now, "was": was, "changed": now != was,
+        "reply": reply,
+    }
 
 
 class LiveBookingRequest(BaseModel):
