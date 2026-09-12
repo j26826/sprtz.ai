@@ -1363,6 +1363,13 @@ literal ends, and each produced more noise than signal. `acorn` does it exactly.
 If acorn is not installed the check says it is skipping rather than passing
 quietly; CI installs it.
 
+**It checks names that are read, not only names that are called.** A constant
+is never called, so the call check could not see `STALLED_AFTER_MS` being
+deleted as a neighbour of a removed card — and the first sign would have been a
+blank screen on the job row that reads it. Any bare name referenced anywhere
+and declared nowhere now fails, with the browser's own globals allowlisted
+beside the language's.
+
 That check exists because this failure shipped three times — `playerMarkup`,
 `renderSessions` and `openSession` were each removed by an edit that sliced a
 region to the next function and took a neighbour with it. All three blank the
@@ -1560,6 +1567,18 @@ by a file's *contents* into opening other URLs, and on GCP that is an SSRF at
 crypto,tcp` blocks it — plain `http` is absent. `tcp` **must** be listed or every
 GCS read fails, and `-nostdin` must **not** be passed to ffprobe, which has no
 such option and swallows the next argument.
+
+**A deleted neighbour is the same bug in Python, and Cloud Run reports it as a
+timeout.** Removing the clip tools from `catalog_server/server.py` sliced to the
+next `@mcp.tool` and took `/healthz` with it, because the health route sits
+between two of them. Everything looked fine: the image built, the container
+started, `/mcp` answered correctly — and every startup probe got a 404, so the
+revision never went healthy and the apply died after twelve minutes of "Still
+modifying..." naming the *service*, not the route. `test_healthz.py` reads both
+servers' source and fails when either has no health route, or a decorator left
+without its handler. Ruff had said the `starlette` imports were now unused,
+which was the evidence; an F401 that appears in the same edit that removes code
+is that edit's own footprint, not pre-existing noise.
 
 **MCP servers use `INGRESS_TRAFFIC_ALL`, not internal-only.** Cloud Run services
 calling each other without a VPC connector egress over the public internet, so

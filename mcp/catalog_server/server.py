@@ -575,6 +575,17 @@ def knn_search_moments(query: str, job_id: str, limit: int, owner_uid: str = "",
         return _fail(exc, query=query, job_id=job_id)
 
 
+# The startup probe's target, and the whole of what Cloud Run judges this
+# service by. It was deleted as a neighbour of the clip tools when those were
+# removed — the region sliced ran to the next `@mcp.tool`, and this sits
+# between two of them. The service came up, served /mcp perfectly, answered
+# every /healthz with 404, and the revision never went healthy: twelve minutes
+# of "Still modifying..." and then a failed deploy.
+@mcp.custom_route("/healthz", methods=["GET"])
+async def healthz(_: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok", "service": "mcp-catalog"})
+
+
 @mcp.tool
 def set_source(job_id: str, gcs_uri: str, analysis_uri: str = "", original_name: str = "",
                size_bytes: int = 0, content_type: str = "") -> dict:
