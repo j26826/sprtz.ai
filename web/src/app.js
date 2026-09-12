@@ -3915,34 +3915,17 @@ const animatedMsgs = new WeakSet();
 
 
 /**
- * Which event everything on screen is about, said in the two places someone
- * looks: at the top of the rail, and over the box they type the next question
- * into.
+ * What the next question will be about, above the box it is typed in.
  *
- * The rail is a list of conversations and the composer is a blank box, so
- * neither said which match the cards under them belong to — and the answer to
- * "show me the best moments" is a different answer for a different event. The
- * rail block opens the event's record, as its name suggests; with nothing
- * open it says so rather than disappearing, because an empty card and an
- * unopened event look identical from the outside.
+ * There was a "Now showing" panel at the top of the session rail saying the
+ * same thing. Two selected-looking things in one column is one too many — the
+ * rail already highlights the open session — so the event is named here only,
+ * where it qualifies the question rather than competing with the list.
  */
-function renderOpenEvent() {
+function renderComposerContext() {
   const game = state.game;
   const job = state.jobs.find((j) => j.id === state.jobId);
   const title = (game && gameHeadline(game)) || job?.title || '';
-  const meta = game
-    ? [game.discipline || game.sport, game.competition || game.groundedCompetition]
-      .filter(Boolean).join(' · ')
-    : (job?.sport || '');
-
-  const block = $('open-event');
-  if (block) {
-    block.dataset.open = String(Boolean(title));
-    block.disabled = !game;
-    $('open-event-label').textContent = title ? t('context.nowShowing') : t('context.noEvent');
-    $('open-event-title').textContent = title;
-    $('open-event-meta').textContent = title ? meta : '';
-  }
 
   const strip = $('composer-context');
   if (strip) {
@@ -3957,7 +3940,7 @@ function renderOpenEvent() {
 
 function render() {
   renderSessions();
-  renderOpenEvent();
+  renderComposerContext();
   $('transcript').innerHTML = currentTurn(state.msgs).map(([m, i]) => {
     const agent = m.who === 'agent';
     const fresh = agent && !animatedMsgs.has(m);
