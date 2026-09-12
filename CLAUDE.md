@@ -1369,6 +1369,47 @@ chip opens; a phrase the routing does not recognise answers with the wrong
 data and hides the prose that would have explained it. Neither says which word
 did it.
 
+### Nothing from a runtime reaches the screen
+
+Firebase says `Firebase: Error (auth/too-many-requests).`, a retired Cloud Run
+instance says `ConnectError: `, a catalog tool says `TypeError: 'NoneType'
+object is not subscriptable`, Terraform's own deploy says `Error code 9`. Each
+is true, none is a sentence anyone can act on, and all of them describe the
+inside of a system the editor cannot see. **`web/src/errors.js` decides what a
+person is told**, and it is the only place that decides.
+
+It reads three sources in order: a code this app recognises (a Firebase auth
+code, an HTTP status), a detail the API wrote, then the fallback for whatever
+was being attempted — so a failure always says which thing failed even when
+nothing else is known. `api()` puts `status` and `detail` on the error it
+throws rather than baking a string into its message, because the choice belongs
+here rather than at the throw site.
+
+**What separates the two is `looksHuman`, not the status.** Publishing answers
+502 carrying YouTube's own refusal — "the stored refresh token has been
+revoked; reconnect the channel in Settings" — which is the most useful sentence
+available and says what to do; Envoy answers 502 with "upstream connect error
+or disconnect/reset before headers", which reads as English and tells an editor
+nothing. The test is strict in both directions: an exception class, a stack
+frame, a `SCREAMING_SNAKE` code, a gRPC status, a JSON body, `Firebase`,
+`error code`, or a line that does not start like a sentence, is machine text.
+Getting it wrong one way shows someone a traceback; the other way replaces a
+specific message with a general one.
+
+The technical text is not lost — `humanError` logs it. The console is where it
+belongs. `jobFailure` applies the same rule to the reason beside a failed job,
+because a stage that died of an exception recorded the exception.
+
+**The API does not send it either.** `_upstream` in `api/app/routers/jobs.py`
+logs what a catalog or media tool returned and raises a written sentence, so
+the internals are not in a response body at all. The sentences the API *does*
+send are written for this screen and quoted verbatim by the browser.
+
+`check.mjs` checks these keys too. They travel as strings rather than as
+`t('…')` — the map in `errors.js`, the fallback in the caller's argument — so
+nothing above can see them, and a missing one would print `error.desk` at an
+editor, which is the machine text this module exists to keep off the screen.
+
 ### web/check.mjs
 
 `node --check` only parses. Three classes of mistake parse perfectly and fail in

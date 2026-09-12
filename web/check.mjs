@@ -160,6 +160,19 @@ for (const [, key] of html.matchAll(/data-i18n="([^"]+)"/g)) {
   if (!keys.has(key)) fail(`index.html marks data-i18n="${key}" which en-GB does not define`);
 }
 
+// Keys that travel as strings rather than as `t('…')`: the sentences shown for
+// a failure are chosen inside errors.js from a code or a status, and the caller
+// passes the fallback as an argument. Nothing above can see either, and a
+// missing one would print `error.desk` at the editor — which is precisely the
+// machine text this module exists to keep off the screen.
+const errors = stripComments(read('src/errors.js'));
+for (const [, key] of errors.matchAll(/'((?:auth|error)\.[A-Za-z]+)'/g)) {
+  if (!keys.has(key)) fail(`errors.js answers with '${key}' which en-GB does not define`);
+}
+for (const [, key] of app.matchAll(/\bhumanError\([^,)]+,\s*'([^']+)'\)/g)) {
+  if (!keys.has(key)) fail(`app.js falls back to '${key}' which en-GB does not define`);
+}
+
 /* ── every element the script reaches for exists in the document ──────────── */
 
 const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));

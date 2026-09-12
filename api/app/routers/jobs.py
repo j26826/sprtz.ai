@@ -23,6 +23,19 @@ from app.core.config import Settings, get_settings
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
+
+def _upstream(result: dict, fallback: str) -> HTTPException:
+    """A failure from a service behind this one, said in a sentence.
+
+    What a catalog or media tool returns is a Python exception rendered as
+    text — "ValueError: No such job: abc", "DeadlineExceeded: 504" — which is
+    true, useless to an editor, and a description of the inside of a system
+    they cannot see. The raw text goes to the log, where whoever is debugging
+    will look for it; the browser gets the sentence for what failed.
+    """
+    logger.warning("upstream failure: %s", result.get("error"))
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback)
+
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 _ALLOWED_CONTENT_TYPES = {
     "video/mp4", "video/quicktime", "video/x-matroska", "video/webm", "video/x-msvideo",
@@ -216,7 +229,7 @@ async def create_job(
         },
     )
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "This match could not be registered. Try again in a moment.")
     return result
 
 
@@ -330,7 +343,7 @@ async def create_job_from_source(
         },
     )
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "This match could not be registered. Try again in a moment.")
     return result
 
 
@@ -407,7 +420,7 @@ async def create_job_from_hls(
         },
     )
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "This recording could not be registered. Check the playlist URL and try again.")
     return result
 
 
@@ -503,7 +516,7 @@ async def create_live_event(
         },
     )
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "This event could not be scheduled. Try again in a moment.")
     return result
 
 
@@ -641,7 +654,7 @@ async def rename_job(
     """
     result = await clients.call_mcp("catalog", "rename_job", {"job_id": job_id, "title": body.title})
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "This match could not be renamed. Try again in a moment.")
     return result
 
 
@@ -667,7 +680,7 @@ async def update_context(
     result = await clients.call_mcp(
         "catalog", "update_job_context", {"job_id": job_id, "context_urls": body.context_urls})
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "Those links could not be saved. Try again in a moment.")
     return result
 
 
@@ -774,7 +787,7 @@ async def update_live_booking(
     result = await clients.call_mcp(
         "catalog", "update_live_booking", {"job_id": job_id, **changes})
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "This booking could not be changed. Try again in a moment.")
     return result
 
 
@@ -928,7 +941,7 @@ async def event_tree(job_id: str, user: CallerIdentity = Depends(current_user)) 
     await _load_job(job_id, user)
     result = await clients.call_mcp("catalog", "get_event_tree", {"job_id": job_id})
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result.get("error"))
+        raise _upstream(result, "The rides for this event could not be read just now.")
     return {"event": result.get("event") or {}}
 
 
