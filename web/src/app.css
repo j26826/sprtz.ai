@@ -85,14 +85,16 @@ input, button, textarea { font-family: var(--font-body); }
   min-width: 0;
 }
 
-/* The Arenos lockup (notag, horizontal) is a wide mark — artwork bounds
-   815.912 x 211, roughly 3.87:1 — sitting in a 232px rail rather than a
-   full-width header. At 35px tall it wants about 136px of width, and the rail
-   leaves 172px once its 13px padding, the 8px gap and the 26px plus button are
-   taken out, so it clears the control beside it. object-fit keeps the ratio;
-   the cap is what stops a wider lockup from ever reaching the button. */
+/* The full horizontal lockup, tagline and all — artwork bounds 819.358 x 211,
+   roughly 3.88:1 — sitting in a 232px rail rather than a full-width header.
+   The rail leaves 172px once its 13px padding, the 8px gap and the 26px plus
+   button are taken out; at 42px tall this wants about 163px, so it clears the
+   control beside it. Taller than the untagged cut used to be at 35px because
+   there is a second line of type in it now, and a tagline set too small is
+   worse than no tagline. object-fit keeps the ratio; the cap is what stops a
+   wider lockup from ever reaching the button. */
 .brand-logo {
-  height: 35px;
+  height: 42px;
   width: auto;
   max-width: 172px;
   object-fit: contain;
@@ -1121,8 +1123,10 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 0 var(--space-4);
-  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  /* Room for the tagline cut to breathe. The plus button stays on its
+     centre line. */
+  min-height: 66px;
   border-bottom: var(--rule-hair) solid var(--color-neutral-300);
 }
 
@@ -1462,6 +1466,25 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
    Close. The title gives way rather than the buttons wrapping: a head that
    reflows as the title changes length moves the buttons under the cursor. */
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; padding-right: 12px; }
+
+/* The head is a title and its actions, not a toolbar: at the page's default
+   button size they crowded the title. One compact size for all of them. */
+.modal-head .btn-primary,
+.modal-head .btn-quiet,
+.modal-head .btn-ghost {
+  padding: 3px 10px;
+  font-size: 11.5px;
+}
+
+/* One width, but only where there is a set to be equal to. On the player the
+   head carries Download, Publish and Close and three lengths of word read as
+   three sizes of button; on the event record Close stands alone, and padding
+   it out to match buttons that are not there is just a wide Close. */
+.modal-head:has(#details-actions button) .btn-primary,
+.modal-head:has(#details-actions button) .btn-quiet,
+.modal-head:has(#details-actions button) .btn-ghost {
+  min-width: 74px;
+}
 #details .modal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .publish-panel { padding: 14px 16px 20px; display: flex; flex-direction: column; gap: 6px; }
@@ -2215,9 +2238,15 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   cursor: pointer;
 }
 .seg-btn:hover { color: var(--color-text); }
+/* Which one is on has to survive a glance. A neutral-200 fill against a
+   neutral ground was a shade apart from the unselected pair, so the control
+   read as two labels rather than as a choice already made. This is the chip's
+   own selected language — accent edge, accent tint, accent text — reused
+   rather than a fourth way of saying the same thing. */
 .seg-btn[aria-pressed="true"] {
-  background: var(--color-neutral-200);
-  color: var(--color-text);
+  background: var(--color-accent-100);
+  box-shadow: inset 0 0 0 var(--rule-hair) var(--color-accent);
+  color: var(--color-accent-900);
   font-weight: 500;
 }
 
@@ -2481,59 +2510,16 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   .rides-loading-board { grid-template-columns: 1fr; }
 }
 
-/* ── What is open ──────────────────────────────────────────────────────────
-   The rail is a list of conversations; this is the event under all of them,
-   marked by the accent down its inside edge — the same bar the open session
-   wears, because both answer "what am I looking at". It opens the event's
-   record, and greys out when there is no event to open. */
-.open-event {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  margin: 0 0 var(--space-3);
-  padding: 9px 12px 10px;
-  text-align: left;
-  background: var(--color-neutral-200);
-  border: var(--rule-hair) solid var(--color-rule);
-  border-left: 2px solid var(--color-accent);
-  color: var(--color-text);
-  font-family: var(--font-body);
-  cursor: pointer;
-}
-.open-event[data-open="false"] { border-left-color: var(--color-neutral-500); }
-.open-event:hover:not(:disabled) { border-color: var(--color-accent); border-left-color: var(--color-accent); }
-.open-event:disabled { cursor: default; }
-.open-event-label {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-accent-700);
-}
-.open-event[data-open="false"] .open-event-label { color: var(--color-neutral-600); }
-.open-event-title {
-  font-size: 12.5px;
-  font-weight: 700;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-.open-event-meta {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--color-neutral-700);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.open-event-meta:empty, .open-event-title:empty { display: none; }
-
 /* The same answer over the box the next question is typed into. One line,
    quiet: it qualifies the question rather than competing with it. */
+/* Inset to the composer's own margin so it sits over the box it describes
+   rather than out at the column edge, and given room under the rule above it:
+   at 0 it sat right against that hairline and read as part of it. */
 .composer-context {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  padding: 0 2px 6px;
+  padding: 14px 48px 10px;
   min-width: 0;
 }
 .composer-context-label {
