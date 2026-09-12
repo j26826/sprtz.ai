@@ -941,6 +941,20 @@ button.tile:hover { border-color: var(--color-accent); }
   min-width: 160px;
 }
 
+/* The events a recording produced, listed under it. A disclosure rather than
+   a popup: the next thing done with this list is opening one of them, and a
+   dialog that has to be dismissed first is in the way of that. */
+.job-cell-events { white-space: nowrap; }
+.job-events { padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.job-events-list { display: grid; gap: 8px; padding: 2px 0 4px; }
+.job-event-name { padding: 0; font-size: 12px; font-weight: 700; text-align: left; }
+.job-event-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-neutral-700);
+  margin-top: 2px;
+}
+
 /* The figure is the control. Underlined so a number in a table reads as
    something to press rather than as data, and mono like every other figure. */
 .job-cell-progress { white-space: nowrap; }

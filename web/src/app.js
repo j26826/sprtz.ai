@@ -90,6 +90,11 @@ const state = {
   // it: { momentId, title, description, privacy, status, error, url }. It
   // lives here rather than on a message because the popup is not a message.
   share: null,
+  // Which jobs have their events listed under them. A set rather than one id
+  // because this is navigation, not a dialog: comparing what two recordings
+  // produced is the reason to look, and a disclosure that closes the last one
+  // makes that impossible.
+  jobEvents: new Set(),
   // Whose progress the popup is showing. Module state rather than the message
   // that opened it: `render()` rebuilds the transcript on every job write, and
   // the popup has to survive that — which is also what lets its bar move while
@@ -580,6 +585,7 @@ onAuthStateChanged(auth, async (user) => {
     closeDetails();
     closeSettings();
     closeProgress();
+    state.jobEvents.clear();
     state.msgs = [];
     state.jobs = [];
     state.jobId = null;
@@ -3397,7 +3403,82 @@ function openSearchResult(index, k) {
  * of them a match is in before they could find it.
  */
 const JOB_COLUMNS = ['jobs.colMatch', 'jobs.colStatus', 'jobs.colStage',
-  'jobs.colProgress', 'jobs.colActions'];
+  'jobs.colEvents', 'jobs.colProgress', 'jobs.colActions'];
+
+
+/**
+ * The events a recording produced, in the order they ran.
+ *
+ * One, normally — a handball match, a single-class day — and several once a
+ * capture has crossed class after class, which is what an equestrian live URL
+ * does all day. Those are separate game records (`{job}__{classId}`) and the
+ * desk had nowhere that said a recording had become three of them: the games
+ * list shows the classes with no sign of which capture they came out of, and
+ * the job row showed the capture with no sign of what came out of it.
+ *
+ * Ordered by when the class started, as `canonical_game` orders them, so the
+ * first row is the one a question about the recording is answered by.
+ */
+function eventsOfJob(jobId) {
+  return state.games
+    .filter((g) => (g.jobId || g.id) === jobId)
+    .sort((a, b) => String(a.classStartAt || '').localeCompare(String(b.classStartAt || ''))
+      || Number(a.classNo || 0) - Number(b.classNo || 0));
+}
+
+
+/**
+ * How many events came out of a recording, and a way to see which.
+ *
+ * The same shape as the progress column and for the same reason: the figure
+ * answers the question most often being asked — did this capture split into
+ * the classes it should have — in the width of a number, and the list is one
+ * click away for the times the answer is no.
+ *
+ * It opens under the row rather than in a popup, because a list of events is
+ * navigation: the next thing done with it is opening one, and a dialog that
+ * has to be dismissed first is in the way of that.
+ */
+function eventsCell(jobId) {
+  const events = eventsOfJob(jobId);
+  if (!events.length) return '<span class="job-pct-none">—</span>';
+  const open = state.jobEvents.has(jobId);
+  return `<button class="link-btn job-events" data-job-events="${esc(jobId)}"
+            aria-expanded="${open}" title="${esc(t('jobs.showEvents'))}"
+          ><span class="job-pct">${events.length}</span></button>`;
+}
+
+
+/**
+ * The events themselves, when the row has been opened.
+ *
+ * Each names its class and opens it — which selects that class's rides and
+ * moments, not the whole recording's. The line under it is what tells two
+ * classes of one day apart: the number the organiser gave it, the arena, and
+ * when it ran.
+ */
+function eventsNote(jobId) {
+  const events = eventsOfJob(jobId);
+  if (!state.jobEvents.has(jobId) || !events.length) return '';
+  return noteRow(`<div class="job-events-list">${events.map((g) => {
+    const meta = [
+      g.classNo ? `${t('game.classNo')} ${g.classNo}` : '',
+      g.arena,
+      g.classStartAt
+        ? new Date(g.classStartAt).toLocaleString(undefined,
+          { dateStyle: 'medium', timeStyle: 'short' }) : '',
+      Array.isArray(g.rides) && g.rides.length
+        ? `${g.rides.length} ${t('game.rides').toLowerCase()}` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="job-event">
+        <button class="link-btn job-event-name"
+                data-open-game="${esc(g.id || g.jobId)}">${
+          esc(g.className || gameHeadline(g))}</button>
+        ${meta ? `<div class="job-event-meta">${esc(meta)}</div>` : ''}
+      </div>`;
+  }).join('')}</div>`);
+}
 
 
 function jobsCard(msg, index) {
@@ -3488,6 +3569,7 @@ function jobRow(j) {
       <td><span class="job-status" data-tone="${tone}">${
         stalled ? esc(t('jobs.stalled')) : esc(j.status || t('jobs.unknown'))}</span></td>
       <td class="job-stage">${esc(detail)}</td>
+      <td class="job-cell-events">${eventsCell(j.id)}</td>
       <td class="job-cell-progress">${
         progressCell(j.id, running && !stalled ? (j.progress || 0) : null)}</td>
       <td class="job-cell-actions">
@@ -3510,7 +3592,8 @@ function jobRow(j) {
       <div class="job-error">
         <p>${esc(jobFailure(j.error, { t }))}</p>
         <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
-      </div>`) : ''}`);
+      </div>`) : ''}
+    ${eventsNote(j.id)}`);
 }
 
 
@@ -3549,6 +3632,7 @@ function liveJobRow(j) {
       <td><span class="job-status" data-tone="${tone}">${
         esc(t(`live.${live.state}`) || live.state)}</span></td>
       <td class="job-stage">${esc(line)}</td>
+      <td class="job-cell-events">${eventsCell(j.id)}</td>
       <td class="job-cell-progress">${
         progressCell(j.id, live.state === 'live' ? liveStageFills(live).analysis : null)}</td>
       <td class="job-cell-actions">
@@ -3577,7 +3661,8 @@ function liveJobRow(j) {
         <div class="moment-actions">
           <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
         </div>
-      </div>` : `<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}`);
+      </div>` : `<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
+    ${eventsNote(j.id)}`);
 }
 
 
@@ -5132,7 +5217,8 @@ document.addEventListener('click', (event) => {
     + '[data-detail-act],[data-trim],[data-trim-reset],[data-publish-to],'
     + '[data-edit-live],[data-cancel-edit-live],'
     + '[data-youtube-act],'
-    + '[data-ride-tab],[data-type-menu],[data-type-pick],[data-progress]');
+    + '[data-ride-tab],[data-type-menu],[data-type-pick],[data-progress],'
+    + '[data-job-events]');
 
   // An open moment-type menu closes on any click outside its own filter. Its
   // toggle used to be the only way out, and a menu only its own button can
@@ -5216,6 +5302,13 @@ document.addEventListener('click', (event) => {
       selectJob(game.jobId || game.id, game.id || game.jobId);
     }
     openGameDetails(game);
+    return;
+  }
+  if (hit.dataset.jobEvents) {
+    const jobId = hit.dataset.jobEvents;
+    if (state.jobEvents.has(jobId)) state.jobEvents.delete(jobId);
+    else state.jobEvents.add(jobId);
+    render();
     return;
   }
   if (hit.dataset.progress) { openProgress(hit.dataset.progress); return; }
