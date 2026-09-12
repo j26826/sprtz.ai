@@ -66,6 +66,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Reels are top-level for the same reason games are, and for one more: a
+    // reel may hold cuts from several matches, so there is no single parent job
+    // to hang it under. Read-shared like everything else on this desk — a reel
+    // a colleague is building is one this desk is building. `ownerUid` on the
+    // document says who started it; it does not gate who may open it.
+    match /reels/{reelId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     match /renders/{renderId} {
       allow read: if isSignedIn() && resource.data.requestedBy == request.auth.uid;
       allow write: if false;
