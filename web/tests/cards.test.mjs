@@ -13,6 +13,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { chooseCard, wantsDetail } from '../src/cards.js';
+import { LOCALES, setLocale, t } from '../src/i18n.js';
+
+// `setLocale` records the language on the document and in localStorage.
+// Neither exists here, and neither is what is being tested.
+globalThis.document = globalThis.document || { documentElement: {} };
+globalThis.localStorage = globalThis.localStorage || {
+  getItem: () => null, setItem: () => {},
+};
 
 const routes = (cases) => {
   for (const [question, card] of Object.entries(cases)) {
@@ -186,5 +194,70 @@ describe('rides', () => {
     // neither has a card of its own.
     'cut a 30 second short of the ride for Anna Berger': 'rides',
     'publish the ride for Anna Berger': 'rides',
+  });
+});
+
+
+describe('every locale, against the desk\'s own words', () => {
+  // The strings below are not invented phrasings: they are what the app itself
+  // puts in the composer when someone clicks a chip or answers the opener. If
+  // one routes somewhere its English twin does not, that button is broken in
+  // that language — which is how "Zeig mir die besten Szenen" came to answer
+  // with the wrong card for every German editor, silently, because nothing
+  // here read anything but English.
+  //
+  // Read from i18n.js rather than copied, so a retranslation cannot drift away
+  // from the routing without this failing.
+  const GENERATED = [
+    ['opener.askMoments', 'desk-moments'],
+    ['action.bestMoments', 'desk-moments'],
+    ['action.processing', 'jobs'],
+    ['action.ingest', 'ingest'],
+  ];
+
+  for (const locale of LOCALES) {
+    it(`routes the desk's own questions in ${locale}`, () => {
+      setLocale(locale);
+      try {
+        for (const [stringKey, card] of GENERATED) {
+          const asked = t(stringKey);
+          assert.equal(chooseCard(asked), card,
+            `${locale} ${stringKey}: ${JSON.stringify(asked)}`);
+        }
+      } finally {
+        setLocale('en-GB');
+      }
+    });
+  }
+
+  it('reads a question in whatever language it was typed in', () => {
+    // The UI language is a display preference, not a promise about the
+    // keyboard. A German desk asked in English, and an English desk asked in
+    // German, are both ordinary and both have to work — which is why every
+    // language compiles into one alternation rather than the current locale
+    // selecting a set.
+    assert.equal(chooseCard('zeig mir alle Spiele'), 'games');
+    assert.equal(chooseCard('mostrami tutte le partite'), 'games');
+    assert.equal(chooseCard('montre-moi tous les matchs'), 'games');
+    assert.equal(chooseCard('muéstrame todos los partidos'), 'games');
+    assert.equal(chooseCard('zeig mir die Ritte'), 'rides');
+    assert.equal(chooseCard('mostrami le riprese'), 'rides');
+    assert.equal(chooseCard('montre-moi les reprises'), 'rides');
+    assert.equal(chooseCard('muéstrame los recorridos'), 'rides');
+  });
+
+  it('folds accents rather than destroying them', () => {
+    // `[^a-z0-9]` alone turned "événements" into " v nements" and "Aktivität"
+    // into "aktivit t", so every accented language was matched on its
+    // fragments and none of these reached its card.
+    assert.equal(chooseCard('montre-moi tous les événements'), 'games');
+    assert.equal(chooseCard('quelle est l’activité ?'), 'activity');
+    assert.equal(chooseCard('¿cuál es la actividad?'), 'activity');
+    assert.equal(chooseCard('mostrami l’attività'), 'activity');
+    assert.equal(chooseCard('zeig mir die Aktivität'), 'activity');
+    // A German keyboard without umlauts types the ae/oe/ue spelling, which
+    // folding cannot produce from the umlaut or the other way round, so both
+    // are listed.
+    assert.equal(chooseCard('zeig mir die Aktivitaet'), 'activity');
   });
 });
