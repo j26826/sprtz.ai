@@ -3605,7 +3605,16 @@ function jobRow(j) {
 
 /**
  * A live event's row in the same table: its own state rather than the job
- * status, and — once it is over — the game record under it.
+ * status, and the events it produced in the Games column beside it.
+ *
+ * There used to be one event's whole record under a finished row — headline,
+ * competition, venue, mood, the generated summary. It picked that record with
+ * `state.games.find`, which is a coin toss the moment a recording holds more
+ * than one: the desk showed a day titled for one class with another class's
+ * summary under it and nothing saying they were different things. The Games
+ * column lists every class a recording produced, each with its number, ring
+ * and start time, and each opening its own record — which is the same question
+ * answered once and completely.
  *
  * Progress is counted in chunks against how many the window will produce,
  * because that is the only unit a live event has: there is no duration to be
@@ -3656,18 +3665,8 @@ function liveJobRow(j) {
     </tr>
     ${j.status === 'failed' && j.error
       ? noteRow(`<div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>`) : ''}
-    ${live.state === 'complete' ? noteRow(game ? `
-      <div class="live-game">
-        <div class="moment-label">${esc(gameHeadline(game))}</div>
-        <div class="moment-meta">${esc([
-          game.competition || game.groundedCompetition,
-          game.venue || game.groundedVenue, game.mood,
-        ].filter(Boolean).join(' · ') || t('game.notIdentified'))}</div>
-        ${game.summary ? `<div class="game-summary">${esc(game.summary)}</div>` : ''}
-        <div class="moment-actions">
-          <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
-        </div>
-      </div>` : `<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
+    ${live.state === 'complete' && !eventsOfJob(j.id).length
+      ? noteRow(`<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
     ${eventsNote(j.id)}`);
 }
 
