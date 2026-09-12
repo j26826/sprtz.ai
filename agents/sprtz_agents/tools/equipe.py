@@ -691,14 +691,25 @@ def day_of(job: dict, started: datetime.datetime | None) -> str:
 
 
 def find_classes(*, job: dict, context_urls: list[str], competition: str = "",
-                 discipline: str = "", arena: str = "",
+                 discipline: str = "", arena: str = "", show_id: int = 0,
                  get=None) -> tuple[Show | None, list[ShowClass]]:
     """The show this recording is of, and the classes it ran that day.
 
-    An editor's own link is the strongest signal and costs one request; without
-    one, the day and the name read off the screen choose between the shows that
-    ran. Either can come back with nothing, and nothing is a perfectly good
-    answer: the recording then stays one event, as it was before any of this.
+    A show already settled for this recording is the strongest signal there is
+    and costs nothing — it is the answer to this question, worked out once and
+    written down. Then an editor's own link, which costs one request. Failing
+    both, the day and the name read off the screen choose between the shows
+    that ran. Any of them can come back with nothing, and nothing is a
+    perfectly good answer: the recording then stays one event, as it was
+    before any of this.
+
+    Taking the stored id first is what makes a split repeatable. Splitting
+    writes each class's own name over `competition` — which is right, that is
+    what the event now is — and a second split then searched a thousand shows
+    for "D&H INTER I SILVER CHAMPIONSHIP" and found none, because that is a
+    class and the list is of shows. So the first split worked, every one after
+    it quietly changed nothing, and the message said the show could not be
+    found on a timetable the record was carrying the id of.
 
     `arena` narrows the classes to the one ring the camera is on, and at a
     championship that is not optional — see `classes_on`. Empty means every
@@ -707,7 +718,7 @@ def find_classes(*, job: dict, context_urls: list[str], competition: str = "",
     """
     started = recording_started(job)
     day = day_of(job, started)
-    show_id = show_id_in(context_urls or [])
+    show_id = int(show_id or 0) or show_id_in(context_urls or [])
 
     if not show_id:
         if not (day and competition):
