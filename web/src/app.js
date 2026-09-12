@@ -2399,7 +2399,10 @@ function liveForm(u, busy) {
       </div>`;
 }
 
-
+// A run that dies takes its progress reporting with it, so the job keeps the
+// status it had and looks alive for ever. Nothing retries on its own, so the
+// only honest reading of a long silence is that it needs starting again.
+const STALLED_AFTER_MS = 15 * 60 * 1000;
 
 function toDate(value) {
   if (!value) return null;

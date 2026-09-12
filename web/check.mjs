@@ -60,6 +60,9 @@ async function checkSymbols(source) {
   const ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
   const declared = new Set();
   const called = [];
+  const read = [];
+  // Identifier nodes that name something other than a binding — see below.
+  const skip = new Set();
 
   const bind = (node) => {
     if (!node) return;
@@ -88,6 +91,23 @@ async function checkSymbols(source) {
       called.push(node.callee.name);
     }
 
+    // ...and a bare name being *read*. `STALLED_AFTER_MS` was deleted as a
+    // neighbour of a removed card and this file passed: nothing calls a
+    // constant, so the call check could not see it, and the first sign would
+    // have been a blank screen on the job row that reads it.
+    if (node.type === 'Identifier' && !skip.has(node)) read.push(node.name);
+
+    // Names that are not references to anything: a property after a dot, a
+    // key in an object literal, a label. Marked rather than skipped, because
+    // the same node must still be walked for its own children.
+    if (node.type === 'MemberExpression' && !node.computed) skip.add(node.property);
+    if ((node.type === 'Property' || node.type === 'PropertyDefinition'
+         || node.type === 'MethodDefinition') && !node.computed) skip.add(node.key);
+    if (node.type === 'LabeledStatement' || node.type === 'BreakStatement'
+        || node.type === 'ContinueStatement') skip.add(node.label);
+    if (node.type === 'ImportSpecifier') skip.add(node.imported);
+    if (node.type === 'ExportSpecifier') { skip.add(node.local); skip.add(node.exported); }
+
     for (const key of Object.keys(node)) {
       const child = node[key];
       if (Array.isArray(child)) child.forEach(walk);
@@ -103,11 +123,26 @@ async function checkSymbols(source) {
     'setTimeout', 'setInterval', 'clearInterval', 'clearTimeout', 'alert',
     'confirm', 'prompt', 'decodeURIComponent', 'encodeURIComponent', 'atob',
     'btoa', 'structuredClone', 'queueMicrotask', 'requestAnimationFrame',
+    // The browser the app runs in, and the two globals it takes from a script
+    // tag rather than an import.
+    'window', 'document', 'console', 'navigator', 'location', 'history',
+    'localStorage', 'sessionStorage', 'Math', 'Intl', 'URL', 'URLSearchParams',
+    'AbortController', 'FormData', 'Blob', 'File', 'FileReader', 'Image',
+    'Event', 'CustomEvent', 'MutationObserver', 'IntersectionObserver',
+    'ResizeObserver', 'getComputedStyle', 'crypto', 'performance', 'undefined',
+    'NaN', 'Infinity', 'globalThis', 'Symbol', 'WeakMap', 'WeakSet', 'BigInt',
+    'TextEncoder', 'TextDecoder', 'Notification', 'Hls', 'CSS',
+    'XMLHttpRequest',
   ]);
 
   for (const name of new Set(called)) {
     if (GLOBALS.has(name) || declared.has(name)) continue;
     fail(`app.js calls ${name}() but nothing declares, imports or binds it`);
+  }
+
+  for (const name of new Set(read)) {
+    if (GLOBALS.has(name) || declared.has(name)) continue;
+    fail(`app.js reads ${name} but nothing declares, imports or binds it`);
   }
 }
 
