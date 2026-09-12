@@ -1,0 +1,178 @@
+/**
+ * The arithmetic of a reel.
+ *
+ * Four of these guard failures that are silent on screen. A key that collides
+ * puts two different moments in one slot, and across a cross-event reel that
+ * is not hypothetical — ids are only unique within a match. A total that
+ * disagrees with the cuts misreports what is about to be published. A nudge
+ * that inverts an edge produces a cut with no duration, which renders as
+ * nothing rather than as an error. And `nextCut` is the one comparison
+ * standing between "stop at the end of the reel" and either looping the last
+ * cut for ever or dropping it.
+ */
+
+import { strict as assert } from 'node:assert';
+import { describe, it } from 'node:test';
+
+import {
+  MIN_CUT_MS, isPickedIn, matchCount, moveCut, msClock, nextCut, nudge,
+  parsePickKey, pastEnd, pickKey, reelLength, togglePicked,
+} from '../src/reels.js';
+
+const cut = (jobId, startMs, endMs) => ({ jobId, momentId: `${jobId}-m`, startMs, endMs });
+
+describe('addressing a picked moment', () => {
+  it('carries the match, because ids are only unique within one', () => {
+    assert.notEqual(pickKey('job-a', 'm1'), pickKey('job-b', 'm1'));
+  });
+
+  it('survives a moment id containing a colon', () => {
+    // The delegated click handler splits its own attributes on colons, which
+    // is exactly why this separator is not one.
+    const back = parsePickKey(pickKey('job-a', 'cdi:gp:m01'));
+    assert.deepEqual(back, { jobId: 'job-a', momentId: 'cdi:gp:m01' });
+  });
+
+  it('knows what is already picked', () => {
+    const pick = [{ jobId: 'job-a', momentId: 'm1' }];
+    assert.equal(isPickedIn(pick, 'job-a', 'm1'), true);
+    assert.equal(isPickedIn(pick, 'job-b', 'm1'), false);
+    assert.equal(isPickedIn([], 'job-a', 'm1'), false);
+  });
+});
+
+describe('picking and unpicking', () => {
+  const a = { jobId: 'j', momentId: 'a' };
+  const b = { jobId: 'j', momentId: 'b' };
+
+  it('adds one that is not there', () => {
+    assert.deepEqual(togglePicked([], a), [a]);
+  });
+
+  it('removes one that is', () => {
+    assert.deepEqual(togglePicked([a, b], a), [b]);
+  });
+
+  it('does not mutate the list it was given', () => {
+    const before = [a];
+    togglePicked(before, b);
+    assert.equal(before.length, 1);
+  });
+
+  it('puts a re-picked moment at the end, since the order is the running order', () => {
+    assert.deepEqual(togglePicked(togglePicked([a, b], a), a), [b, a]);
+  });
+
+  it('tells the same moment in two matches apart', () => {
+    const inA = { jobId: 'job-a', momentId: 'm1' };
+    const inB = { jobId: 'job-b', momentId: 'm1' };
+    assert.equal(togglePicked([inA], inB).length, 2);
+  });
+});
+
+describe('how long a reel runs', () => {
+  it('is the sum of the cuts, not the span they cover', () => {
+    // Two 5s cuts an hour apart are ten seconds of video, not an hour.
+    assert.equal(reelLength([cut('j', 0, 5000), cut('j', 3600000, 3605000)]), 10000);
+  });
+
+  it('is zero for no cuts', () => {
+    assert.equal(reelLength([]), 0);
+    assert.equal(reelLength(undefined), 0);
+  });
+
+  it('never counts an inverted cut as negative time', () => {
+    assert.equal(reelLength([cut('j', 5000, 1000)]), 0);
+  });
+
+  it('counts the matches a reel draws on', () => {
+    assert.equal(matchCount([cut('a', 0, 1), cut('b', 0, 1), cut('a', 2, 3)]), 2);
+    assert.equal(matchCount([]), 0);
+  });
+});
+
+describe('reading a cut point', () => {
+  it('shows the milliseconds, because that is what a nudge moves', () => {
+    assert.equal(msClock(83900), '1:23.900');
+  });
+
+  it('pads so the digits line up down a column', () => {
+    assert.equal(msClock(61001), '1:01.001');
+    assert.equal(msClock(0), '0:00.000');
+  });
+
+  it('does not go negative', () => {
+    assert.equal(msClock(-500), '0:00.000');
+  });
+
+  it('keeps counting minutes past an hour rather than wrapping', () => {
+    // A competition day is eight hours long; 1:05:00 shown as 5:00 would be
+    // a cut point two hours from where it is.
+    assert.equal(msClock(3900000), '65:00.000');
+  });
+});
+
+describe('nudging an edge', () => {
+  const c = cut('j', 10000, 20000);
+
+  it('moves the edge asked for and leaves the other alone', () => {
+    assert.deepEqual(nudge(c, 'start', -100).startMs, 9900);
+    assert.deepEqual(nudge(c, 'start', -100).endMs, 20000);
+    assert.deepEqual(nudge(c, 'end', 100).endMs, 20100);
+  });
+
+  it('clamps at zero rather than going before the recording started', () => {
+    assert.equal(nudge(cut('j', 200, 5000), 'start', -1000).startMs, 0);
+  });
+
+  it('stops rather than inverting when an edge is pushed past the other', () => {
+    // A control held at its limit should stop, not start failing.
+    assert.equal(nudge(c, 'start', 999999).startMs, 20000 - MIN_CUT_MS);
+    assert.equal(nudge(c, 'end', -999999).endMs, 10000 + MIN_CUT_MS);
+  });
+
+  it('never produces a cut with no duration', () => {
+    const squashed = nudge(nudge(c, 'start', 999999), 'end', -999999);
+    assert.ok(squashed.endMs - squashed.startMs >= MIN_CUT_MS);
+  });
+});
+
+describe('reordering', () => {
+  const cuts = [cut('a', 0, 1), cut('b', 0, 1), cut('c', 0, 1)];
+
+  it('swaps with the neighbour', () => {
+    assert.deepEqual(moveCut(cuts, 0, 1).map((x) => x.jobId), ['b', 'a', 'c']);
+    assert.deepEqual(moveCut(cuts, 2, -1).map((x) => x.jobId), ['a', 'c', 'b']);
+  });
+
+  it('is a no-op off either end rather than an error', () => {
+    assert.deepEqual(moveCut(cuts, 0, -1).map((x) => x.jobId), ['a', 'b', 'c']);
+    assert.deepEqual(moveCut(cuts, 2, 1).map((x) => x.jobId), ['a', 'b', 'c']);
+  });
+
+  it('does not mutate the list it was given', () => {
+    const before = [...cuts];
+    moveCut(before, 0, 1);
+    assert.deepEqual(before.map((x) => x.jobId), ['a', 'b', 'c']);
+  });
+});
+
+describe('running from one cut to the next', () => {
+  const cuts = [cut('j', 1000, 2000), cut('j', 9000, 9500)];
+
+  it('advances while there is another cut', () => {
+    assert.equal(nextCut(cuts, 0), 1);
+  });
+
+  it('stops at the last one rather than looping it', () => {
+    assert.equal(nextCut(cuts, 1), null);
+  });
+
+  it('knows when the playhead has run past the cut it is in', () => {
+    // Seconds in, because that is what a video element reports; compared in
+    // milliseconds, because that is what a cut is stored in.
+    assert.equal(pastEnd(cuts[0], 1.999), false);
+    assert.equal(pastEnd(cuts[0], 2.0), true);
+    assert.equal(pastEnd(null, 99), false);
+  });
+});

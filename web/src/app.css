@@ -2816,3 +2816,194 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 /* The ride pane's own play, with the round's length set beside the label. */
 .play-ride { gap: 7px; }
+
+
+/* ── Picking moments, and the reel they become ────────────────────────────
+   The pick control is a sibling of the frame rather than a child: the frame
+   is a button and a button cannot hold another one. It sits opposite the
+   early-preview mark, over the corner of the picture where nothing is ever
+   the subject. */
+.tile-pick {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: var(--rule-hair) solid var(--color-neutral-500);
+  border-radius: var(--radius-sm);
+  /* Over a picture, not over the card: it needs its own ground or it is
+     legible on a dark frame and invisible on a bright one. */
+  background: rgba(17, 17, 17, 0.55);
+  cursor: pointer;
+}
+.tile-pick > span {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: transparent;
+}
+.tile-pick:hover { border-color: var(--color-accent); }
+.tile-pick[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.tile-pick[aria-pressed="true"] > span {
+  /* Ink on amber, never white. */
+  background: var(--color-on-accent);
+}
+.tile[aria-current="true"] { border-color: var(--color-accent); }
+
+/* The bar under the tiles. Present at zero, because a control that appears
+   only once you have guessed the gesture that summons it is a control nobody
+   finds — but quiet until there is something to act on. */
+.reel-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--rule-hair) solid var(--color-rule);
+}
+.reel-bar-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-neutral-700);
+}
+.reel-bar[data-picked="true"] .reel-bar-count {
+  color: var(--color-accent-700);
+  font-weight: 500;
+}
+.reel-bar-actions { display: flex; gap: var(--space-2); margin-left: auto; }
+
+/* ── The editor ───────────────────────────────────────────────────────────
+   The whole viewport, like the moment player: a reel is judged by watching it,
+   and every pixel given back to the page behind is a pixel off the picture. */
+/* The same arrangement #details uses, and for the same reason: the backdrop
+   margin is pixels taken off the picture. The padding has to be cleared on the
+   modal itself, not just the card — the card cannot fill a box that is inset. */
+#reel { padding: 0; align-items: stretch; }
+
+.modal-card-full {
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+.reel-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  /* Both the split and each column, or a grid child refuses to shrink below
+     its content and the dialog quietly grows past the viewport. */
+  min-height: 0;
+}
+.reel-stage, .reel-cuts { min-height: 0; overflow-y: auto; }
+.reel-cuts { border-left: var(--rule-hair) solid var(--color-rule); padding: var(--space-3); }
+.reel-under { padding: var(--space-3) var(--space-4) var(--space-5); }
+
+.reel-meta { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.reel-meta-facts {
+  display: flex;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-neutral-700);
+}
+.reel-len { color: var(--color-accent-700); }
+
+.reel-cuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+/* One cut: what it is, where it starts and ends, and where it sits in the
+   order. The three rows are deliberate — a cut is read, then trimmed, then
+   moved, and putting all of it on one line made none of it findable. */
+.reel-cut {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+  background: var(--color-neutral-200);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-md);
+}
+.reel-cut[aria-current="true"] { border-left-color: var(--color-accent); }
+.reel-cut-top { display: flex; align-items: center; gap: var(--space-2); }
+.reel-cut-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A timecode is a model-produced reading, so it is set in the mono. */
+.reel-cut-len, .reel-edge-at {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-700);
+}
+.reel-cut-play {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.reel-cut-play:hover { border-color: var(--color-accent); }
+.reel-cut-play > span {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-left: 7px solid var(--color-text);
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+}
+.reel-cut-edges { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.reel-edge { display: inline-flex; align-items: center; gap: 4px; }
+.reel-edge-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.reel-cut-move { display: flex; gap: var(--space-2); }
+.reel-cut-move .btn-step { min-width: 0; }
+
+.reel-render-state {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+  margin-right: var(--space-2);
+}
+.reel-render-state[data-state="ready"] { color: var(--color-accent-700); }
+
+@media (max-width: 900px) {
+  .reel-split { grid-template-columns: 1fr; }
+  .reel-cuts { border-left: 0; border-top: var(--rule-hair) solid var(--color-rule); }
+}

@@ -30,6 +30,10 @@ import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i1
 import { chooseCard, wantsDetail } from './cards.js';
 import { currentTurn } from './transcript.js';
 import { humanMessage, jobFailure } from './errors.js';
+import {
+  isPickedIn, matchCount, moveCut, msClock, nextCut, nudge, pastEnd, pickKey,
+  reelLength, togglePicked,
+} from './reels.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
   disciplinesFor, findGames, gamesInScope, scopeContextLine, scopeFilters, scopeTitle,
@@ -123,6 +127,16 @@ const state = {
   },
   pendingUploads: [],     // uploaded to GCS but never registered as a job
   thumbs: { urls: {}, asked: new Set() },  // momentId -> signed URL for its still
+  // Moments picked to go in a reel: [{ jobId, momentId, label, summary }].
+  //
+  // On the session rather than on a message, because a reel may draw on
+  // several events and the moments for each arrive as a different answer. A
+  // basket held on one card could only ever hold one card's worth, which is
+  // the one thing a cross-event reel cannot be. It persists with the session
+  // for the same reason a scope does: a half-built reel should survive a
+  // reload, and the transcript is rebuilt wholesale on every Firestore write.
+  pick: [],
+  reel: null,             // the reel open in the editor, once one is built
   details: null,          // the moment whose popup is open, and playing inside it
   // The title being edited: { jobId, value, at }. The transcript re-renders on
   // every Firestore write, so a half-typed name has to live here rather than in
@@ -1088,6 +1102,68 @@ function momentsHead(view, index) {
  * and gone against a bright floor. The star and the play button are the
  * exceptions, because each carries its own ground wherever it lands.
  */
+/* ── Picking moments for a reel ──────────────────────────────────────────────
+   A moment is addressed by its match as well as by itself: ids are unique
+   within a job and a reel may hold cuts from four of them, so the key carries
+   both. The separator is a pipe rather than a colon because the delegated
+   handler already splits on colons for `index:value` attributes. */
+
+const keyOf = (jobId, momentId) => pickKey(jobId || state.jobId || '', momentId);
+
+function isPicked(m) {
+  return isPickedIn(state.pick, m.jobId || state.jobId || '', m.momentId);
+}
+
+/** Add or remove one moment, and remember it with the session. */
+function togglePick(jobId, momentId) {
+  const m = momentById(momentId) || {};
+  state.pick = togglePicked(state.pick, {
+    jobId: jobId || state.jobId || '',
+    momentId,
+    // Kept on the pick rather than looked up later: a moment from another
+    // event is not in `state.moments`, so by the time the editor opens there
+    // would be nothing to read a label off.
+    label: m.label || m.momentType || '',
+    summary: m.summary || '',
+  });
+  persistPick();
+}
+
+function persistPick() {
+  if (state.sessionKey) updateSession(state.sessionKey, { pick: state.pick });
+}
+
+/**
+ * The bar under a page of tiles: what is picked, and the way into the editor.
+ *
+ * Under the tiles rather than in the card's head, because it acts on what was
+ * just chosen and reads in the direction the choosing happened. It is present
+ * even at zero — a control that appears only once you have guessed the
+ * gesture that summons it is a control nobody finds.
+ */
+function reelBar() {
+  const n = state.pick.length;
+  const open_ = Boolean(state.reel);
+  return `
+    <div class="reel-bar" data-picked="${n > 0}">
+      <span class="reel-bar-count">${n
+    ? esc(t('reel.picked').replace('{n}', String(n)))
+    : esc(t('reel.pickHint'))}</span>
+      <span class="reel-bar-actions">
+        ${n ? `<button class="btn-ghost btn-step" data-pick-clear="1">${
+    esc(t('reel.clear'))}</button>` : ''}
+        ${open_
+    // A reel is already being edited, so this adds to that one. Building a
+    // second reel from the desk while the first is open is almost never what
+    // was meant — "add more moments" is a trip out to the desk and back.
+    ? `<button class="btn-primary btn-step" data-reel-append="1" ${n ? '' : 'disabled'}>${
+      esc(t('reel.addToOpen'))}</button>`
+    : `<button class="btn-primary btn-step" data-reel-build="1" ${n ? '' : 'disabled'}>${
+      esc(t('reel.build'))}</button>`}
+      </span>
+    </div>`;
+}
+
 function momentTile(m, opts = {}) {
   // A moment from another game cannot be played through the open match's
   // listeners, which do not hold it. opts.open routes the picture through the
@@ -1104,8 +1180,18 @@ function momentTile(m, opts = {}) {
   const kind = m.label || m.momentType || '';
   const sure = m.confidence == null ? null : Math.round(Math.min(Math.max(Number(m.confidence), 0), 1) * 100);
 
+  const picked = isPicked(m);
+
   return `
-    <div class="tile">
+    <div class="tile" aria-current="${picked}">
+      <!-- A sibling of the frame, not a child of it: the frame is a button and
+           a button cannot hold another one. It sits over the top-left corner,
+           opposite the early-preview mark. -->
+      <button class="tile-pick" data-pick="${esc(keyOf(m.jobId, m.momentId))}"
+              aria-pressed="${picked}"
+              title="${esc(t(picked ? 'reel.removeOne' : 'reel.addOne'))}"
+              aria-label="${esc(`${t(picked ? 'reel.removeOne' : 'reel.addOne')}: ${
+    m.summary || kind}`)}"><span aria-hidden="true"></span></button>
       <button class="thumb" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-play="${esc(m.momentId)}"`}
               title="${esc(t('moment.play'))}" aria-label="${esc(`${t('moment.play')}: ${m.summary || kind}`)}"
               ${m.thumbUri && !state.thumbs.urls[m.momentId]
@@ -1161,6 +1247,7 @@ function momentsCard(msg, index) {
     <div class="list">
       ${momentsHead({ ...found, sort: msg.sort }, index)}
       <div class="tile-row">${view.slice.map(momentTile).join('')}</div>
+      ${reelBar()}
       ${pagerRow(view, index)}
     </div>`;
 }
@@ -1596,6 +1683,7 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boar
         ${playRideButton(ride, 'btn-primary play-ride')}
       </div>
       ${body}
+      ${reelBar()}
       ${pagerRow(view, index)}
     </div>`;
 }
@@ -3067,6 +3155,8 @@ function openSession(sessionId) {
   // switching back, not starting again.
   state.sessionId = session.agentSessionId || null;
   state.scope = session.scope || null;
+  // The half-built reel survives a switch away and back, like the scope.
+  state.pick = Array.isArray(session.pick) ? session.pick : [];
   state.msgs = Array.isArray(session.msgs) && session.msgs.length
     ? session.msgs.map((m) => ({ ...m, searching: false, deskLoading: false }))
     : [];
@@ -4548,6 +4638,361 @@ function destroyPlayer() {
 }
 
 
+/* ──────────────────────────────────────────────────── the reel editor ── */
+
+// One manifest per match, because a reel may draw on several and the moment
+// player's cache holds only the open one. Cleared when the editor closes: a
+// signed CDN cookie outlives the dialog but not the session, and re-asking is
+// one request against playing the wrong match's video.
+let reelUrls = {};
+let reelHls = null;
+let reelVideo = null;
+let reelLoadedJob = null;
+
+// How far a nudge moves an edge. Milliseconds, because that is what a cut is
+// stored in; 1s to find the moment, 100ms to land on it.
+const NUDGE_MS = [1000, 100];
+
+/** Turn what is picked into a reel, and open it. */
+async function buildReel() {
+  if (!state.pick.length) return;
+  const cuts = state.pick.map((p) => ({ job_id: p.jobId, moment_id: p.momentId }));
+  try {
+    const out = await api('/api/reels', {
+      method: 'POST',
+      body: JSON.stringify({ title: defaultReelTitle(), cuts }),
+    });
+    state.reel = out.reel;
+    // The basket has become the reel; leaving it full would have the next
+    // Build reel silently make a second copy of the same one.
+    state.pick = [];
+    persistPick();
+    openReelEditor();
+    render();
+  } catch (err) {
+    say(humanError(err, 'reel.buildFailed'));
+  }
+}
+
+/** Add what has just been picked to the reel already open, and go back to it. */
+async function appendToReel() {
+  if (!state.reel || !state.pick.length) return;
+  const cuts = [
+    ...state.reel.cuts.map((c) => ({
+      job_id: c.jobId, moment_id: c.momentId,
+      start_sec: c.startMs / 1000, end_sec: c.endMs / 1000,
+    })),
+    ...state.pick.map((p) => ({ job_id: p.jobId, moment_id: p.momentId })),
+  ];
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}`, {
+      method: 'PATCH', body: JSON.stringify({ cuts }),
+    });
+    state.reel = out.reel;
+    state.pick = [];
+    persistPick();
+    openReelEditor();
+    render();
+  } catch (err) {
+    say(humanError(err, 'reel.saveFailed'));
+  }
+}
+
+/** A name from what the cuts are of, not "Untitled reel". */
+function defaultReelTitle() {
+  const games = new Set(state.pick.map((p) => p.jobId));
+  if (games.size === 1) {
+    const g = state.games.find((x) => (x.jobId || x.id) === [...games][0]);
+    const name = (g && gameHeadline(g)) || state.job?.title || '';
+    if (name) return `${name} — ${t('reel.highlights')}`.slice(0, 100);
+  }
+  return t('reel.highlights');
+}
+
+function openReelEditor() {
+  $('reel').classList.remove('hidden');
+  renderReelEditor();
+  mountReelPlayer();
+}
+
+function closeReelEditor() {
+  $('reel').classList.add('hidden');
+  if (reelHls) { reelHls.destroy(); reelHls = null; }
+  reelVideo = null;
+  reelLoadedJob = null;
+  reelUrls = {};
+  state.reel = null;
+  state.reelPlay = null;
+  $('reel-player').innerHTML = '';
+  render();
+}
+
+/**
+ * The editor, drawn into its own regions.
+ *
+ * Same contract as renderDetailsBody: the player's own container is never
+ * rewritten, because re-parenting a playing video is how a preview loses its
+ * place on every keystroke.
+ */
+function renderReelEditor() {
+  const reel = state.reel;
+  if (!reel) return;
+  $('reel-title').textContent = reel.title || t('reel.untitled');
+  $('reel-actions').innerHTML = reelActions(reel);
+  $('reel-cuts').innerHTML = reelCutList(reel);
+  $('reel-under').innerHTML = reelMeta(reel);
+}
+
+function reelActions(reel) {
+  const state_ = (reel.render || {}).status || '';
+  const busy = state_ === 'running';
+  return `
+    <span class="reel-render-state" data-state="${esc(state_)}">${
+  state_ ? esc(t(`reel.render.${state_}`) || state_) : ''}</span>
+    <button class="btn-quiet detail-action" data-reel-add="1">${esc(t('reel.addMore'))}</button>
+    <button class="btn-primary detail-action" data-reel-render="1" ${
+  busy || !reel.cuts.length ? 'disabled' : ''}>${esc(t('reel.render'))}</button>`;
+}
+
+function reelMeta(reel) {
+  const matches = matchCount(reel.cuts);
+  return `
+    <div class="reel-meta">
+      <label class="field-label" for="reel-name">${esc(t('reel.name'))}</label>
+      <input class="input" id="reel-name" maxlength="100" data-reel-field="title"
+             value="${esc(reel.title || '')}" />
+      <div class="reel-meta-facts">
+        <span>${esc(t('reel.cutCount').replace('{n}', String(reel.cuts.length)))}</span>
+        <span class="reel-len">${esc(msClock(reelLength(reel.cuts)))}</span>
+        ${matches > 1 ? `<span>${esc(t('reel.fromMatches').replace('{n}', String(matches)))}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+/** The cuts, in the order they will play. */
+function reelCutList(reel) {
+  if (!reel.cuts.length) {
+    return `<div class="ride-group-empty">${esc(t('reel.noCuts'))}</div>`;
+  }
+  const step = state.reelPlay?.step ?? NUDGE_MS[0];
+  return `
+    <div class="reel-cuts-head">
+      <span class="panel-label">${esc(t('reel.order'))}</span>
+      <span class="segmented" role="group" aria-label="${esc(t('reel.nudge'))}">
+        ${NUDGE_MS.map((ms) => `
+          <button class="seg-btn" data-reel-step="${ms}" aria-pressed="${ms === step}">${
+  ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`}</button>`).join('')}
+      </span>
+    </div>
+    ${reel.cuts.map((c, i) => reelCutRow(c, i, reel.cuts.length)).join('')}`;
+}
+
+function reelCutRow(cut, i, total) {
+  const playing = state.reelPlay?.at === i;
+  return `
+    <div class="reel-cut" aria-current="${playing}">
+      <div class="reel-cut-top">
+        <button class="reel-cut-play" data-reel-play="${i}"
+                title="${esc(t('reel.playCut'))}" aria-label="${esc(t('reel.playCut'))}">
+          <span aria-hidden="true"></span>
+        </button>
+        <span class="reel-cut-name">${esc(cut.label || cut.momentId)}</span>
+        <span class="reel-cut-len">${esc(msClock(cut.endMs - cut.startMs))}</span>
+      </div>
+      <div class="reel-cut-edges">
+        ${['start', 'end'].map((edge) => `
+          <span class="reel-edge">
+            <span class="reel-edge-label">${esc(t(`reel.${edge}`))}</span>
+            <button class="link-btn" data-reel-trim="${i}:${edge}:-1"
+                    aria-label="${esc(t('reel.earlier'))}">&minus;</button>
+            <span class="reel-edge-at">${esc(msClock(edge === 'start' ? cut.startMs : cut.endMs))}</span>
+            <button class="link-btn" data-reel-trim="${i}:${edge}:1"
+                    aria-label="${esc(t('reel.later'))}">+</button>
+          </span>`).join('')}
+      </div>
+      <div class="reel-cut-move">
+        <button class="btn-ghost btn-step" data-reel-move="${i}:-1" ${i === 0 ? 'disabled' : ''}
+                aria-label="${esc(t('reel.moveUp'))}">&uarr;</button>
+        <button class="btn-ghost btn-step" data-reel-move="${i}:1"
+                ${i === total - 1 ? 'disabled' : ''} aria-label="${esc(t('reel.moveDown'))}">&darr;</button>
+        <button class="btn-ghost btn-step" data-reel-drop="${i}">${esc(t('reel.remove'))}</button>
+      </div>
+    </div>`;
+}
+
+/* ── Editing the cuts ─────────────────────────────────────────────────────
+   Every change is written straight through to the API, which re-plans each
+   cut against the moment it names. The browser's copy is what came back, so
+   a trim the server clamped shows as clamped rather than as what was asked
+   for — the alternative is a field that disagrees with the thing it edits. */
+
+async function saveReelCuts(cuts) {
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        cuts: cuts.map((c) => ({
+          job_id: c.jobId,
+          moment_id: c.momentId,
+          start_sec: c.startMs / 1000,
+          end_sec: c.endMs / 1000,
+        })),
+      }),
+    });
+    state.reel = out.reel;
+  } catch (err) {
+    say(humanError(err, 'reel.saveFailed'));
+  }
+  renderReelEditor();
+}
+
+async function saveReelTitle(title) {
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: title.slice(0, 100) }),
+    });
+    state.reel = out.reel;
+  } catch (err) {
+    say(humanError(err, 'reel.saveFailed'));
+  }
+  renderReelEditor();
+}
+
+function reelTrim(i, edge, dir) {
+  const cuts = state.reel.cuts.map((c) => ({ ...c }));
+  const cut = cuts[i];
+  if (!cut) return;
+  cuts[i] = nudge(cut, edge, (state.reelPlay?.step ?? NUDGE_MS[0]) * dir);
+  saveReelCuts(cuts);
+}
+
+function reelMove(i, by) {
+  const cuts = moveCut(state.reel.cuts, i, by);
+  if (cuts !== state.reel.cuts) saveReelCuts(cuts);
+}
+
+function reelDrop(i) {
+  const cuts = state.reel.cuts.filter((_, n) => n !== i);
+  saveReelCuts(cuts);
+}
+
+/* ── Previewing ───────────────────────────────────────────────────────────
+   No render is needed to watch a reel: the cuts are ranges of matches that
+   are already streaming, so the preview seeks between them on one video.
+   Cuts from one match run on without a break; crossing to another costs a
+   manifest load, which is visible and is meant to be — pretending otherwise
+   would make a stall look like a stutter in the footage. */
+
+async function reelPlaybackUrl(jobId) {
+  if (reelUrls[jobId]) return reelUrls[jobId];
+  const p = await api(`/api/jobs/${jobId}/playback`);
+  reelUrls[jobId] = p.hls_url;
+  return reelUrls[jobId];
+}
+
+function mountReelPlayer() {
+  const slot = $('reel-player');
+  if (!slot) return;
+  slot.innerHTML = `
+    <div class="inline-player">
+      <div class="player-frame">
+        <video playsinline preload="none"></video>
+      </div>
+      <div class="player-controls">
+        <button class="btn-primary player-play" data-reel-pc="play">${esc(t('player.play'))}</button>
+        <button class="pc" data-reel-pc="prev">&#8592;</button>
+        <button class="pc" data-reel-pc="next">&#8594;</button>
+        <span class="player-time" data-reel-time>0:00.000</span>
+      </div>
+    </div>`;
+  reelVideo = slot.querySelector('video');
+  reelVideo.addEventListener('timeupdate', onReelTick);
+  reelVideo.addEventListener('click', () => reelControl('play'));
+}
+
+function onReelTick() {
+  const play = state.reelPlay;
+  const cut = state.reel?.cuts?.[play?.at ?? -1];
+  if (!play || !cut || !reelVideo) return;
+  const el = $('reel-cuts')?.querySelector('[data-reel-time]');
+  const clock = $('reel-player')?.querySelector('[data-reel-time]');
+  if (clock) clock.textContent = msClock(reelVideo.currentTime * 1000 - cut.startMs);
+  if (el) el.textContent = '';
+  if (pastEnd(cut, reelVideo.currentTime)) {
+    const next = nextCut(state.reel.cuts, play.at);
+    if (next === null) { reelVideo.pause(); play.playing = false; } else playReelCut(next);
+  }
+}
+
+async function playReelCut(i) {
+  const cut = state.reel?.cuts?.[i];
+  if (!cut || !reelVideo) return;
+  state.reelPlay = { ...(state.reelPlay || {}), at: i, playing: true };
+  renderReelEditor();
+  try {
+    if (reelLoadedJob !== cut.jobId) {
+      const url = await reelPlaybackUrl(cut.jobId);
+      if (reelHls) { reelHls.destroy(); reelHls = null; }
+      if (window.Hls?.isSupported()) {
+        reelHls = new window.Hls({ enableWorker: true });
+        reelHls.loadSource(url);
+        reelHls.attachMedia(reelVideo);
+        await new Promise((done) => reelHls.on(window.Hls.Events.MANIFEST_PARSED, done));
+      } else {
+        reelVideo.src = url;
+        await new Promise((done) => reelVideo.addEventListener('loadedmetadata', done, { once: true }));
+      }
+      reelLoadedJob = cut.jobId;
+    }
+    reelVideo.currentTime = cut.startMs / 1000;
+    await reelVideo.play();
+  } catch (err) {
+    $('reel-under').innerHTML = `<div class="error-note">${esc(humanError(err, 'reel.previewFailed'))}</div>`;
+  }
+}
+
+function reelControl(kind) {
+  const play = state.reelPlay || { at: 0 };
+  if (kind === 'play') {
+    if (reelVideo && !reelVideo.paused) { reelVideo.pause(); return; }
+    playReelCut(play.at ?? 0);
+    return;
+  }
+  if (kind === 'prev') playReelCut(Math.max(0, (play.at ?? 0) - 1));
+  if (kind === 'next') playReelCut(Math.min(state.reel.cuts.length - 1, (play.at ?? 0) + 1));
+}
+
+/* ── Rendering ────────────────────────────────────────────────────────── */
+
+async function startReelRender() {
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/render`, { method: 'POST' });
+    state.reel = { ...state.reel, render: out.render };
+    renderReelEditor();
+    pollReelRender();
+  } catch (err) {
+    say(humanError(err, 'reel.renderFailed'));
+  }
+}
+
+/** Ask how the encode is doing until it settles. */
+async function pollReelRender() {
+  if (!state.reel) return;
+  const id = state.reel.reelId;
+  try {
+    const out = await api(`/api/reels/${id}/render`);
+    if (!state.reel || state.reel.reelId !== id) return;
+    state.reel = { ...state.reel, render: out.render };
+    renderReelEditor();
+    if (out.render?.status === 'running') setTimeout(pollReelRender, 5000);
+  } catch {
+    // A poll that could not be made is not news about the encode; try again.
+    setTimeout(pollReelRender, 10000);
+  }
+}
+
+
 /* ──────────────────────────────────────────────────────────── agent ── */
 
 async function ensureSession() {
@@ -5218,6 +5663,9 @@ document.addEventListener('click', (event) => {
     + '[data-edit-live],[data-cancel-edit-live],'
     + '[data-youtube-act],'
     + '[data-ride-tab],[data-type-menu],[data-type-pick],[data-progress],'
+    + '[data-pick],[data-pick-clear],[data-reel-build],[data-reel-append],'
+    + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
+    + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
     + '[data-job-events]');
 
   // An open moment-type menu closes on any click outside its own filter. Its
@@ -5358,6 +5806,54 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
+  if (hit.dataset.pick) {
+    // The key carries the match as well as the moment: ids are unique within a
+    // job, and a reel may hold cuts from several.
+    const raw = hit.dataset.pick;
+    const at = raw.indexOf('|');
+    togglePick(raw.slice(0, at), raw.slice(at + 1));
+    render();
+    return;
+  }
+  if (hit.dataset.pickClear) {
+    state.pick = [];
+    persistPick();
+    render();
+    return;
+  }
+  if (hit.dataset.reelBuild) {
+    buildReel();
+    return;
+  }
+  if (hit.dataset.reelAppend) {
+    appendToReel();
+    return;
+  }
+  if (hit.dataset.reelPc) { reelControl(hit.dataset.reelPc); return; }
+  if (hit.dataset.reelRender !== undefined) { startReelRender(); return; }
+  if (hit.dataset.reelAdd !== undefined) {
+    // Back to the desk with the reel still open behind: picking more is done
+    // where the moments are, not in a second browser inside the editor.
+    $('reel').classList.add('hidden');
+    return;
+  }
+  if (hit.dataset.reelStep) {
+    state.reelPlay = { ...(state.reelPlay || {}), step: Number(hit.dataset.reelStep) };
+    renderReelEditor();
+    return;
+  }
+  if (hit.dataset.reelPlay !== undefined) { playReelCut(Number(hit.dataset.reelPlay)); return; }
+  if (hit.dataset.reelTrim) {
+    const [i, edge, dir] = hit.dataset.reelTrim.split(':');
+    reelTrim(Number(i), edge, Number(dir));
+    return;
+  }
+  if (hit.dataset.reelMove) {
+    const [i, by] = hit.dataset.reelMove.split(':');
+    reelMove(Number(i), Number(by));
+    return;
+  }
+  if (hit.dataset.reelDrop !== undefined) { reelDrop(Number(hit.dataset.reelDrop)); return; }
   if (hit.dataset.typePick) {
     const [index, key] = hit.dataset.typePick.split(':');
     const msg = state.msgs[Number(index)];
@@ -5511,6 +6007,14 @@ document.addEventListener('input', (event) => {
     if (state.share) state.share[el.dataset.shareField] = el.value;
     return;
   }
+  // The reel's name, for the same reason: the editor is redrawn on every
+  // trim, and a redraw under the caret would take the caret with it. It is
+  // written through on blur rather than per keystroke — one PATCH a name,
+  // not one a letter.
+  if (el.matches('[data-reel-field]')) {
+    if (state.reel) state.reel[el.dataset.reelField] = el.value;
+    return;
+  }
   if (el.matches('[data-youtube-field]')) {
     state.youtubeForm = { ...(state.youtubeForm || {}), [el.dataset.youtubeField]: el.value };
     return;
@@ -5573,6 +6077,11 @@ document.addEventListener('change', (event) => {
     if (state.share) state.share[event.target.dataset.shareField] = event.target.value;
     return;
   }
+  // A name is written through when the field is left, not on every letter.
+  if (event.target.matches?.('[data-reel-field]') && state.reel) {
+    saveReelTitle(event.target.value);
+    return;
+  }
   if (event.target.id !== 'file-input') return;
   const f = event.target.files?.[0];
   if (!f) return;
@@ -5616,6 +6125,10 @@ document.addEventListener('click', (event) => {
 $('open-settings')?.addEventListener('click', openSettings);
 $('close-settings')?.addEventListener('click', closeSettings);
 $('close-details')?.addEventListener('click', closeDetails);
+$('close-reel')?.addEventListener('click', closeReelEditor);
+$('reel')?.addEventListener('click', (event) => {
+  if (event.target.id === 'reel') closeReelEditor();
+});
 // Clicking the backdrop closes; clicking the card must not.
 $('details')?.addEventListener('click', (event) => {
   if (event.target.id === 'details') closeDetails();
