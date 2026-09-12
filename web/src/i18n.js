@@ -16,6 +16,14 @@ const BASE = 'en-GB';
 
 const STRINGS = {
   'en-GB': {
+    'reel.cutCount.one': '1 cut',
+    'reel.publishTitle': 'Publish this reel',
+    'reel.rerender': 'Render again',
+    'reel.publishing': 'Publishing',
+    'reel.contains': 'In this reel',
+    'reel.busy.render': 'Rendering the reel — editing is paused until it finishes',
+    'reel.busy.publish': 'Uploading to YouTube — editing is paused until it finishes',
+    'reel.busy.crop': 'Cutting the shape — editing is paused until it finishes',
     'crop.title': 'Shape',
     'crop.drag': 'Drag the guide to move the crop',
     'crop.needsRender': 'Render the reel first — the other shapes are cut from it',
@@ -545,6 +553,14 @@ const STRINGS = {
   },
 
   de: {
+    'reel.cutCount.one': '1 Schnitt',
+    'reel.publishTitle': 'Dieses Reel veröffentlichen',
+    'reel.rerender': 'Erneut rendern',
+    'reel.publishing': 'Wird veröffentlicht',
+    'reel.contains': 'In diesem Reel',
+    'reel.busy.render': 'Reel wird gerendert — Bearbeitung pausiert bis zum Abschluss',
+    'reel.busy.publish': 'Upload zu YouTube — Bearbeitung pausiert bis zum Abschluss',
+    'reel.busy.crop': 'Format wird geschnitten — Bearbeitung pausiert bis zum Abschluss',
     'crop.title': 'Format',
     'crop.drag': 'Ziehen Sie den Rahmen, um den Ausschnitt zu verschieben',
     'crop.needsRender': 'Zuerst das Reel rendern — die anderen Formate werden daraus geschnitten',
@@ -1052,6 +1068,14 @@ const STRINGS = {
   },
 
   it: {
+    'reel.cutCount.one': '1 taglio',
+    'reel.publishTitle': 'Pubblica questo reel',
+    'reel.rerender': 'Renderizza di nuovo',
+    'reel.publishing': 'Pubblicazione',
+    'reel.contains': 'In questo reel',
+    'reel.busy.render': 'Renderizzazione in corso — la modifica riprende al termine',
+    'reel.busy.publish': 'Caricamento su YouTube — la modifica riprende al termine',
+    'reel.busy.crop': 'Ritaglio in corso — la modifica riprende al termine',
     'crop.title': 'Formato',
     'crop.drag': 'Trascina la guida per spostare il ritaglio',
     'crop.needsRender': 'Prima renderizza il reel — gli altri formati si ricavano da lì',
@@ -1557,6 +1581,14 @@ const STRINGS = {
   },
 
   fr: {
+    'reel.cutCount.one': '1 séquence',
+    'reel.publishTitle': 'Publier ce reel',
+    'reel.rerender': 'Générer à nouveau',
+    'reel.publishing': 'Publication',
+    'reel.contains': 'Dans ce reel',
+    'reel.busy.render': 'Génération en cours — la modification reprend à la fin',
+    'reel.busy.publish': 'Envoi vers YouTube — la modification reprend à la fin',
+    'reel.busy.crop': 'Recadrage en cours — la modification reprend à la fin',
     'crop.title': 'Format',
     'crop.drag': 'Faites glisser le repère pour déplacer le recadrage',
     'crop.needsRender': 'Générez d\'abord le reel — les autres formats en sont issus',
@@ -2065,6 +2097,14 @@ const STRINGS = {
   },
 
   es: {
+    'reel.cutCount.one': '1 corte',
+    'reel.publishTitle': 'Publicar este reel',
+    'reel.rerender': 'Renderizar de nuevo',
+    'reel.publishing': 'Publicando',
+    'reel.contains': 'En este reel',
+    'reel.busy.render': 'Renderizando el reel — la edición se reanuda al terminar',
+    'reel.busy.publish': 'Subiendo a YouTube — la edición se reanuda al terminar',
+    'reel.busy.crop': 'Recortando el formato — la edición se reanuda al terminar',
     'crop.title': 'Formato',
     'crop.drag': 'Arrastra la guía para mover el recorte',
     'crop.needsRender': 'Renderiza el reel primero — los demás formatos se recortan de él',

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -296,6 +297,66 @@ async def crop_reel(reel_id: str, body: CropRequest,
                                    {"reel_id": reel_id, "aspect": body.aspect, "crop": crop})
     return {"reel_id": reel_id, "aspect": body.aspect, "crop": crop,
             "reel": saved.get("reel") or reel}
+
+
+class PublishYouTubeRequest(BaseModel):
+    """What to publish, and how it should read on the channel.
+
+    Deliberately the same shape as the single-moment request next door: the
+    two are one action on two things, and an editor who has published a moment
+    should not have to learn a second form to publish a reel.
+    """
+
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=5000)
+    privacy: Literal["private", "unlisted", "public"] = "private"
+    tags: list[str] = Field(default_factory=list, max_length=15)
+
+
+@router.post("/{reel_id}/publish/youtube")
+async def publish_reel_to_youtube(reel_id: str, body: PublishYouTubeRequest,
+                                  user: CallerIdentity = Depends(current_user)) -> dict:
+    """Upload the rendered 16:9 reel to the configured YouTube channel.
+
+    The rendered file is what goes up, so there has to be one — nothing here
+    cuts video. That is the difference from the moment route, which renders
+    its cut on the way past; a reel's render is a Transcoder job that already
+    happened.
+    """
+    reel = await _reel(reel_id)
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Render the reel first — publishing uploads the rendered file.")
+
+    result = await clients.call_mcp("media", "publish_youtube", {
+        "clip_uri": render["reelUri"],
+        "title": body.title,
+        "description": body.description,
+        "privacy": body.privacy,
+        "tags": body.tags,
+    })
+    if result.get("status") != "success":
+        # The reason is the editor's to act on — a revoked refresh token, a
+        # channel over its daily quota — so it travels rather than being
+        # flattened into "upload failed". Same rule as the moment route.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.get("error") or "YouTube would not accept the upload.",
+        )
+
+    publish = {
+        "status": "done",
+        "videoId": result.get("video_id", ""),
+        "url": result.get("url", ""),
+        "privacy": result.get("privacy", body.privacy),
+        "error": "",
+    }
+    saved = await clients.call_mcp("catalog", "set_reel_publish",
+                                   {"reel_id": reel_id, "publish": publish})
+    return {"reel_id": reel_id, "video_id": publish["videoId"], "url": publish["url"],
+            "privacy": publish["privacy"], "reel": saved.get("reel") or reel}
 
 
 @router.get("/{reel_id}/render")

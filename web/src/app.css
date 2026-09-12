@@ -3267,3 +3267,71 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   border-radius: var(--radius-sm);
   color: var(--color-neutral-700);
 }
+
+/* ── While the reel is busy ───────────────────────────────────────────────
+   A render is minutes of someone else's encoder and a publish is an upload.
+   Both leave the editor looking idle while the thing under it is not, and an
+   edit made in that window either applies to a render already superseded or
+   is thrown away when the reply lands. So the surface says so, in a band that
+   cannot be missed, and everything it would be pointless to press goes flat. */
+.reel-busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-accent-100);
+  border-bottom: var(--rule-hair) solid var(--color-accent-300);
+  font-size: 12px;
+  color: var(--color-accent-900);
+}
+.reel-busy-spin {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-accent-300);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: loading-spin 700ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .reel-busy-spin { animation: none; } }
+
+/* Disabled is the state that carries this, so it needs to read as disabled
+   rather than merely as unclickable — the default 0.4 on a seg-btn or a
+   link-btn is too easy to mistake for "quiet". */
+#reel[data-busy]:not([data-busy=""]) .seg-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .link-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-ghost:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-quiet:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-primary:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+/* The two dragged controls have no disabled attribute to carry it, so the
+   whole panel is dimmed and made inert instead. */
+#reel[data-busy]:not([data-busy=""]) .trim-strip,
+#reel[data-busy]:not([data-busy=""]) .crop-source {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* What is going up, above the fields, in the same voice as the trim readings. */
+.reel-publish-what {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.reel-publish-what .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.reel-publish-what b {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}

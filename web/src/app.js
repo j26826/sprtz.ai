@@ -2010,6 +2010,9 @@ function trimPanel(p) {
  * through `state.playing`, the editor through the reel's cuts.
  */
 function trimStrip({ startMs, endMs, detectedStartMs, detectedEndMs, thumb, scope, index = 0 }) {
+  // A trim made during a render applies to a render that is already stale, so
+  // the strip goes read-only rather than accepting an edit it cannot honour.
+  const off = scope === 'cut' && reelBusy() ? 'disabled' : '';
   const win = trimWindow(detectedStartMs, detectedEndMs);
   const left = pctOf(startMs, win);
   const right = pctOf(endMs, win);
@@ -2051,10 +2054,10 @@ function trimStrip({ startMs, endMs, detectedStartMs, detectedEndMs, thumb, scop
           <span class="trim-edge-box">
             <span class="field-label">${esc(t(`reel.${edge}`))}</span>
             <button class="link-btn" data-${scope === 'cut' ? 'reel-trim' : 'trim'}="${at}${edge}:-1"
-                    aria-label="${esc(t('reel.earlier'))}">&minus;</button>
+                    ${off} aria-label="${esc(t('reel.earlier'))}">&minus;</button>
             <span class="trim-at">${esc(msClock(edge === 'start' ? startMs : endMs))}</span>
             <button class="link-btn" data-${scope === 'cut' ? 'reel-trim' : 'trim'}="${at}${edge}:1"
-                    aria-label="${esc(t('reel.later'))}">+</button>
+                    ${off} aria-label="${esc(t('reel.later'))}">+</button>
           </span>`).join('')}
         <span class="trim-ranges">
           <span><span class="k">${esc(t('trim.detected'))}</span>
@@ -2089,6 +2092,7 @@ function onTrimPointerDown(event) {
   // on it would be mostly grips.
   const source = el.closest?.('[data-crop-source]');
   if (source) {
+    if (reelBusy()) return;
     const aspect = state.reelCrop?.aspect || '9:16';
     // Measured once, here. Every move re-renders the panel, which replaces
     // this element — and a detached element's rect is all zeros, so reading it
@@ -4977,6 +4981,8 @@ function closeReelEditor() {
   reelUrls = {};
   state.reel = null;
   state.reelPlay = null;
+  state.reelPublish = null;
+  state.reelCrop = null;
   $('reel-player').innerHTML = '';
   render();
 }
@@ -4993,19 +4999,72 @@ function renderReelEditor() {
   if (!reel) return;
   $('reel-title').textContent = reel.title || t('reel.untitled');
   $('reel-actions').innerHTML = reelActions(reel);
-  $('reel-cuts').innerHTML = reelCutList(reel);
+  $('reel-cuts').innerHTML = state.reelPublish?.open
+    ? reelPublishPanel(reel)
+    : reelCutList(reel);
   $('reel-under').innerHTML = reelMeta(reel);
+
+  // One class on the dialog, read by everything inside it. Saying it once here
+  // rather than on each control is what keeps a new control from quietly
+  // staying live during a render.
+  const busy = reelBusy();
+  $('reel').dataset.busy = busy;
+  const banner = $('reel-busy');
+  if (banner) {
+    banner.hidden = !busy;
+    banner.innerHTML = busy
+      ? `<span class="reel-busy-spin" aria-hidden="true"></span>
+         <span>${esc(t(`reel.busy.${busy}`))}</span>` : '';
+  }
+}
+
+/**
+ * What the reel is busy doing, or ''.
+ *
+ * One answer, read by every control on the screen. A render is minutes of
+ * someone else's encoder and a publish is an upload; both leave the editor
+ * looking idle while the thing under it is not, and an edit made in that
+ * window either applies to a render that has already been superseded or is
+ * quietly thrown away when the reply lands. So the whole surface goes to
+ * work-in-progress rather than each button deciding for itself.
+ */
+/**
+ * "1 cut" / "3 cuts".
+ *
+ * There is no plural machinery in i18n.js — `{n}` is replaced by hand — so the
+ * singular is its own key. Only this string needs it: "1 selected" reads
+ * correctly, and the match count is only ever shown above one.
+ */
+function cutCount(n) {
+  return t(n === 1 ? 'reel.cutCount.one' : 'reel.cutCount').replace('{n}', String(n));
+}
+
+function reelBusy() {
+  const reel = state.reel;
+  if (!reel) return '';
+  if ((reel.render || {}).status === 'running') return 'render';
+  if (state.reelPublish?.status === 'sending') return 'publish';
+  if (state.reelCrop?.busy) return 'crop';
+  return '';
 }
 
 function reelActions(reel) {
-  const state_ = (reel.render || {}).status || '';
-  const busy = state_ === 'running';
+  const rendered = (reel.render || {}).status || '';
+  const busy = reelBusy();
+  const off = busy ? 'disabled' : '';
+  const ready = rendered === 'ready';
+  const publishing = state.reelPublish?.open;
   return `
-    <span class="reel-render-state" data-state="${esc(state_)}">${
-  state_ ? esc(t(`reel.render.${state_}`) || state_) : ''}</span>
-    <button class="btn-quiet detail-action" data-reel-add="1">${esc(t('reel.addMore'))}</button>
-    <button class="btn-primary detail-action" data-reel-render="1" ${
-  busy || !reel.cuts.length ? 'disabled' : ''}>${esc(t('reel.render'))}</button>`;
+    <span class="reel-render-state" data-state="${esc(rendered)}">${
+  rendered ? esc(t(`reel.render.${rendered}`) || rendered) : ''}</span>
+    <button class="btn-quiet detail-action" data-reel-add="1" ${off}>${
+  esc(t('reel.addMore'))}</button>
+    <button class="btn-quiet detail-action" data-reel-render="1" ${
+  off || !reel.cuts.length ? 'disabled' : ''}>${
+  esc(ready ? t('reel.rerender') : t('reel.render'))}</button>
+    <button class="btn-primary detail-action" data-reel-publish="1"
+            aria-pressed="${Boolean(publishing)}" ${off || !ready ? 'disabled' : ''}>${
+  esc(t('share.publish'))}</button>`;
 }
 
 function reelMeta(reel) {
@@ -5032,7 +5091,7 @@ function reelMeta(reel) {
       <input class="input" id="reel-name" maxlength="100" data-reel-field="title"
              value="${esc(reel.title || '')}" />
       <div class="reel-meta-facts">
-        <span>${esc(t('reel.cutCount').replace('{n}', String(reel.cuts.length)))}</span>
+        <span>${esc(cutCount(reel.cuts.length))}</span>
         <span class="reel-len">${esc(msClock(reelLength(reel.cuts)))}</span>
         ${matches > 1 ? `<span>${esc(t('reel.fromMatches').replace('{n}', String(matches)))}</span>` : ''}
       </div>
@@ -5061,6 +5120,7 @@ function cropPanel(reel) {
   const band = cropBand(chosen, focus);
   const done = reel.crops || {};
   const busy = state.reelCrop?.busy;
+  const off = reelBusy() ? 'disabled' : '';
 
   return `
     <div class="crop-card">
@@ -5068,7 +5128,7 @@ function cropPanel(reel) {
         <span class="panel-label">${esc(t('crop.title'))}</span>
         <span class="segmented" role="group" aria-label="${esc(t('crop.title'))}">
           ${Object.keys(CROP_ASPECTS).map((a) => `
-            <button class="seg-btn" data-crop-aspect="${a}" aria-pressed="${a === chosen}">${
+            <button class="seg-btn" data-crop-aspect="${a}" ${off} aria-pressed="${a === chosen}">${
   esc(a)}${done[a] ? ' ✓' : ''}</button>`).join('')}
         </span>
       </div>
@@ -5083,14 +5143,69 @@ function cropPanel(reel) {
       <div class="crop-actions">
         <span class="segmented" role="group" aria-label="${esc(t('crop.fill'))}">
           ${['crop', 'blur'].map((f) => `
-            <button class="seg-btn" data-crop-fill="${f}" aria-pressed="${f === fill}">${
+            <button class="seg-btn" data-crop-fill="${f}" ${off} aria-pressed="${f === fill}">${
   esc(t(`crop.fill.${f}`))}</button>`).join('')}
         </span>
-        <button class="btn-primary btn-step" data-crop-go="1" ${ready && !busy ? '' : 'disabled'}>${
+        <button class="btn-primary btn-step" data-crop-go="1" ${ready && !reelBusy() ? '' : 'disabled'}>${
   esc(busy ? t('crop.cutting') : t('crop.cut').replace('{a}', chosen))}</button>
       </div>
       ${Object.keys(done).length ? `<div class="crop-done">${
     Object.keys(done).sort().map((a) => `<span class="crop-chip">${esc(a)}</span>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+/**
+ * Publishing the rendered reel.
+ *
+ * The same panel as a moment's, in the same order, with the same fields and
+ * the same three inert platform notes — it is one action on two things, and an
+ * editor who has published a moment should not meet a second form. What it
+ * does not have is a trim: a reel's range is its cuts, which are edited on the
+ * other side of this dialog, and the file being uploaded is the render.
+ */
+function reelPublishPanel(reel) {
+  const pub = state.reelPublish || {};
+  const status = pub.status || 'idle';
+  const done = reel.publish || {};
+
+  return `
+    <div class="publish-panel">
+      <div class="panel-label">${esc(t('reel.publishTitle'))}</div>
+
+      <div class="reel-publish-what">
+        <span class="k">${esc(t('reel.publishing'))}</span>
+        <b>${esc(msClock(reelLength(reel.cuts)))}</b>
+        <span class="k">${esc(cutCount(reel.cuts.length))}</span>
+      </div>
+
+      <label class="field-label" for="reel-share-title">${esc(t('share.videoTitle'))}</label>
+      <input class="input" id="reel-share-title" maxlength="100" data-reel-share="title"
+             value="${esc(pub.title || '')}" />
+      <div class="setting-hint">${esc(t('share.titleHint'))}</div>
+
+      <label class="field-label" for="reel-share-description">${esc(t('share.description'))}</label>
+      <textarea class="input share-text" id="reel-share-description" rows="5"
+                data-reel-share="description">${esc(pub.description || '')}</textarea>
+
+      <label class="field-label" for="reel-share-privacy">${esc(t('share.privacy'))}</label>
+      <select class="input" id="reel-share-privacy" data-reel-share="privacy">
+        ${['private', 'unlisted', 'public'].map((v) => `
+          <option value="${v}" ${(pub.privacy || 'private') === v ? 'selected' : ''}>${
+  esc(t(`share.privacy.${v}`))}</option>`).join('')}
+      </select>
+
+      <div class="platform-row">
+        <button class="btn-primary" data-reel-publish-to="youtube" ${
+  status === 'sending' ? 'disabled' : ''}>${
+  esc(status === 'sending' ? t('share.sending') : t('share.toYouTube'))}</button>
+        <span class="platform-soon">${esc(t('share.instagramSoon'))}</span>
+        <span class="platform-soon">${esc(t('share.tiktokSoon'))}</span>
+      </div>
+
+      ${status === 'error' ? `<div class="share-error">${esc(pub.error || '')}</div>` : ''}
+      ${done.url ? `<div class="share-done">${esc(t('share.published'))}
+        <a class="link-btn" href="${esc(done.url)}" target="_blank"
+           rel="noopener noreferrer">${esc(done.url)}</a></div>` : ''}
     </div>`;
 }
 
@@ -5109,6 +5224,7 @@ function reelCutList(reel) {
 
 function reelCutRow(cut, i, total) {
   const playing = state.reelPlay?.at === i;
+  const off = reelBusy() ? 'disabled' : '';
   return `
     <div class="reel-cut" aria-current="${playing}">
       <div class="reel-cut-top">
@@ -5131,11 +5247,13 @@ function reelCutRow(cut, i, total) {
         ${isTrimmed(cut) ? `<span class="reel-edge-trimmed">${esc(t('trim.trimmed'))}</span>` : ''}
       </div>
       <div class="reel-cut-move">
-        <button class="btn-ghost btn-step" data-reel-move="${i}:-1" ${i === 0 ? 'disabled' : ''}
+        <button class="btn-ghost btn-step" data-reel-move="${i}:-1" ${i === 0 || off ? 'disabled' : ''}
                 aria-label="${esc(t('reel.moveUp'))}">&uarr;</button>
         <button class="btn-ghost btn-step" data-reel-move="${i}:1"
-                ${i === total - 1 ? 'disabled' : ''} aria-label="${esc(t('reel.moveDown'))}">&darr;</button>
-        <button class="btn-ghost btn-step" data-reel-drop="${i}">${esc(t('reel.remove'))}</button>
+                ${i === total - 1 || off ? 'disabled' : ''}
+                aria-label="${esc(t('reel.moveDown'))}">&darr;</button>
+        <button class="btn-ghost btn-step" data-reel-drop="${i}" ${off}>${
+  esc(t('reel.remove'))}</button>
       </div>
     </div>`;
 }
@@ -5313,6 +5431,49 @@ async function cutReelShape() {
     say(humanError(err, 'crop.failed'));
   }
   state.reelCrop = { ...state.reelCrop, busy: false };
+  renderReelEditor();
+}
+
+/* ── Publishing ───────────────────────────────────────────────────────── */
+
+/** The copy a reel arrives with: what it is, and what is in it. */
+function reelShareDefaults(reel) {
+  const names = (reel.cuts || []).map((c) => c.label).filter(Boolean);
+  const seen = [...new Set(names)].slice(0, 4);
+  return {
+    title: (reel.title || t('reel.untitled')).slice(0, 100),
+    // What is actually in it, in the order it plays. Not a claim about how
+    // good it is: nothing here has watched it.
+    description: [
+      seen.length ? `${t('reel.contains')}: ${seen.join(', ')}.` : '',
+      cutCount((reel.cuts || []).length),
+    ].filter(Boolean).join('\n\n'),
+    privacy: state.youtube?.privacy || 'private',
+  };
+}
+
+async function publishReelToYouTube() {
+  const pub = state.reelPublish;
+  if (!state.reel || !pub || pub.status === 'sending') return;
+  state.reelPublish = { ...pub, status: 'sending', error: '' };
+  renderReelEditor();
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/publish/youtube`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: pub.title,
+        description: pub.description,
+        privacy: pub.privacy,
+      }),
+    });
+    state.reel = out.reel || state.reel;
+    state.reelPublish = { ...state.reelPublish, status: 'done', url: out.url };
+  } catch (err) {
+    state.reelPublish = {
+      ...state.reelPublish, status: 'error',
+      error: humanError(err, 'share.publishFailed'),
+    };
+  }
   renderReelEditor();
 }
 
@@ -6021,6 +6182,7 @@ document.addEventListener('click', (event) => {
     // rightly wants to know something handles it.
     + '[data-trim-grab],[data-reel-trim-reset],'
     + '[data-crop-aspect],[data-crop-fill],[data-crop-go],'
+    + '[data-reel-publish],[data-reel-publish-to],'
     + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
     + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
     + '[data-job-events]');
@@ -6197,6 +6359,16 @@ document.addEventListener('click', (event) => {
     renderReelEditor();
     return;
   }
+  if (hit.dataset.reelPublish) {
+    // A second press closes it again: the button is pressed, and a toggle
+    // that only opens is a trap. Same rule as the moment's Publish.
+    state.reelPublish = state.reelPublish?.open
+      ? { ...state.reelPublish, open: false }
+      : { ...reelShareDefaults(state.reel), open: true, status: 'idle' };
+    renderReelEditor();
+    return;
+  }
+  if (hit.dataset.reelPublishTo) { publishReelToYouTube(); return; }
   if (hit.dataset.cropGo) { cutReelShape(); return; }
   if (hit.dataset.reelPc) { reelControl(hit.dataset.reelPc); return; }
   if (hit.dataset.reelRender !== undefined) { startReelRender(); return; }
@@ -6388,6 +6560,10 @@ document.addEventListener('input', (event) => {
     if (state.reel) state.reel[el.dataset.reelField] = el.value;
     return;
   }
+  if (el.matches('[data-reel-share]')) {
+    if (state.reelPublish) state.reelPublish[el.dataset.reelShare] = el.value;
+    return;
+  }
   if (el.matches('[data-youtube-field]')) {
     state.youtubeForm = { ...(state.youtubeForm || {}), [el.dataset.youtubeField]: el.value };
     return;
@@ -6453,6 +6629,10 @@ document.addEventListener('change', (event) => {
   // A name is written through when the field is left, not on every letter.
   if (event.target.matches?.('[data-reel-field]') && state.reel) {
     saveReelTitle(event.target.value);
+    return;
+  }
+  if (event.target.matches?.('[data-reel-share]') && state.reelPublish) {
+    state.reelPublish[event.target.dataset.reelShare] = event.target.value;
     return;
   }
   if (event.target.id !== 'file-input') return;
