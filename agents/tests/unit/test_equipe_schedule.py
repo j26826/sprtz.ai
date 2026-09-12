@@ -253,3 +253,85 @@ class TestTheDayThisWasBuiltFor:
         # class had finished.
         gold = day[-1]
         assert 23 in [r["order"] for r in gold.rides]
+
+
+class TestThePublishedResults:
+    """What a class section says once it has been ridden.
+
+    All of it is better than what the desk can see: a lower third abbreviates a
+    rider and vanishes for whole rounds, a broadcast shows a total for five
+    seconds and never shows who sat at M. This is the source of record.
+    """
+
+    SECTION = {
+        "id": 1299028,
+        "meeting_class_id": 1278771,
+        "state": "results",
+        "officials": [
+            {"official_type": "dressage_judge", "official_name": "Clive Halsall",
+             "official_country": "GBR", "judge_by": "E"},
+            {"official_type": "dressage_judge", "official_name": "Sandy Phillips",
+             "official_country": "GBR", "judge_by": "C"},
+            {"official_type": "steward", "official_name": "", "judge_by": ""},
+        ],
+        "starts": [
+            {"rider_name": "Matt Frost", "horse_name": "Lenika", "rank": 2,
+             "start_at": "2026-09-11 17:16:00 +0100", "results": [
+                 {"judge_by": "E", "percent": "72.000"},
+                 {"judge_by": "C", "percent": "70.125"},
+                 {"percent": "70.500", "technical_percent": "69.000",
+                  "artistic_percent": "72.000"}]},
+            {"rider_name": "Dannie Morgan", "horse_name": "Fever Tree", "rank": 1,
+             "start_at": "2026-09-11 16:50:00 +0100", "results": [
+                 {"judge_by": "E", "percent": "72.125"},
+                 {"percent": "71.575", "technical_percent": "69.350",
+                  "artistic_percent": "73.800"}]},
+        ],
+    }
+
+    def test_the_panel_comes_back_with_names_and_places(self):
+        results = equipe.parse_section(self.SECTION)
+        assert [(o.position, o.name) for o in results.officials] == [
+            ("E", "Clive Halsall"), ("C", "Sandy Phillips")]
+
+    def test_an_official_with_no_name_is_not_a_judge(self):
+        results = equipe.parse_section(self.SECTION)
+        assert all(o.name for o in results.officials)
+
+    def test_starts_come_back_in_the_order_the_arena_saw_them(self):
+        results = equipe.parse_section(self.SECTION)
+        assert [s.rider for s in results.starts] == ["Dannie Morgan", "Matt Frost"]
+
+    def test_a_start_carries_its_result_and_its_judges(self):
+        results = equipe.parse_section(self.SECTION)
+        winner = results.starts[0]
+        assert winner.rank == 1
+        assert winner.total_pct == 71.575
+        assert (winner.technical_pct, winner.artistic_pct) == (69.35, 73.8)
+        assert winner.judge_marks == {"E": 72.125}
+        # The arena's clock, which is what the start list is read in and what
+        # align_schedule compares against the video.
+        assert winner.start_time == "17:16" or results.starts[1].start_time == "17:16"
+
+    def test_the_row_is_the_shape_the_grounding_already_reads(self):
+        row = equipe.parse_section(self.SECTION).starts[0].as_row()
+        assert row["finalPlace"] == 1
+        assert row["totalPct"] == 71.575
+        assert row["startTime"] == "16:50"
+        assert row["judgeMarks"] == {"E": 72.125}
+
+    def test_a_class_still_being_judged_has_no_final_results(self):
+        running = {**self.SECTION, "state": "startlist"}
+        assert equipe.parse_section(running).final is False
+
+    def test_a_total_that_has_not_been_published_is_the_marks_it_has(self):
+        # Mid-class, the judges' own percentages arrive before the total does.
+        part = {"id": 1, "state": "startlist", "starts": [
+            {"rider_name": "A", "horse_name": "B", "results": [
+                {"judge_by": "E", "percent": "70.000"},
+                {"judge_by": "C", "percent": "72.000"}]}]}
+        assert equipe.parse_section(part).starts[0].total_pct == 71.0
+
+    def test_nothing_parseable_is_not_a_crash(self):
+        assert equipe.parse_section(None) is None
+        assert equipe.parse_section({"starts": []}) is None

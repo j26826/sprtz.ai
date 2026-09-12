@@ -485,6 +485,22 @@ def upsert_game(job_id: str, game: dict, embed_text: str = "", class_id: str = "
 
 
 @mcp.tool
+def delete_game(job_id: str, class_id: str = "") -> dict:
+    """Remove one game record, leaving the job and its moments untouched.
+
+    Args:
+        job_id: Identifier of the job.
+        class_id: One competition of it, or empty for the whole-recording
+            record — which is what a day being split into its classes leaves
+            behind.
+    """
+    try:
+        return {"status": "success", **store.delete_game(job_id, class_id)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, job_id=job_id)
+
+
+@mcp.tool
 def list_games(job_id: str) -> dict:
     """Every competition one recording holds, in running order.
 

@@ -453,6 +453,15 @@ def upsert_game(job_id: str, game: dict[str, Any], embed_text: str = "",
         # Which competition of the recording this is. Absent on a record that
         # is the whole recording, which is how a reader tells the two apart.
         "classId": str(class_id or ""),
+        # What the published record says about this class beyond its name: how
+        # the organiser numbered it, where it ran, the test and the movements
+        # it was marked on, and whether the results were final when they were
+        # read. A placing that can still move is not a placing.
+        "classNo": game.get("class_no", ""),
+        "arena": game.get("arena", ""),
+        "testName": game.get("test_name", ""),
+        "testMovements": game.get("test_movements", []),
+        "resultsFinal": bool(game.get("results_final", False)),
         "classStartAt": game.get("class_start_at", ""),
         "classUrl": game.get("class_url", ""),
         # "schedule" when the published timetable placed these rides, "caption"
@@ -472,6 +481,17 @@ def _game_out(data: dict[str, Any]) -> dict[str, Any]:
     """Firestore document -> the GameDetails shape, without the 768-float vector."""
     return {
         "type": "GameDetails",
+        "classId": data.get("classId", ""),
+        "className": data.get("classId") and data.get("title", "") or "",
+        "classNo": data.get("classNo", ""),
+        "classUrl": data.get("classUrl", ""),
+        "arena": data.get("arena", ""),
+        "testName": data.get("testName", ""),
+        "resultsFinal": data.get("resultsFinal", False),
+        "showTitle": data.get("showTitle", ""),
+        "showUrl": data.get("showUrl", ""),
+        "equipeUrl": data.get("equipeUrl", ""),
+        "judges": data.get("judges", []),
         "jobId": data.get("jobId", ""),
         "title": data.get("title", ""),
         "sport": data.get("sport", ""),
@@ -542,6 +562,21 @@ def _earlier(data: dict[str, Any], against: str) -> bool:
     if not against:
         return False
     return bool(at) and at < against
+
+
+def delete_game(job_id: str, class_id: str | int = "") -> dict[str, Any]:
+    """Remove one game record, leaving the job and its moments alone.
+
+    For the one case that needs it: a recording stored as a single event that
+    turns out to have held several. The whole-day record has to go as the
+    classes are written, or the desk shows the day twice — once whole and once
+    in pieces.
+    """
+    ref = game_ref(job_id, class_id)
+    existed = ref.get().exists
+    if existed:
+        ref.delete()
+    return {"job_id": job_id, "game_id": game_id(job_id, class_id), "deleted": bool(existed)}
 
 
 def get_game(job_id: str, class_id: str | int = "") -> dict[str, Any]:
@@ -1381,13 +1416,19 @@ def update_moment_identity(job_id: str, identities: list[dict[str, Any]]) -> int
         moment_id = str(row.get("moment_id") or "")
         if not moment_id:
             continue
-        batch.update(collection.document(moment_id), {
+        patch = {
             "rider": row.get("rider", ""),
             "horse": row.get("horse", ""),
             "startNumber": row.get("start_number", ""),
             "rideOrder": row.get("ride_order"),
             "identitySource": row.get("identity_source", ""),
-        })
+        }
+        # Which competition of the day this moment happened in. Only written
+        # when it is known: a recording of one class has none, and writing an
+        # empty one over a moment that has it would unfile it.
+        if row.get("class_id"):
+            patch["classId"] = str(row["class_id"])
+        batch.update(collection.document(moment_id), patch)
         count += 1
         # Firestore batches cap at 500 writes.
         if count % 400 == 0:
@@ -1421,6 +1462,7 @@ def _moment_out(data: dict[str, Any]) -> dict[str, Any]:
         "horse": data.get("horse", ""),
         "start_number": data.get("startNumber", ""),
         "ride_order": data.get("rideOrder"),
+        "class_id": data.get("classId", ""),
         "identity_source": data.get("identitySource", ""),
         "excitement": data.get("excitement", 0.0),
         "highlight_score": data.get("highlightScore", 0.0),

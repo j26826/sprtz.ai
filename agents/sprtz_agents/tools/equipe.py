@@ -61,6 +61,17 @@ class ShowClass:
     date: str = ""
     discipline: str = ""
     position: int = 0
+    # The class as the organiser numbered it, where it ran, and the sections
+    # its results live under — a class is usually one, occasionally several.
+    class_no: str = ""
+    arena: str = ""
+    section_ids: list[int] = field(default_factory=list)
+    # The test that was ridden: its name, and the movements it is marked on.
+    # Stored because it is what the marks mean — a 7 for a piaffe at
+    # coefficient 2 is not a 7 for an entry.
+    test_name: str = ""
+    judge_positions: list[str] = field(default_factory=list)
+    movements: list[dict] = field(default_factory=list)
 
     @property
     def url(self) -> str:
@@ -134,6 +145,7 @@ def parse_schedule(payload: Any) -> Show | None:
             # A timetable PDF and a declarations list are rows on this page and
             # not competitions; an event made from one would hold no rides.
             continue
+        sheet = _first_sheet(row.get("score_sheets"))
         show.classes.append(ShowClass(
             class_id=int(row["id"]),
             name=str(row.get("name") or ""),
@@ -141,12 +153,34 @@ def parse_schedule(payload: Any) -> Show | None:
             date=str(row.get("date") or ""),
             discipline=discipline,
             position=int(row.get("position") or 0),
+            class_no=str(row.get("class_no") or ""),
+            arena=str((row.get("arena") or {}).get("name") or "") if isinstance(row.get("arena"), dict)
+            else str(row.get("arena") or ""),
+            section_ids=[int(sec["id"]) for sec in row.get("class_sections") or []
+                         if isinstance(sec, dict) and sec.get("id")],
+            test_name=str(sheet.get("name") or ""),
+            judge_positions=[str(p) for p in (sheet.get("judge_by_aliases") or {})],
+            movements=[{
+                "position": item.get("position"),
+                "keyword": item.get("keyword", ""),
+                "coefficient": item.get("coefficient"),
+                "section": item.get("section", ""),
+            } for item in sheet.get("sheet_items") or [] if isinstance(item, dict)],
         ))
     show.classes.sort(key=lambda c: (c.start_at or _FAR_FUTURE, c.position))
     return show
 
 
 _FAR_FUTURE = datetime.datetime(9999, 1, 1, tzinfo=datetime.UTC)
+
+
+def _first_sheet(sheets: Any) -> dict:
+    """The class's marking sheet. Keyed by sheet id, and a class has one."""
+    if isinstance(sheets, dict):
+        for sheet in sheets.values():
+            if isinstance(sheet, dict):
+                return sheet
+    return {}
 
 
 def parse_time(value: Any) -> datetime.datetime | None:
@@ -456,3 +490,237 @@ def _class_named_in(ride: dict, classes: list[ShowClass]) -> tuple[ShowClass | N
     scored.sort(key=lambda pair: pair[0], reverse=True)
     best, show_class = scored[0] if scored else (0.0, None)
     return (show_class, best) if best >= CAPTION_MATCH else (None, best)
+
+
+# --- What a recording turns out to hold ---------------------------------------
+
+def recording_started(job: dict) -> datetime.datetime | None:
+    """When the camera started, in wall clock, if the job knows.
+
+    A live event does: the recorder wrote when it began, and every chunk after
+    it carries a programme-date-time. An upload does not — a file has offsets
+    and no clock — and there the classes are told apart by what was read in the
+    arena or not at all.
+    """
+    live = job.get("live") or {}
+    capture = live.get("capture") or {}
+    for value in (capture.get("captureStart"), capture.get("startedAt"), live.get("eventStart")):
+        parsed = parse_time(value)
+        if parsed:
+            return parsed
+    return None
+
+
+def day_of(job: dict, started: datetime.datetime | None) -> str:
+    """The day a recording is of, as Equipe dates its shows."""
+    if started:
+        return started.date().isoformat()
+    live = (job.get("live") or {}).get("eventStart")
+    parsed = parse_time(live) or parse_time(job.get("createdAt"))
+    return parsed.date().isoformat() if parsed else ""
+
+
+def find_classes(*, job: dict, context_urls: list[str], competition: str = "",
+                 discipline: str = "", get=None) -> tuple[Show | None, list[ShowClass]]:
+    """The show this recording is of, and the classes it ran that day.
+
+    An editor's own link is the strongest signal and costs one request; without
+    one, the day and the name read off the screen choose between the shows that
+    ran. Either can come back with nothing, and nothing is a perfectly good
+    answer: the recording then stays one event, as it was before any of this.
+    """
+    started = recording_started(job)
+    day = day_of(job, started)
+    show_id = show_id_in(context_urls or [])
+
+    if not show_id:
+        if not (day and competition):
+            # Without a day there is nothing to filter a thousand shows by, and
+            # without a name there is nothing to choose between the ones left.
+            return None, []
+        shows = fetch_shows(get=get)
+        picked = pick_show(shows, on=day, name_hint=competition, discipline=discipline)
+        if picked is None:
+            return None, []
+        show_id = picked.show_id
+
+    show = fetch_schedule(show_id, get=get)
+    if show is None:
+        return None, []
+    return show, classes_on(show, day)
+
+
+# --- Results: what was actually scored ----------------------------------------
+#
+# `/api/v1/class_sections/{id}` is the published record of a class once it has
+# been ridden: the panel that judged it by name and position, every combination
+# in start order with the time it was due in the arena, its placing, its total,
+# and each judge's own percentage split into technical and artistic.
+#
+# All of it is better than what the desk can see. A lower third abbreviates a
+# rider and vanishes for whole rounds; a broadcast graphic shows a total for
+# five seconds and never shows who sat at M. This is the source of record, and
+# it arrives as numbers rather than as prose a model read off a search result.
+
+SECTION_PATH = "/api/v1/class_sections/{section_id}"
+
+
+@dataclass
+class Official:
+    """A judge: where they sat, and who they are."""
+
+    position: str
+    name: str
+    country: str = ""
+
+    def as_dict(self) -> dict:
+        return {"position": self.position, "name": self.name, "country": self.country}
+
+
+@dataclass
+class Start:
+    """One combination in a class, as published."""
+
+    rider: str
+    horse: str
+    start_number: str = ""
+    start_time: str = ""          # "HH:MM", which is what align_schedule reads
+    rank: int | None = None
+    total_pct: float | None = None
+    technical_pct: float | None = None
+    artistic_pct: float | None = None
+    nation: str = ""
+    judge_marks: dict[str, float] = field(default_factory=dict)
+
+    def as_row(self) -> dict:
+        """The shape `align_schedule` and `apply_grounding` already read."""
+        return {
+            "rider": self.rider,
+            "horse": self.horse,
+            "startNumber": self.start_number,
+            "startTime": self.start_time,
+            "nation": self.nation,
+            "finalPlace": self.rank,
+            "totalPct": self.total_pct,
+            "technicalPct": self.technical_pct,
+            "artisticPct": self.artistic_pct,
+            "judgeMarks": self.judge_marks,
+        }
+
+
+@dataclass
+class ClassResults:
+    """One class's published results, or as much of them as exists yet."""
+
+    section_id: int
+    state: str = ""
+    officials: list[Official] = field(default_factory=list)
+    starts: list[Start] = field(default_factory=list)
+
+    @property
+    def final(self) -> bool:
+        """Whether these are results rather than a start list still running."""
+        return self.state == "results"
+
+
+def parse_section(payload: Any) -> ClassResults | None:
+    """A class section: its panel, its start list, and its results."""
+    if not isinstance(payload, dict) or not payload.get("id"):
+        return None
+    out = ClassResults(section_id=int(payload["id"]), state=str(payload.get("state") or ""))
+    for row in payload.get("officials") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("official_name") or "").strip()
+        if not name:
+            continue
+        out.officials.append(Official(
+            position=str(row.get("judge_by") or row.get("judge_by_alias") or "").strip(),
+            name=name,
+            country=str(row.get("official_country") or "").strip(),
+        ))
+    for row in payload.get("starts") or []:
+        if isinstance(row, dict):
+            out.starts.append(_start_of(row))
+    # Start order, which is the order the arena saw them in and the order
+    # `align_schedule` places against the video.
+    out.starts.sort(key=lambda s: (s.start_time or "99:99", s.start_number))
+    return out
+
+
+def _start_of(row: dict) -> Start:
+    rider = str(row.get("rider_name") or " ".join(
+        x for x in (row.get("rider_first_name"), row.get("rider_last_name")) if x)).strip()
+    start = Start(
+        rider=rider,
+        horse=str(row.get("horse_name") or "").strip(),
+        start_number=str(row.get("st_nr") or row.get("start_no") or "").strip(),
+        start_time=_hhmm(row.get("start_at")),
+        rank=int(row["rank"]) if isinstance(row.get("rank"), (int, float)) and row.get("rank") else None,
+        nation=str(row.get("rider_country") or row.get("nation") or "").strip(),
+    )
+    for result in row.get("results") or []:
+        if not isinstance(result, dict):
+            continue
+        percent = _number(result.get("percent"))
+        where = str(result.get("judge_by") or "").strip()
+        if where:
+            # One row per judge, each with their own percentage.
+            if percent is not None:
+                start.judge_marks[where] = percent
+        else:
+            # The row with no judge is the combination's own result.
+            start.total_pct = percent if percent is not None else start.total_pct
+            start.technical_pct = _number(result.get("technical_percent"))
+            start.artistic_pct = _number(result.get("artistic_percent"))
+    if start.total_pct is None and start.judge_marks:
+        # A class still being judged has the marks but not the total yet.
+        start.total_pct = round(sum(start.judge_marks.values()) / len(start.judge_marks), 3)
+    return start
+
+
+def _number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _hhmm(value: Any) -> str:
+    at = parse_time(value)
+    if at is None:
+        return ""
+    # Local time, because a start list is read in the arena's clock and
+    # `align_schedule` compares it against a video recorded in the same one.
+    text = str(value)
+    match = re.search(r"[T ](\d{2}:\d{2})", text)
+    return match.group(1) if match else at.strftime("%H:%M")
+
+
+def fetch_results(section_id: int, get=None, timeout: int = 20) -> ClassResults | None:
+    """One class section's published panel, start list and results."""
+    payload = _get(f"{BASE}{SECTION_PATH.format(section_id=section_id)}", get=get, timeout=timeout)
+    return parse_section(payload) if payload is not None else None
+
+
+def results_for(show_class: ShowClass, get=None) -> ClassResults | None:
+    """The results of a class, across however many sections it was run in.
+
+    A class is usually one section. Where it is several — a split class, a
+    consolation — they are one competition to everyone watching, so the starts
+    are gathered and the panel is taken from the first section that names one.
+    """
+    gathered: ClassResults | None = None
+    for section_id in show_class.section_ids:
+        part = fetch_results(section_id, get=get)
+        if part is None:
+            continue
+        if gathered is None:
+            gathered = part
+            continue
+        gathered.starts.extend(part.starts)
+        if not gathered.officials:
+            gathered.officials = part.officials
+        if part.state == "results":
+            gathered.state = part.state
+    return gathered

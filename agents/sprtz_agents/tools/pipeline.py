@@ -19,7 +19,7 @@ from google.adk.tools import ToolContext
 from sprtz_agents.config import get_settings
 from sprtz_agents.schemas import GameDetails, Moment, format_timecode
 from sprtz_agents.sports import get_profile, list_sports
-from sprtz_agents.tools import game_summary, grounding, mcp_client
+from sprtz_agents.tools import equipe, game_summary, grounding, mcp_client
 from sprtz_agents.tools import rides as rides_tool
 from sprtz_agents.tools.analysis import (
     analyse_segments,
@@ -1053,6 +1053,99 @@ async def record_game_facts(
         logger.warning("could not write the interim game record for %s", job_id, exc_info=True)
 
 
+def _classes_for(job: dict, game: GameDetails, context_urls: list[str]) -> list[Any]:
+    """The competitions a recording turned out to hold.
+
+    Empty when it held one, which is every handball match and every day that
+    ran a single class — and when Equipe cannot be reached, or cannot say which
+    show this was. A day that stays one event is what the desk did before any
+    of this, so nothing here is allowed to be fatal.
+    """
+    try:
+        show, classes = equipe.find_classes(
+            job=job, context_urls=context_urls or [],
+            competition=game.competition or game.title, discipline=game.discipline)
+        if not classes:
+            return []
+        runs = equipe.assign_classes(
+            [dict(r) for r in game.rides], classes,
+            recorded_from=equipe.recording_started(job))
+        for run in runs:
+            run.show = show
+        return runs if len(runs) > 1 else []
+    except Exception:
+        logger.warning("could not read the show timetable", exc_info=True)
+        return []
+
+
+def _published_class(show_class: Any) -> Any:
+    """A class's published panel, start list and results, or nothing.
+
+    Best effort by design: a class still being ridden has a start list and no
+    results, a show that publishes late has neither, and a recording is worth
+    having either way.
+    """
+    try:
+        return equipe.results_for(show_class)
+    except Exception:
+        logger.warning("could not read the published results for %s", show_class.class_id,
+                       exc_info=True)
+        return None
+
+
+def _moments_of(run: Any, moments: list[Moment]) -> list[Moment]:
+    """The moments that happened inside one class.
+
+    By the ride they belong to, because that is what the class was decided on;
+    a moment outside every ride falls back to the window the class occupied, so
+    the minutes between two rounds go to the class they sat in rather than
+    being dropped.
+    """
+    orders = {r.get("order") for r in run.rides if r.get("order") is not None}
+    starts = [float(r.get("start_sec") or 0) for r in run.rides]
+    ends = [float(r.get("end_sec") or 0) for r in run.rides]
+    first, last = (min(starts) if starts else 0.0), (max(ends) if ends else 0.0)
+    out = []
+    for moment in moments:
+        if moment.ride_order is not None and moment.ride_order in orders:
+            out.append(moment)
+        elif moment.ride_order is None and first <= moment.start_sec <= last:
+            out.append(moment)
+    return out
+
+
+async def _tag_moments_with_class(job_id: str, runs: list[Any],
+                                  moments: list[Moment]) -> int:
+    """Write which competition each moment happened in.
+
+    The event tree filters a class's moments by this, so a moment left untagged
+    on a split day is a moment that shows under no competition at all.
+    """
+    identities = []
+    for run in runs:
+        class_id = str(run.show_class.class_id)
+        for moment in _moments_of(run, moments):
+            identities.append({
+                "moment_id": moment.moment_id,
+                "rider": moment.rider or "",
+                "horse": moment.horse or "",
+                "start_number": moment.start_number or "",
+                "ride_order": moment.ride_order,
+                "identity_source": moment.identity_source or "",
+                "class_id": class_id,
+            })
+    if not identities:
+        return 0
+    try:
+        written = await mcp_client.call_tool(
+            "catalog", "update_moment_identity",
+            {"job_id": job_id, "identities": identities})
+        return int(written.get("updated") or written.get("count") or 0)
+    except Exception:
+        logger.warning("could not tag moments with their class", exc_info=True)
+        return 0
+
+
 async def _record_game_details(
     *, job_id: str, sport: str, moments: list[Moment],
     segment_summaries: list[dict], competitions: list[str], venues: list[str],
@@ -1154,6 +1247,17 @@ async def _record_game_details(
                         "than the one the context links name. Nothing from it was stored.",
                         level="warning")
 
+        # A live URL points at an arena, and the camera runs through class
+        # after class. Where the timetable says this recording held several,
+        # each one is an event of its own — its own name, rides, judges and
+        # start list — rather than a single day with a running order of
+        # twenty-four and two riders nobody could name.
+        job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+        runs = _classes_for(job if isinstance(job, dict) else {}, game, list(context_urls or []))
+        if runs:
+            await _store_classes(job_id, game, runs, moments)
+            return game
+
         await mcp_client.call_tool("catalog", "upsert_game", {
             "job_id": job_id,
             "game": game.model_dump(),
@@ -1169,6 +1273,151 @@ async def _record_game_details(
         logger.exception("could not build the game summary for %s", job_id)
         await _emit(job_id, "analysis", "Could not build the game summary.", level="warning")
         return None
+
+
+async def _store_classes(job_id: str, game: GameDetails, runs: list[Any],
+                         moments: list[Moment]) -> None:
+    """Store one record per competition the recording held.
+
+    Each carries only its own rides and only the moments that happened in
+    them, and is named for the class rather than for the day: "FAIRFAX SADDLES
+    PSG FREESTYLE GOLD CHAMPIONSHIP" is what that event is, and the day's own
+    name becomes the show it belonged to.
+
+    The whole-day record is not kept beside them. Two answers to "what is this
+    recording" is how a desk ends up showing a day twice, once whole and once
+    in pieces.
+    """
+    await _tag_moments_with_class(job_id, runs, moments)
+    for run in runs:
+        show_class = run.show_class
+        show = getattr(run, "show", None)
+        mine = _moments_of(run, moments)
+        published = _published_class(show_class)
+        rides = list(run.rides)
+        judges, start_list = [], []
+        if published:
+            judges = [o.as_dict() for o in published.officials]
+            start_list = [s.as_row() for s in published.starts]
+            # The published record against what was read in the arena. The
+            # start list names rounds no graphic did; the results confirm or
+            # contradict the totals that were shown. Neither overwrites an
+            # observed value — they land in their own fields, because a
+            # caption and a results page are different kinds of fact.
+            rides, _ = rides_tool.align_schedule(rides, start_list)
+            rides = rides_tool.apply_grounding(rides, start_list, source="equipe")
+            await _patch_moment_identities(
+                job_id, mine, rides,
+                announce="{n} moments named from the published start list.")
+        part = game.model_copy(update={
+            "judges": judges or game.judges,
+            "start_list": start_list,
+            "equipe_url": show_class.url,
+            "class_no": show_class.class_no,
+            "arena": show_class.arena,
+            "test_name": show_class.test_name,
+            "test_movements": show_class.movements,
+            "results_final": bool(published and published.final),
+            "title": show_class.name or game.title,
+            "competition": show_class.name or game.competition,
+            "show_title": (show.name if show else "") or game.show_title,
+            "rides": rides,
+            "moment_count": len(mine),
+            "highlight_count": sum(1 for m in mine if (m.highlight_score or 0) >= 0.6),
+            "class_id": str(show_class.class_id),
+            "class_name": show_class.name,
+            "class_url": show_class.url,
+            "class_start_at": show_class.start_at.isoformat() if show_class.start_at else "",
+            "class_decided_by": run.decided_by,
+            "show_id": show.show_id if show else 0,
+            "show_url": show.url if show else "",
+        })
+        await mcp_client.call_tool("catalog", "upsert_game", {
+            "job_id": job_id,
+            "class_id": str(show_class.class_id),
+            "game": part.model_dump(),
+            "embed_text": game_summary.embed_text(part),
+        })
+    names = ", ".join(run.show_class.name for run in runs)
+    await _emit(job_id, "analysis",
+                f"This recording covered {len(runs)} classes, saved as separate events: {names}.",
+                classes=len(runs))
+
+
+async def split_event_classes(job_id: str) -> dict:
+    """Split a recording that was stored as one event into the classes it held.
+
+    A live URL points at an arena, and the camera runs through class after
+    class — so a day's capture recorded before this was understood came back as
+    a single event with one running order across every competition in it. This
+    reads the show's published timetable, works out which class each round was
+    in, and stores one event per class: its own name, its own rides, its own
+    moments, its own page on the results site.
+
+    Nothing is re-analysed and no moment is lost: the rounds and the detections
+    are the ones already on record, filed under the competition they happened
+    in. A recording that held one class is left exactly as it is.
+
+    Args:
+        job_id: Identifier of the recording to split.
+
+    Returns:
+        dict naming the classes it was split into, or saying why it was not.
+    """
+    job = await mcp_client.call_tool("catalog", "get_job", {"job_id": job_id})
+    if job.get("status") == "error":
+        return job
+
+    found = await mcp_client.call_tool("catalog", "get_game", {"job_id": job_id})
+    if found.get("status") == "error":
+        return {"status": "error", "job_id": job_id,
+                "error": "This recording has no game record to split."}
+    rides = await mcp_client.call_tool("catalog", "list_game_rides", {"job_id": job_id})
+    # Every moment, not the ranked shortlist: each one has to be told which
+    # class it happened in, and an untagged moment shows under no competition.
+    stored = await mcp_client.call_tool(
+        "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
+
+    game = GameDetails.model_validate({
+        **{k: v for k, v in found.items() if k not in ("status", "type")},
+        "job_id": job_id,
+        "rides": rides.get("rides") or [],
+    })
+    if not game.rides:
+        return {"status": "idle", "job_id": job_id,
+                "message": "Only a competition day is split into classes, and this has no rounds."}
+
+    moments = [Moment.model_validate(m) for m in _moments_from(stored)]
+    runs = _classes_for(job, game, list(job.get("contextUrls") or []))
+    if not runs:
+        return {"status": "idle", "job_id": job_id,
+                "message": ("This recording covers one class, or its show could not be found "
+                            "on the published timetable. Nothing was changed.")}
+
+    await _store_classes(job_id, game, runs, moments)
+    # The whole-day record goes as the classes arrive: two answers to "what is
+    # this recording" is how a desk shows a day twice, once whole and once in
+    # pieces.
+    await mcp_client.call_tool("catalog", "delete_game", {"job_id": job_id})
+    return {
+        "status": "success",
+        "job_id": job_id,
+        "classes": [
+            {"class_id": str(run.show_class.class_id), "name": run.show_class.name,
+             "rides": len(run.rides), "decided_by": run.decided_by,
+             "url": run.show_class.url}
+            for run in runs
+        ],
+    }
+
+
+def _moments_from(listing: dict) -> list[dict]:
+    """The stored moments, whichever shape the listing came back in."""
+    for key in ("moments", "action_plays"):
+        rows = listing.get(key)
+        if isinstance(rows, list):
+            return rows
+    return []
 
 
 async def summarise_match(job_id: str) -> dict:
