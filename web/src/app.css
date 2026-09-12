@@ -788,7 +788,7 @@ button.tile:hover { border-color: var(--color-accent); }
 
 .panel-section { display: grid; gap: 6px; justify-items: start; }
 .panel-section > * { max-width: 100%; }
-.panel-section > .source-ref, .panel-section > .range-chips { justify-self: stretch; }
+.panel-section > .source-ref, .panel-section > .range-select { justify-self: stretch; }
 .panel-label {
   font-size: 10px;
   font-weight: 700;
@@ -803,24 +803,10 @@ button.tile:hover { border-color: var(--color-accent); }
 .panel-line { font-size: 12px; line-height: 1.45; color: var(--color-neutral-800); }
 .mono-soft { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-neutral-700); }
 
-.range-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.range-chip {
-  border: var(--rule-hair) solid var(--color-neutral-400);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text);
-  padding: 5px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.range-chip span { margin-left: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--color-neutral-700); }
-.range-chip:hover { border-color: var(--color-accent); }
-.range-chip[aria-pressed="true"] {
-  border-color: var(--color-accent);
-  background: var(--color-accent-100);
-  color: var(--color-accent-900);
-}
-.range-chip[aria-pressed="true"] span { color: var(--color-accent-800); }
+/* What is playing, as one control. Full width of its section: the labels are a
+   movement and a timecode, and a select sized to its longest option jumps
+   width as the ride changes. */
+.range-select { width: 100%; font-family: var(--font-body); }
 
 .source-ref {
   margin: 0;
@@ -1953,11 +1939,18 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 
 /* Forty rides is a scroller, not a taller card: the rail is navigation, and a
-   card that grows with the class buries the conversation it sits in. */
+   card that grows with the class buries the conversation it sits in. It runs
+   the full height of the pane beside it rather than stopping at its own
+   content — a rail half the height of what it controls reads as a list that
+   ended, and the empty ground under it belonged to nothing. `height: 100%`
+   with `min-height: 0` is what lets the tabs scroll inside a stretched grid
+   item; without the second, the rail grows instead of scrolling. */
 .ride-rail {
   display: flex;
   flex-direction: column;
-  max-height: 30rem;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
   padding: var(--space-3) var(--space-2) var(--space-4);
   background: var(--color-bg);
   border-right: var(--rule-hair) solid var(--color-rule);
@@ -2651,6 +2644,22 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .btn-quiet:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent-700); }
 
 .btn-ghost { color: var(--color-neutral-700); }
+
+/* The player's three: Download, Publish and Close. They act on the moment on
+   screen and are one kind of thing, so they are one button in three weights
+   rather than three idioms — and all three carry the amber, because that is
+   what they have in common. The fill still belongs to Publish alone: an amber
+   rectangle three times over in one row is emphasis that has stopped meaning
+   anything. */
+.btn-quiet.detail-action {
+  border-color: var(--color-accent-300);
+  color: var(--color-accent-900);
+}
+.btn-quiet.detail-action:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
+}
 .btn-ghost:hover:not(:disabled) { color: var(--color-text); }
 
 .btn-primary:disabled,

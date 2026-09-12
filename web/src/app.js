@@ -29,6 +29,7 @@ import {
 import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i18n.js';
 import { chooseCard, wantsDetail } from './cards.js';
 import { currentTurn } from './transcript.js';
+import { humanMessage, jobFailure } from './errors.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
   disciplinesFor, findGames, gamesInScope, scopeContextLine, scopeFilters, scopeTitle,
@@ -98,6 +99,10 @@ const state = {
     // What the match is called. Empty means "take it from the file or the
     // URL", which is what this did before there was anywhere to type one.
     title: '',
+    // Pages about this recording, as typed: one per line or space-separated.
+    // Held here rather than in the textarea, because render() rebuilds the
+    // panel on every job write and would otherwise empty it mid-booking.
+    contextUrls: '',
     src: 'file',              // 'file' | 'path' | 'stream' — one source, not three stacked
     hlsUrl: '',               // a VOD playlist to download
     live: { title: '', hlsUrl: '', start: '', end: '' },
@@ -174,7 +179,13 @@ async function api(path, options = {}) {
     // only way back.
     if (res.status === 401) sessionExpired();
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `${res.status} ${res.statusText}`);
+    // The status and the detail travel on the error rather than being baked
+    // into its message: what an editor is shown is decided in one place
+    // (`errors.js`), and "502 Bad Gateway" is not a sentence.
+    const failure = new Error(body.detail || `${res.status} ${res.statusText}`);
+    failure.status = res.status;
+    failure.detail = body.detail || '';
+    throw failure;
   }
   return res.json();
 }
@@ -195,6 +206,21 @@ function sessionExpired() {
   if (sessionEnding || !state.user) return;
   sessionEnding = true;
   signOutNow().finally(() => { sessionEnding = false; });
+}
+
+
+/**
+ * What to show for a failure, in the editor's own language.
+ *
+ * Everything caught goes through here. Nothing from Firebase, a stack or a
+ * status line reaches the screen: those read as a broken product and say
+ * things about the inside of the system that a desk has no business showing.
+ * The technical text is not lost, it is logged — the console is where that
+ * belongs.
+ */
+function humanError(err, fallback = 'error.generic') {
+  if (err) console.warn('handled failure:', err);
+  return humanMessage(err, { t, fallback });
 }
 
 
@@ -265,7 +291,7 @@ async function refreshYouTube() {
   try {
     state.youtube = await api('/api/integrations/youtube');
   } catch (err) {
-    state.youtube = { error: err.message };
+    state.youtube = { error: humanError(err, 'youtube.checkFailed') };
   }
   renderYouTube();
 }
@@ -334,7 +360,7 @@ async function onYouTubeAction(action) {
       // replacing the desk with it would lose an open session.
       window.open(out.url, '_blank', 'noopener');
     } catch (err) {
-      state.youtube = { ...(state.youtube || {}), error: err.message };
+      state.youtube = { ...(state.youtube || {}), error: humanError(err, 'youtube.saveFailed') };
       renderYouTube();
     }
     return;
@@ -344,7 +370,7 @@ async function onYouTubeAction(action) {
     try {
       await api('/api/integrations/youtube', { method: 'DELETE' });
     } catch (err) {
-      state.youtube = { ...(state.youtube || {}), error: err.message };
+      state.youtube = { ...(state.youtube || {}), error: humanError(err, 'youtube.saveFailed') };
     }
     await refreshYouTube();
     return;
@@ -362,7 +388,7 @@ async function onYouTubeAction(action) {
       await api('/api/integrations/youtube', { method: 'PUT', body: JSON.stringify(body) });
       state.youtubeForm = null;
     } catch (err) {
-      state.youtube = { ...(state.youtube || {}), error: err.message };
+      state.youtube = { ...(state.youtube || {}), error: humanError(err, 'youtube.saveFailed') };
     }
     await refreshYouTube();
   }
@@ -466,15 +492,11 @@ const db = getFirestore(fb);
  */
 function signinError(err) {
   const box = $('signin-error');
-  const code = err?.code || '';
-  const message = {
-    'auth/invalid-credential': t('auth.badCredentials'),
-    'auth/wrong-password': t('auth.badCredentials'),
-    'auth/user-not-found': t('auth.noAccount'),
-    'auth/unauthorized-domain': t('auth.unauthorizedDomain'),
-    'auth/operation-not-allowed': t('auth.notEnabled'),
-  }[code] || err?.message || t('auth.failed');
-  box.textContent = message;
+  // The codes and their sentences live in `errors.js`, with everything else
+  // that decides what a person is told. What used to be here fell through to
+  // `err.message`, which for Firebase is "Firebase: Error (auth/…)." — the
+  // code twice over, and nothing to do about it.
+  box.textContent = humanError(err, 'auth.failed');
   box.classList.remove('hidden');
 }
 
@@ -1084,6 +1106,13 @@ function momentsCard(msg, index) {
   if (!found.list.length) return emptyCard(t('moments.none'));
 
   const event = eventFor(msg);
+  // One event selected, and it is a competition day: the board is the answer.
+  // A flat grid of two hundred tiles from forty rounds is a list nobody reads
+  // down; who rode is the first question asked of a day, and the board makes
+  // that the first axis. The narrowed list goes with it, so a question that
+  // asked for halts still gets halts — the board filters what it is given
+  // rather than reaching for the match's moments again.
+  if (event && oneEventSelected()) return ridesCard(msg, index, found.list);
   if (event) return rideGroupsCard(msg, index, found, event);
 
   const view = pageOf(found.list, msg.page);
@@ -1102,6 +1131,21 @@ function momentsCard(msg, index) {
 
 
 /**
+ * Whether the desk is on one event rather than a catalogue of them.
+ *
+ * The board answers for a single competition day; across several matches the
+ * first axis is the match, not the rider, and a rail of riders from four
+ * events is a rail of strangers. A session scoped to one game says this
+ * outright; a desk holding exactly one game says it by having nothing else.
+ */
+function oneEventSelected() {
+  const inScope = gamesInScope(state.scope, state.games);
+  if (inScope.length === 1) return true;
+  return !state.scope && state.games.length === 1;
+}
+
+
+/**
  * The open event's tree, when this message is about it and it has rides.
  *
  * Only for the open job: the tree is fetched for the match whose listeners are
@@ -1115,6 +1159,11 @@ function eventFor(msg) {
   return tree.event?.riders?.length ? tree.event : null;
 }
 
+
+// Moments per page inside one rider's pane. Twelve rather than the list's ten:
+// the pane is the width of the board and a row holds four, so twelve is three
+// full rows and ten leaves a ragged one.
+const RIDE_MOMENTS_PER_PAGE = 12;
 
 // Rides per page. A ride is a heading and a row of tiles, so a page of them is
 // already long; a class of forty is forty headings, which is what the pager is for.
@@ -1176,7 +1225,7 @@ function rideJobFor(question) {
  * `asked` only when there are rides to show — cardAnswersIt reads it, so the
  * agent's reply stays visible behind every empty state.
  */
-function ridesFor(msg) {
+function ridesFor(msg, narrowed = null) {
   const jobId = msg.jobId || state.jobId;
   // The tree is the open event's; an earlier answer about another event says
   // so rather than borrowing this one's rides.
@@ -1187,7 +1236,11 @@ function ridesFor(msg) {
   const tree = state.eventTree;
   if (!tree || tree.jobId !== jobId) return { empty: t('rides.loading'), loading: true };
 
-  const moments = selectMoments(state.moments, { sort: msg.sort }).list;
+  // What the question left, when it came through the moments card; the whole
+  // match when the board was asked for directly.
+  const moments = narrowed
+    ? selectMoments(narrowed, { sort: msg.sort }).list
+    : selectMoments(state.moments, { sort: msg.sort }).list;
   const all = groupByRide(tree.event, moments).filter((g) => g.ride);
   if (!all.length) return { empty: t('rides.none') };
   const asked = ridesAsked(all, msg.rideQuery || '');
@@ -1243,8 +1296,8 @@ function ridesLoading() {
  * The count is moments rather than rides, because the pane is what it
  * describes: this ride's visible moments against everything the event holds.
  */
-function ridesCard(msg, index) {
-  const found = ridesFor(msg);
+function ridesCard(msg, index, moments = null) {
+  const found = ridesFor(msg, moments);
   if (found.loading) return ridesLoading();
   if (!found.asked) {
     const note = found.unchecked
@@ -1474,7 +1527,7 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boar
     result.totalPct == null ? '' : `${Number(result.totalPct).toFixed(3)}%`,
     result.place == null ? '' : `${t('ride.place')} ${result.place}`,
   ].filter(Boolean).join(' · ');
-  const view = pageOf(moments, msg.page);
+  const view = pageOf(moments, msg.page, RIDE_MOMENTS_PER_PAGE);
 
   let body = `<div class="ride-group-empty">${esc(t('ride.none'))}</div>`;
   if (moments.length) {
@@ -1792,6 +1845,11 @@ function detailActions() {
   if (!p?.moment) return '';
   const busy = state.share?.status === 'sending';
   const publishing = state.share?.mode === 'publish';
+  // One shape for the three, and all three in the amber family: they are one
+  // kind of thing — what you do with the moment you are looking at — and three
+  // idioms read as three kinds. The fill stays scarce, which is the brand's
+  // rule: Publish is the action, Download and Close are the same button
+  // outlined. `.detail-action` is what carries the amber to the quiet two.
   return `
     <button class="btn-quiet detail-action" data-detail-act="download" ${
       state.share?.downloading ? 'disabled' : ''}>${
@@ -1939,7 +1997,7 @@ async function downloadMoment() {
     // rather than navigating away from the desk.
     window.location.href = out.url;
   } catch (err) {
-    state.share = { ...(state.share || {}), status: 'error', error: err.message };
+    state.share = { ...(state.share || {}), status: 'error', error: humanError(err, 'share.downloadFailed') };
   } finally {
     state.share = { ...(state.share || {}), downloading: false };
     renderDetailsBody();
@@ -1969,7 +2027,7 @@ async function publishToYouTube() {
     );
     state.share = { ...state.share, status: 'done', url: out.url };
   } catch (err) {
-    state.share = { ...state.share, status: 'error', error: err.message };
+    state.share = { ...state.share, status: 'error', error: humanError(err, 'share.publishFailed') };
   }
   renderDetailsBody();
 }
@@ -2073,20 +2131,28 @@ function ridePanel(ride, p) {
     .filter(Boolean).join(' · ');
 
   const moments = ride.moments || [];
-  const chips = [
-    `<button class="range-chip" data-player-range="full" aria-pressed="${Boolean(p.full)}">
-       ${esc(t('player.fullRide'))} <span>${clock(ride.startSec)}</span></button>`,
+  // One control rather than a row of them. A round holds a dozen movements and
+  // a chip each was two lines of buttons above the video, pushing the picture
+  // down the screen on exactly the rides worth watching most — and the list
+  // rewrapped as the player moved through it, so the thing being aimed at
+  // changed position under the cursor. A select is one line whatever the
+  // count, and it says what is playing without being read across.
+  const picked = p.full ? 'full' : (p.moment?.momentId || '');
+  const options = [
+    `<option value="full" ${p.full ? 'selected' : ''}>${
+      esc(t('player.fullRide'))} · ${clock(ride.startSec)}–${clock(ride.endSec)}</option>`,
     ...moments.map((mo) => `
-     <button class="range-chip" data-player-range="${esc(mo.momentId)}"
-             aria-pressed="${!p.full && p.moment?.momentId === mo.momentId}">
-       ${esc(mo.label || mo.momentType || '')} <span>${clock(mo.startSec)}</span></button>`),
+      <option value="${esc(mo.momentId)}" ${picked === mo.momentId ? 'selected' : ''}>${
+      esc(mo.label || mo.momentType || '')} · ${clock(mo.startSec)}</option>`),
   ].join('');
 
   const incidents = moments.filter((mo) => mo.category === 'incident' || mo.requiresHumanReview);
-  // Above the player, the one thing that drives it: the chips that pick what
-  // is playing. They used to sit under the ride's score tiles, which put the
-  // controls for the video below the video and everything about it.
-  const over = panelSection(t('ride.momentsInRide'), `<div class="range-chips">${chips}</div>`);
+  // Above the player, the one thing that drives it. It used to sit under the
+  // ride's score tiles, which put the controls for the video below the video
+  // and everything about it.
+  const over = panelSection(t('ride.momentsInRide'), `
+    <select class="input range-select" data-player-pick
+            aria-label="${esc(t('ride.momentsInRide'))}">${options}</select>`);
 
   // Under it, the ride itself — who rode, what it scored and where the score
   // came from. Beside it, the material an editor reads rather than acts on.
@@ -2279,6 +2345,16 @@ function sportRow(u) {
 }
 
 
+/**
+ * Pages the editor says are about this recording, for grounding.
+ *
+ * Held on `state.upload` like every other field here, and for the reason the
+ * others are: render() rebuilds the panel on every Firestore write, and an
+ * analysis running elsewhere writes often. Typed links used to live only in
+ * the textarea, so the next write emptied it — and a registration that
+ * happened to follow one sent nothing, which is what "the context links are
+ * not persisted" was.
+ */
 function contextField(u) {
   return `
       <div class="ingest-field">
@@ -2416,8 +2492,12 @@ function liveForm(u, busy) {
       <div class="ingest-foot">
         <button class="btn-primary btn-lg" data-schedule-live="1"
                 ${ready && !busy ? '' : 'disabled'}>
-          ${esc(u.status === 'scheduling' ? t('ingest.scheduling') : t('ingest.schedule'))}
+          ${esc(u.status === 'scheduling'
+    ? (l.editing ? t('ingest.saving') : t('ingest.scheduling'))
+    : (l.editing ? t('ingest.saveBooking') : t('ingest.schedule')))}
         </button>
+        ${l.editing ? `<button class="link-btn" data-cancel-edit-live="1">${
+    esc(t('ingest.cancelEdit'))}</button>` : ''}
         <span class="ingest-ready">${esc(err ? t(err)
     : ready ? `${t('ingest.ready')} — ${u.sport}, ${t('ingest.readyMoments')}`
       : t('ingest.liveNeeds'))}</span>
@@ -2593,7 +2673,7 @@ async function saveRename(jobId) {
       render();
     }
   } catch (err) {
-    say(`${t('rename.failed')}: ${err.message || err}`);
+    say(`${t('rename.failed')}: ${humanError(err, 'error.generic')}`);
   }
 }
 
@@ -2876,6 +2956,12 @@ function openGameDetails(game) {
   // inherit that moment's video — playing, beside a record it has nothing to
   // do with.
   $('details-player').innerHTML = '';
+  // ...and nothing to download or publish either. The head's buttons act on
+  // the moment that is playing, and a game record is not one; left there they
+  // would cut whatever moment happened to be open before this.
+  const actions = $('details-actions');
+  if (actions) actions.innerHTML = '';
+  state.share = null;
   if (state.details) {
     state.details = null;
     state.playing = null;
@@ -3154,7 +3240,7 @@ async function loadDeskMoments(index) {
     msg.running = res.running || [];
   } catch (err) {
     msg.searchResults = [];
-    say(`${t('desk.title')}: ${err.message || err}`);
+    say(`${t('desk.title')}: ${humanError(err, 'error.generic')}`);
   } finally {
     msg.deskLoading = false;
     render();
@@ -3182,7 +3268,7 @@ async function runSearch(index) {
     msg.searchResults = res.moments || res.results || [];
   } catch (err) {
     msg.searchResults = [];
-    say(`${t('search.title')}: ${err.message || err}`);
+    say(`${t('search.title')}: ${humanError(err, 'error.generic')}`);
   } finally {
     msg.searching = false;
     render();
@@ -3250,7 +3336,7 @@ function jobsCard(msg, index) {
           </div>` : ''}
         ${failed && j.error ? `
           <div class="job-error">
-            <p>${esc(j.error)}</p>
+            <p>${esc(jobFailure(j.error, { t }))}</p>
             <button class="btn-quiet" data-retry="${esc(j.id)}">${esc(t('jobs.retry'))}</button>
           </div>` : ''}
         <div class="job-actions">
@@ -3299,7 +3385,7 @@ function liveJobRow(j) {
         <div class="job-stage">${esc(line)}</div>
         ${liveStrip(live)}
         ${j.status === 'failed' && j.error ? `
-          <div class="job-error"><p>${esc(j.error)}</p></div>` : ''}
+          <div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>` : ''}
         ${live.state === 'complete' ? (game ? `
           <div class="live-game">
             <div class="moment-label">${esc(gameHeadline(game))}</div>
@@ -3314,6 +3400,9 @@ function liveJobRow(j) {
           </div>` : `
           <div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
         <div class="job-actions">
+          ${live.state === 'scheduled'
+            ? `<button class="link-btn" data-edit-live="${esc(j.id)}">${esc(t('live.edit'))}</button>`
+            : ''}
           ${active
             ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
             : ''}
@@ -4092,12 +4181,12 @@ async function mountPlayer() {
     // Packaging is independent of the analysis, so a job can have moments and
     // still have nothing to play — and re-running the whole analysis to fix
     // that would be an hour spent on the wrong thing. Offer the packaging.
-    const notReady = /still being prepared/i.test(err.message);
+    const notReady = /still being prepared/i.test(String(err?.detail || err?.message || ''));
     playerEl.insertAdjacentHTML('beforeend', `
       <div class="error-note">
         <p>${notReady
           ? esc(t('player.notPackaged'))
-          : `${esc(t('player.notReady'))}: ${esc(err.message)}`}</p>
+          : `${esc(t('player.notReady'))}: ${esc(humanError(err, 'error.desk'))}`}</p>
         ${notReady && state.jobId ? `
           <button class="btn-quiet" data-prepare-playback="${esc(state.jobId)}">
             ${esc(t('player.preparePlayback'))}
@@ -4240,8 +4329,9 @@ async function ask(text, cards = null) {
     if (!cards) attachCards(msgIndex, text);
   } catch (err) {
     state.thinking = false;
-    if (msgIndex >= 0) state.msgs[msgIndex].text = `Could not reach the agent: ${err.message}`;
-    else say(`Could not reach the agent: ${err.message}`);
+    const message = humanError(err, 'error.agent');
+    if (msgIndex >= 0) state.msgs[msgIndex].text = message;
+    else say(message);
   }
   persistTranscript();
   render();
@@ -4405,6 +4495,7 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
   u.file = null;
   u.name = '';
   u.title = '';
+  u.contextUrls = '';
   selectJob(job_id);
   playbackUrl = null;
   render();
@@ -4433,7 +4524,10 @@ async function registerAndAnalyse({ job_id, filename, size_bytes, content_type, 
  * than held in state so a link typed after the file was chosen still goes.
  */
 function contextUrlList() {
-  const raw = document.querySelector('[data-context-urls]')?.value || '';
+  // The panel's own value, with the field as a fallback for the render that
+  // has not happened yet — a paste followed immediately by the button.
+  const raw = state.upload.contextUrls
+    || document.querySelector('[data-context-urls]')?.value || '';
   return [...new Set(raw.split(/\s+/).map((x) => x.trim()).filter(Boolean))].slice(0, 10);
 }
 
@@ -4462,7 +4556,7 @@ async function reanalyseWithContext(jobId) {
       method: 'PATCH', body: JSON.stringify({ context_urls: urls }),
     });
   } catch (err) {
-    say(`${t('reanalyse.title')}: ${err.message || err}`);
+    say(`${t('reanalyse.title')}: ${humanError(err, 'error.generic')}`);
     return;
   }
   state.reanalyse = null;
@@ -4494,6 +4588,7 @@ async function registerFromStorage() {
 
     u.gcsUri = '';
     u.title = '';
+    u.contextUrls = '';
     // Idle before the turn, for the same reason as the upload path.
     u.status = 'idle';
     u.stage = 'Handed to the agent';
@@ -4512,7 +4607,7 @@ async function registerFromStorage() {
       actions: [t('action.processing'), t('action.bestMoments')],
     });
   } catch (err) {
-    say(`That location could not be used: ${err.message}`);
+    say(humanError(err, 'ingest.pathFailed'));
   }
   u.status = 'idle';
   render();
@@ -4561,7 +4656,7 @@ async function registerFromHls() {
     });
   } catch (err) {
     u.status = 'idle';
-    say(`That stream could not be used: ${err.message}`);
+    say(humanError(err, 'ingest.streamFailed'));
   }
   render();
 }
@@ -4591,12 +4686,13 @@ async function scheduleLiveEvent() {
         event_start: startIso,
         event_end: new Date(l.end).toISOString(),
         metadata_language: getSettings().metadataLanguage,
-          title_source: l.title.trim() ? 'editor' : 'derived',
+        title_source: l.title.trim() ? 'editor' : 'derived',
         stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
       }),
     });
     u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.contextUrls = '';
     u.status = 'idle';
     selectJob(job.job_id);
     if (state.sessionKey) {
@@ -4608,7 +4704,95 @@ async function scheduleLiveEvent() {
     say(t('live.scheduledMsg').replace('{start}', when), { showJobs: true });
   } catch (err) {
     u.status = 'idle';
-    say(`The live event could not be scheduled: ${err.message}`);
+    say(humanError(err, 'ingest.scheduleFailed'));
+  }
+  render();
+}
+
+
+/**
+ * Reopen a booking that has not started, in the panel it was made in.
+ *
+ * A live event is booked hours ahead and the two things most likely to be
+ * wrong by the time it comes round are the window and the playlist URL — a
+ * class running late, a link whose token has turned over. Deleting and
+ * re-booking was the only remedy, and it threw away the title and the context
+ * links with it.
+ *
+ * The panel is the same one, with the booking's id on it: `state.upload.live.
+ * editing`. Once the recorder has started the API refuses, and the row stops
+ * offering this.
+ */
+function editLiveBooking(jobId) {
+  const job = state.jobs.find((j) => j.id === jobId);
+  if (!job) return;
+  const live = job.live || {};
+  const u = state.upload;
+  u.live = {
+    editing: jobId,
+    title: job.title || '',
+    hlsUrl: job.hlsUrl || '',
+    // The inputs are `datetime-local`, which reads and writes local wall time
+    // with no zone; the stored value is UTC.
+    start: localInputValue(live.eventStart),
+    end: localInputValue(live.eventEnd),
+  };
+  u.sport = job.sport || u.sport;
+  u.contextUrls = (job.contextUrls || []).join('\n');
+  u.status = 'idle';
+  // Into the message that is on screen, so the panel opens where the editor is
+  // looking rather than at the top of a transcript they have scrolled away from.
+  const [m] = currentTurn(state.msgs).slice(-1)[0] || [];
+  if (m) { m.showIngest = true; m.ingestKind = 'live'; }
+  else say(t('live.editing'), { showIngest: true, ingestKind: 'live' });
+  render();
+}
+
+
+/** A stored UTC time as the local wall time a datetime-local input wants. */
+function localInputValue(iso) {
+  const at = toDate(iso);
+  if (!at) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+    + `T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+
+/** Save a booking that has not started yet. */
+async function saveLiveBooking() {
+  const u = state.upload;
+  const l = u.live;
+  const err = validateLiveEvent({ hlsUrl: l.hlsUrl, start: l.start, end: l.end });
+  if (err) { say(t(err)); return; }
+
+  u.status = 'scheduling';
+  render();
+  try {
+    const startIso = new Date(l.start).toISOString();
+    await api(`/api/jobs/${l.editing}/live`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        hls_url: l.hlsUrl.trim(),
+        title: l.title.trim() || undefined,
+        sport: u.sport,
+        event_start: startIso,
+        event_end: new Date(l.end).toISOString(),
+        metadata_language: getSettings().metadataLanguage,
+        stall_minutes: getSettings().liveStallMinutes,
+        context_urls: contextUrlList(),
+      }),
+    });
+    u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.contextUrls = '';
+    u.status = 'idle';
+    const when = new Date(startIso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    say(t('live.rescheduledMsg').replace('{start}', when), { showJobs: true });
+  } catch (err) {
+    u.status = 'idle';
+    // The API refuses once the recorder is running, and that is the answer
+    // rather than a failure: the event is under way.
+    say(`${t('live.editFailed')} ${humanError(err, 'error.generic')}`);
   }
   render();
 }
@@ -4621,7 +4805,7 @@ async function resumeUpload(jobId) {
     await registerAndAnalyse(pending);
   } catch (err) {
     state.upload.status = 'idle';
-    say(`That upload could not be picked up: ${err.message}`);
+    say(humanError(err, 'ingest.resumeFailed'));
     render();
   }
 }
@@ -4672,7 +4856,7 @@ async function startUpload() {
     u.status = 'idle';
     u.stage = '';
     render();
-    say(`The upload did not complete: ${err.message}`);
+    say(humanError(err, 'ingest.uploadFailed'));
   }
 }
 
@@ -4713,6 +4897,7 @@ document.addEventListener('click', (event) => {
     + '[data-scope-done],[data-scope-back],[data-scope-change],'
     + '[data-pc],[data-player-range],[data-watch-ride],'
     + '[data-detail-act],[data-trim],[data-trim-reset],[data-publish-to],'
+    + '[data-edit-live],[data-cancel-edit-live],'
     + '[data-youtube-act],'
     + '[data-ride-tab],[data-type-menu],[data-type-pick]');
 
@@ -4736,6 +4921,13 @@ document.addEventListener('click', (event) => {
   if (hit.dataset.playerRange) { setPlayerRange(hit.dataset.playerRange); return; }
   if (hit.dataset.watchRide) { openRide(hit.dataset.watchRide); return; }
 
+  if (hit.dataset.editLive) { editLiveBooking(hit.dataset.editLive); return; }
+  if (hit.dataset.cancelEditLive) {
+    state.upload.live = { title: '', hlsUrl: '', start: '', end: '' };
+    state.upload.contextUrls = '';
+    render();
+    return;
+  }
   if (hit.dataset.detailAct) {
     if (hit.dataset.detailAct === 'download') downloadMoment();
     // A second press closes the panel again: the button reads as a toggle
@@ -4791,7 +4983,13 @@ document.addEventListener('click', (event) => {
       || 'scopeGame' in hit.dataset || 'scopeDone' in hit.dataset || 'scopeBack' in hit.dataset
       || 'scopeChange' in hit.dataset) { onScopeClick(hit); return; }
   if (hit.dataset.registerHls) { registerFromHls(); return; }
-  if (hit.dataset.scheduleLive) { scheduleLiveEvent(); return; }
+  if (hit.dataset.scheduleLive) {
+    // One button, two jobs: the panel is the booking form and the edit form,
+    // and which it is doing is on the booking it was opened from.
+    if (state.upload.live.editing) saveLiveBooking();
+    else scheduleLiveEvent();
+    return;
+  }
   if (hit.dataset.ingestSrc) { state.upload.src = hit.dataset.ingestSrc; render(); return; }
   if (hit.dataset.opener) { onOpenerClick(hit); return; }
   if (hit.dataset.openerBack) { onOpenerBack(hit); return; }
@@ -4986,6 +5184,12 @@ document.addEventListener('input', (event) => {
   // Only re-render when a button's enabled state or a validation message
   // actually changes; doing it on every keystroke would move the caret to
   // the end of the field.
+  if (el.matches('[data-context-urls]')) {
+    // No re-render: nothing on the panel depends on this, and rebuilding the
+    // textarea under a caret would move it to the end mid-paste.
+    u.contextUrls = el.value;
+    return;
+  }
   if (el.matches('[data-gcs-input]')) {
     const wasEmpty = !u.gcsUri;
     u.gcsUri = el.value;
@@ -5027,6 +5231,10 @@ document.addEventListener('input', (event) => {
 
 
 document.addEventListener('change', (event) => {
+  if (event.target.matches?.('[data-player-pick]')) {
+    setPlayerRange(event.target.value);
+    return;
+  }
   if (event.target.matches?.('[data-share-field]')) {
     if (state.share) state.share[event.target.dataset.shareField] = event.target.value;
     return;
