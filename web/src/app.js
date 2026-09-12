@@ -3948,7 +3948,7 @@ function renderOpenEvent() {
   if (strip) {
     strip.hidden = !title;
     strip.innerHTML = title
-      ? `<span class="composer-context-label">${esc(t('context.asking'))}</span>
+      ? `<span class="composer-context-label">${esc(t('context.asking'))}:</span>
          <span class="composer-context-title">${esc(title)}</span>`
       : '';
   }

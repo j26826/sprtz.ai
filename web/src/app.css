@@ -2543,13 +2543,23 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 .open-event-meta:empty, .open-event-title:empty { display: none; }
 
 /* The same answer over the box the next question is typed into. One line,
-   quiet: it qualifies the question rather than competing with it. */
+   quiet: it qualifies the question rather than competing with it.
+
+   Aligned to the box below it, not to the card: the composer keeps a 48px
+   gutter and this had 2px of its own, so the label started forty-odd pixels to
+   the left of the box it is about and read as a stray line rather than as a
+   label on it. The gutter is the composer's own at every width — two numbers
+   that have to match, and they are set together here and in `.composer-inner`
+   because nothing else can keep them in step. */
 .composer-context {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
-  padding: 0 2px 6px;
+  padding: 0 48px 6px;
   min-width: 0;
+}
+@media (max-width: 900px) {
+  .composer-context { padding-left: 20px; padding-right: 20px; }
 }
 .composer-context-label {
   font-family: var(--font-mono);
