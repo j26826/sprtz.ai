@@ -44,7 +44,6 @@ const STRINGS = {
     'game.notIdentified': 'Nothing on screen identified this match',
     'moment.category': 'Category',
     'moment.play': 'Play this moment',
-    'moment.beta': 'Beta',
     'moment.details': 'Details',
     'moment.add': 'Add',
     'moment.remove': 'Remove',
@@ -78,6 +77,11 @@ const STRINGS = {
     'sessions.deleteConfirm': 'Delete the session',
 
     'sessions.empty': 'No sessions yet. Upload a match to start one.',
+    'context.nowShowing': 'Now showing',
+    'context.noEvent': 'No event open',
+    'context.asking': 'Asking about',
+    'preview.badge': 'Early preview',
+    'preview.notice': 'Equestrian moment detection is an early preview. Movements, timings and confidence scores are still being tuned against real footage, so please review a clip before publishing it. We would welcome your feedback on what it gets right and where it goes wrong.',
 
     'header.settings': 'Settings',
     'settings.title': 'Settings',
@@ -462,7 +466,6 @@ const STRINGS = {
     'game.notIdentified': 'Nichts auf dem Bild hat dieses Spiel identifiziert',
     'moment.category': 'Kategorie',
     'moment.play': 'Diese Szene abspielen',
-    'moment.beta': 'Beta',
     'moment.details': 'Details',
     'moment.add': 'Hinzufügen',
     'moment.remove': 'Entfernen',
@@ -496,6 +499,11 @@ const STRINGS = {
     'sessions.deleteConfirm': 'Sitzung löschen',
 
     'sessions.empty': 'Noch keine Sitzungen. Laden Sie ein Spiel hoch, um zu beginnen.',
+    'context.nowShowing': 'Aktuell geöffnet',
+    'context.noEvent': 'Keine Veranstaltung geöffnet',
+    'context.asking': 'Fragen zu',
+    'preview.badge': 'Frühe Vorschau',
+    'preview.notice': 'Die Szenenerkennung für den Reitsport ist eine frühe Vorschau. Lektionen, Zeiten und Konfidenzwerte werden noch anhand echter Aufnahmen abgestimmt — prüfen Sie einen Clip bitte vor der Veröffentlichung. Über Ihre Rückmeldung, was gut erkannt wird und was nicht, freuen wir uns.',
 
     'header.settings': 'Einstellungen',
     'settings.title': 'Einstellungen',
@@ -861,7 +869,6 @@ const STRINGS = {
     'game.notIdentified': 'Nulla sullo schermo ha identificato questa partita',
     'moment.category': 'Categoria',
     'moment.play': 'Riproduci questa azione',
-    'moment.beta': 'Beta',
     'moment.details': 'Dettagli',
     'moment.add': 'Aggiungi',
     'moment.remove': 'Rimuovi',
@@ -895,6 +902,11 @@ const STRINGS = {
     'sessions.deleteConfirm': 'Eliminare la sessione',
 
     'sessions.empty': 'Ancora nessuna sessione. Carica una partita per iniziarne una.',
+    'context.nowShowing': 'In visione',
+    'context.noEvent': 'Nessun evento aperto',
+    'context.asking': 'Domande su',
+    'preview.badge': 'Anteprima iniziale',
+    'preview.notice': 'Il rilevamento dei momenti per l’equitazione è in anteprima iniziale. Movimenti, tempi e punteggi di confidenza sono ancora in fase di taratura su riprese reali: verifica una clip prima di pubblicarla. Il tuo riscontro su ciò che funziona e ciò che sbaglia è prezioso.',
 
     'header.settings': 'Impostazioni',
     'settings.title': 'Impostazioni',
@@ -1258,7 +1270,6 @@ const STRINGS = {
     'game.notIdentified': 'Rien à l’écran n’a permis d’identifier ce match',
     'moment.category': 'Catégorie',
     'moment.play': 'Lire cette action',
-    'moment.beta': 'Beta',
     'moment.details': 'Détails',
     'moment.add': 'Ajouter',
     'moment.remove': 'Retirer',
@@ -1292,6 +1303,11 @@ const STRINGS = {
     'sessions.deleteConfirm': 'Supprimer la session',
 
     'sessions.empty': 'Aucune session pour le moment. Importez un match pour en démarrer une.',
+    'context.nowShowing': 'Actuellement ouvert',
+    'context.noEvent': 'Aucun événement ouvert',
+    'context.asking': 'À propos de',
+    'preview.badge': 'Aperçu anticipé',
+    'preview.notice': 'La détection des moments équestres est un aperçu anticipé. Les figures, les minutages et les indices de confiance sont encore ajustés sur des images réelles : vérifiez un clip avant de le publier. Vos retours sur ce qui fonctionne et ce qui échoue nous sont précieux.',
 
     'header.settings': 'Paramètres',
     'settings.title': 'Paramètres',
@@ -1658,7 +1674,6 @@ const STRINGS = {
     'game.notIdentified': 'Nada en pantalla identificó este partido',
     'moment.category': 'Categoría',
     'moment.play': 'Reproducir esta jugada',
-    'moment.beta': 'Beta',
     'moment.details': 'Detalles',
     'moment.add': 'Añadir',
     'moment.remove': 'Quitar',
@@ -1692,6 +1707,11 @@ const STRINGS = {
     'sessions.deleteConfirm': 'Eliminar la sesión',
 
     'sessions.empty': 'Aún no hay sesiones. Sube un partido para empezar una.',
+    'context.nowShowing': 'En pantalla',
+    'context.noEvent': 'Ningún evento abierto',
+    'context.asking': 'Preguntas sobre',
+    'preview.badge': 'Vista previa inicial',
+    'preview.notice': 'La detección de momentos ecuestres es una vista previa inicial. Los movimientos, los tiempos y los niveles de confianza aún se están ajustando con grabaciones reales: revisa un clip antes de publicarlo. Agradecemos tus comentarios sobre lo que acierta y lo que falla.',
 
     'header.settings': 'Ajustes',
     'settings.title': 'Ajustes',

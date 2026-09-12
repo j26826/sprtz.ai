@@ -212,6 +212,9 @@ input, button, textarea { font-family: var(--font-body); }
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   display: flex;
+  /* Centred, not stretched: beside a boxed control like the sort, a stretched
+     count sits at the top of the row and reads as misaligned with it. */
+  align-items: center;
   gap: 10px;
 }
 
@@ -235,9 +238,12 @@ input, button, textarea { font-family: var(--font-body); }
 .list { display: flex; flex-direction: column; }
 .card > .list { margin-top: var(--space-3); }
 
+/* Baselines line a title up with plain text beside it, but the meta now holds
+   a bordered control whose own text sits inside padding — so the row centres
+   instead, and the title, the count and the control share one middle. */
 .list-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   margin-bottom: var(--space-3);
@@ -281,8 +287,8 @@ input, button, textarea { font-family: var(--font-body); }
   position: absolute;
   top: 0;
   left: 0;
-  width: 62px;
-  height: 62px;
+  width: 78px;
+  height: 78px;
   overflow: hidden;
   pointer-events: none;
   z-index: 2;
@@ -294,16 +300,16 @@ input, button, textarea { font-family: var(--font-body); }
 }
 .tile-beta > span {
   position: absolute;
-  top: 11px;
-  left: -22px;
-  width: 92px;
+  top: 15px;
+  left: -28px;
+  width: 116px;
   transform: rotate(-45deg);
   background: var(--color-accent);
   /* Ink on amber, never white: amber as a fill is about 1.9:1 against white. */
   color: var(--color-on-accent);
-  font-size: 8.5px;
+  font-size: 7.5px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   text-align: center;
   padding: 2px 0;
@@ -967,6 +973,15 @@ button.tile:hover { border-color: var(--color-accent); }
   min-width: 0;
 }
 
+/* The examples are a hint, not a value waiting to be sent: the brand's light
+   weight and a quiet colour keep them from reading as typed text. What
+   somebody types sits at the body weight above. */
+.composer-input::placeholder {
+  font-weight: 300;
+  color: var(--color-neutral-600);
+  opacity: 1;   /* Firefox dims placeholders by default; the colour is the dimming. */
+}
+
 .composer-send {
   border: 0;
   border-left: var(--rule) solid var(--color-rule);
@@ -981,14 +996,6 @@ button.tile:hover { border-color: var(--color-accent); }
 }
 .composer-send:hover { background: var(--color-accent-600); }
 .composer-send:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.footer-line {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--color-neutral-600);
-  margin-top: 7px;
-}
 
 /* Sign-in */
 
@@ -2081,17 +2088,23 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 .ride-pane { min-width: 0; padding: 14px 20px 22px; }
 
+/* Who, how it scored, and the way into the whole ride. Wrapping rather than
+   three fixed columns: the pane is half a card on a narrow window, and a grid
+   there squeezed the rider's name to one word a line and pushed the button
+   off the edge. */
 .ride-pane-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content max-content;
-  column-gap: var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: var(--space-3) var(--space-4);
   padding-bottom: var(--space-2);
   margin: var(--space-4) 0 var(--space-3);
   border-bottom: var(--rule-hair) solid var(--color-neutral-300);
   font-size: 12px;
 }
-.ride-pane-head .ride-who { min-width: 0; }
+.ride-pane-head .ride-who { flex: 1 1 11rem; min-width: 0; }
+.ride-pane-head .ride-group-result { flex: 0 1 auto; }
+.ride-pane-head .play-ride { flex: none; margin-left: auto; }
 
 /* The board is the card's full width, so the list's own padding would inset
    the rail from an edge it is meant to meet. */
@@ -2534,4 +2547,127 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 }
 @media (max-width: 720px) {
   .rides-loading-board { grid-template-columns: 1fr; }
+}
+
+/* ── What is open ──────────────────────────────────────────────────────────
+   The rail is a list of conversations; this is the event under all of them,
+   marked by the accent down its inside edge — the same bar the open session
+   wears, because both answer "what am I looking at". It opens the event's
+   record, and greys out when there is no event to open. */
+.open-event {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  margin: 0 0 var(--space-3);
+  padding: 9px 12px 10px;
+  text-align: left;
+  background: var(--color-neutral-200);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-left: 2px solid var(--color-accent);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+.open-event[data-open="false"] { border-left-color: var(--color-neutral-500); }
+.open-event:hover:not(:disabled) { border-color: var(--color-accent); border-left-color: var(--color-accent); }
+.open-event:disabled { cursor: default; }
+.open-event-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+.open-event[data-open="false"] .open-event-label { color: var(--color-neutral-600); }
+.open-event-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.open-event-meta {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--color-neutral-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-event-meta:empty, .open-event-title:empty { display: none; }
+
+/* The same answer over the box the next question is typed into. One line,
+   quiet: it qualifies the question rather than competing with it. */
+.composer-context {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 0 2px 6px;
+  min-width: 0;
+}
+.composer-context-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.composer-context-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Early preview ─────────────────────────────────────────────────────────
+   A flag on the frame and a notice under the player. The flag takes its own
+   dark ground, as the clock and the play button do — a still from an arena is
+   not a flat colour. It is a state, not a warning: amber, not the alert ramp,
+   which in this system means something went wrong. */
+.thumb-flag {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  z-index: 1;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.62);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Under the player, where the clip it qualifies has just been watched. */
+.preview-notice {
+  display: grid;
+  gap: 6px;
+  margin: 14px 16px 0;
+  padding: 10px 12px;
+  border: var(--rule-hair) solid var(--color-accent-300);
+  border-left: 2px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-100);
+}
+.preview-notice-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+.preview-notice p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text);
+  max-width: 68ch;
 }

@@ -75,6 +75,14 @@
         </button>
       </div>
 
+      <!-- Which event every card and every question is about. The rail is
+           conversations; this is the one thing on it that is not. -->
+      <button class="open-event" id="open-event" data-game-details="1">
+        <span class="open-event-label" id="open-event-label"></span>
+        <span class="open-event-title" id="open-event-title"></span>
+        <span class="open-event-meta" id="open-event-meta"></span>
+      </button>
+
       <div class="sessions-list" id="sessions-list"></div>
 
       <div class="sessions-footer">
@@ -105,13 +113,14 @@
       </div>
 
       <div class="composer">
+        <!-- What the next question will be about, where the question is typed. -->
+        <div class="composer-context" id="composer-context" hidden></div>
         <div class="composer-inner">
           <form class="composer-box" id="composer">
             <input class="composer-input" id="draft" autocomplete="off"
-                   placeholder="e.g. &ldquo;show me all events&rdquo;, &ldquo;show me the ride for Gareth Hughes&rdquo;, &ldquo;best pirouettes&rdquo;, &ldquo;rides scoring more than 70%&rdquo;" />
+                   placeholder="Try &ldquo;show me all rides&rdquo;, &ldquo;show me the ride for Gareth Hughes&rdquo;, &ldquo;rides scoring more than 70%&rdquo;, &ldquo;show me pirouettes&rdquo;" />
             <button class="composer-send" type="submit" id="send" data-i18n="composer.send">Send</button>
           </form>
-          <div class="footer-line" id="footer-line">Enter to send &middot; the agent finds the moments &mdash; no timeline required</div>
         </div>
       </div>
     </div>
