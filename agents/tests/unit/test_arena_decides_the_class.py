@@ -475,3 +475,57 @@ class TestTheStartListMayNotCrossTheDay:
         assert not equipe._not_due_yet(classes[1], at)
         # The freestyle, four hours out, is not — by any reading.
         assert equipe._not_due_yet(classes[2], at)
+
+
+class TestASplitMustNotConfirmItself:
+    """`list_game_rides` stamps each ride with the class it currently sits in.
+
+    That is the catalog annotating its own storage — a ride of a split
+    recording says which class it was filed under — and it was being read as a
+    caption. A second split was handed its own previous answer and matched it
+    at 1.00, which no real signal here can reach: the clock cannot, the arena
+    cannot, and a start list narrows rather than scores. So the first split of
+    a recording stuck whatever it decided, every correction reproduced it, and
+    the record grew more confident each time.
+
+    The 12th's morning capture is the case: two rounds at 08:50 and 09:16 were
+    filed under a freestyle not due until 13:50, and the next split kept them
+    there and relabelled the run "caption".
+    """
+
+    MORNING = datetime.datetime(2026, 9, 12, 7, 9, 27, tzinfo=datetime.UTC)
+
+    def _ride(self, order, start_sec, **extra):
+        return {"order": order, "start_sec": start_sec,
+                "end_sec": start_sec + 260, **extra}
+
+    def test_a_previous_answer_is_not_a_caption(self):
+        # Exactly what the catalog hands back after the bad split: the ride,
+        # its own unhelpful scoreboard, and the class name we wrote on it.
+        ride = self._ride(11, 4015.0, rider="Dannie Morgan",
+                          scoreboard="(119) Dannie Morgan Freya VII",
+                          class_name="D&H GOLD CHAMPIONSHIP - FEI "
+                                     "Intermediate I Freestyle 2009 (update 2026)")
+        runs = equipe.assign_classes(
+            [ride], equipe.classes_on(_show(), "2026-09-12", arena=CAMERA),
+            recorded_from=self.MORNING)
+        assert [r.show_class.class_id for r in runs] == [1278778]
+        assert runs[0].decided_by != "caption"
+
+    def test_the_arena_cannot_be_chosen_by_a_previous_answer_either(self):
+        # pick_arena scores each ring by what its rides' captions said, through
+        # the same reader — so a stamped class name would vote for whichever
+        # ring the last split chose, however wrong.
+        stamped = [self._ride(n, 600.0 * n, class_name="BETTALIFE NOVICE SILVER "
+                                                       "CHAMPIONSHIP - Novice 6 (2024)")
+                   for n in range(1, 6)]
+        assert equipe.pick_arena(_show(), "2026-09-12", stamped) == ""
+
+    def test_a_real_scoreboard_still_names_its_class(self):
+        # The rule keeps what it is for: text read off the arena.
+        ride = self._ride(1, 600.0,
+                          scoreboard="KBIS BRITISH DRESSAGE YOUNG HORSES 7YR OLD")
+        named, score = equipe._class_named_in(
+            ride, equipe.classes_on(_show(), "2026-09-12", arena=CAMERA))
+        assert named is not None and named.class_id == 1278778
+        assert score >= equipe.CAPTION_MATCH

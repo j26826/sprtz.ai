@@ -743,9 +743,20 @@ def _class_at(at: datetime.datetime, classes: list[ShowClass]) -> ShowClass | No
 
 
 def _class_named_in(ride: dict, classes: list[ShowClass]) -> tuple[ShowClass | None, float]:
-    """The class a ride's own scoreboard names, and how well it named it."""
+    """The class a ride's own scoreboard names, and how well it named it.
+
+    **Only what was read off the arena.** This used to include the ride's
+    `class_name`, which is not an observation at all: `list_game_rides` stamps
+    every ride of a split recording with the title of the class it currently
+    sits under, so a second split was handed its own previous answer and
+    matched it at 1.00 — beating the clock, the arena and the start list, none
+    of which can reach that score. A split therefore confirmed itself, and
+    every attempt to correct one reproduced it exactly. `competition` goes with
+    it: nothing writes one onto a ride, and an empty key that would behave the
+    same way if something ever did is not worth keeping.
+    """
     text = "\n".join(str(ride.get(key) or "") for key in
-                     ("scoreboard", "scoreboard_text", "competition", "class_name"))
+                     ("scoreboard", "scoreboard_text"))
     if not text.strip():
         return None, 0.0
     scored = [(same_name(text, c.name), c) for c in classes if c.name]
