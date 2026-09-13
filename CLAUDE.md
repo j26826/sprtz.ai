@@ -127,6 +127,26 @@ against the live project. Treat a merge as a deploy.
   times, so a failing window costs three full analyses and still yields
   nothing. And the run that failed spent 27,748 output tokens doing it.
 
+  **Neither of the two levers rescues it, and both were measured.** Thinking
+  can be reduced but not removed: `thinkingBudget: 0` is honoured on the
+  analysis prompt (no thinking at all) and not on a short reasoning one (550
+  tokens), and `thinkingLevel: MINIMAL` is refused outright while `LOW` is
+  accepted. Turning it off does cure the degeneration — six runs, none of them
+  ran away — and does nothing for recall: 3.8 found 2, 2, 2 and 5, 2, 2 where
+  2.5 **with thinking equally off** found 19. That control is the point. The
+  gap is the model, not the budget.
+
+  **Agentic video processing does not close it either.** `Part.mediaProcessing
+  = "AGENTIC"` hands the model a pointer instead of frames and lets it pull
+  what it needs, and it is real: 9,121 input tokens against 28,686 for the same
+  five-minute chunk. It found 3-4 moments — what static 3.8 finds. Three things
+  to know before reaching for it again: it is **`v1beta1` only** (the `v1`
+  endpoint this code calls answers `Unknown name "mediaProcessing"`), `fps`,
+  `start_offset` and `end_offset` are **static-only** so the deliberate 1 fps
+  goes with it, and **2.5 Flash cannot use it** — *"media_processing is not
+  supported for this model"*. So the cheap path exists only on the models that
+  cannot do this job, which is the whole finding.
+
   **3.8 is a thinking model.** A tight `max_output_tokens` is spent on thinking
   before any answer: a 16-token cap returns empty text with
   `thoughtsTokenCount` set, which reads as a parse failure and is a budget one.
