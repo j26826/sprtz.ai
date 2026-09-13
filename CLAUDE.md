@@ -79,22 +79,45 @@ against the live project. Treat a merge as a deploy.
 
 ### Models and analysis
 
-- **Gemini 2.5 Flash for video analysis, in `us-central1`; Gemini 3.6 Flash
-  for search reranking, through Vertex's `global` location.** 3.6 Flash ran
-  the analysis for a day and its moments were judged less accurate on the
-  equestrian footage, so the analysis went back to 2.5; the lesson below about
-  structured output stays, because the reranker is still on 3.6 and any later
-  model may behave the same. In this project every regional endpoint returns
-  404 for the post-2.5 Flash models, so a model that is only global is not a
-  model in `us-central1`. Model and location therefore travel as a pair:
-  `analysis_model`/`analysis_location` and `rerank_model`/`rerank_location` in
-  Terraform, reaching the engine as `SPRTZ_ANALYSIS_MODEL`/`_LOCATION` and the
-  catalog as `RERANK_MODEL`/`RERANK_LOCATION`. Each falls back to the engine's
-  own model and region when unset. The **root agent, the game judgement and
-  grounding are also on Gemini 2.5 Flash** in `us-central1` (`gemini_model`), and
-  so does **gemini-embedding-001** (768-dim)
-  for semantic search. The embedding width must equal the Firestore vector
-  index dimension exactly or queries fail at read time, not write time.
+- **Gemini 3.8 Flash for everything the engine asks a model, through Vertex's
+  `global` location.** In this project every regional endpoint returns 404 for
+  the Flash models after 2.5, so a model that is only global is not a model in
+  `us-central1`. Model and location therefore travel as a pair, and there are
+  three of them: `gemini_model`/`gemini_location` (the root agent, the stages,
+  the game judgement and grounding), `analysis_model`/`analysis_location` (the
+  per-segment video pass) and `rerank_model`/`rerank_location` (search
+  reranking and the reel copy). They reach the engine as
+  `SPRTZ_MODEL`/`SPRTZ_MODEL_LOCATION` and `SPRTZ_ANALYSIS_MODEL`/`_LOCATION`,
+  and the catalog as `RERANK_MODEL`/`RERANK_LOCATION`; each location falls back
+  to the engine's own region when unset, so a deployment that sets neither
+  behaves as it always did. `test_model_settings.py` fails if any default pairs
+  a post-2.5 model with a region.
+
+  **The engine's own model needed a location before it could move.** The
+  analysis and the reranker each build their own `genai.Client`, so each
+  already carried one. The root agent and the stages build no client at all —
+  ADK builds one from the environment, and on Agent Runtime that is
+  `GOOGLE_CLOUD_LOCATION`, which the platform injects and refuses to let a
+  deployment set. So there was no variable that could move them, and pointing
+  `gemini_model` at a global-only model would have 404'd the whole desk.
+  `sprtz_agents/models.py` gives ADK a model whose client is pinned instead,
+  which is what ADK's own documentation prescribes; grounding reads
+  `settings.model_location` for the same reason.
+
+  **3.8 is being tried on its own evidence.** 3.6 Flash ran the analysis for a
+  day and its moments were judged less accurate on the equestrian footage, so
+  the analysis went back to 2.5 at the time. If 3.8's moments come back worse
+  too, `analysis_model` goes back to `gemini-2.5-flash` — with
+  `analysis_location` back to the engine's region in the same edit, because 2.5
+  is served there and 3.8 is not. **3.8 is a thinking model**, and a tight
+  `max_output_tokens` is spent on thinking before any answer: a 16-token cap
+  returns empty text with `thoughtsTokenCount` set, which reads as a parse
+  failure and is a budget one.
+
+  **The embeddings do not move**: `gemini-embedding-001` (768-dim) in
+  `us-central1`. The width must equal the Firestore vector index dimension
+  exactly or queries fail at read time, not write time — and deleting a vector
+  index is the one operation this file warns about.
 - **Structured output is requested as `response_json_schema`, never
   `response_schema=<Pydantic class>`.** Handed the class, the SDK converts it
   to Vertex's own Schema type, and gemini-3.6-flash under that constraint
@@ -102,6 +125,8 @@ against the live project. Treat a merge as a deploy.
   0.0000…` for thirty thousand characters until the token cap, so the JSON
   never closes. Nine of sixteen segments were "Unparseable response" on the
   first 3.6 run, and the reranker degraded to vector order without a word.
+  The rule is not about 3.6: it is about what the SDK does with a class, so it
+  holds for 3.8 and for whatever follows.
   The same shape passed as `cls.model_json_schema()` answers in seconds; the
   thinking configuration made no difference either way. `response.parsed` is
   only filled for the class form, so every site parses `response.text` itself.

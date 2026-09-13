@@ -80,21 +80,50 @@ esac
 # Probe with a real generateContent call. A GET on the publisher model resource
 # returns 404 in regions that serve the model perfectly well, so it cannot be
 # used to decide availability.
-MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
-echo "Checking $MODEL in $VERTEX_REGION..."
+# A model and the location it is called from travel as a pair: the Flash
+# generations after 2.5 are served only through `global`, and the regional
+# endpoint answers 404 rather than falling back. So this probes the model where
+# the deployment actually calls it, not where the engine happens to run —
+# checking `gemini_model` against `vertex_region` would fail a correct config,
+# or pass a model nothing uses.
+# Nothing passes these in: the pipeline runs this step before Terraform, so
+# there are no outputs to read and no substitution carries a model. Taking the
+# declared defaults straight from `variables.tf` is what keeps the check on the
+# model that will actually be deployed — a guard reading a stale literal is a
+# guard that passes while the thing it guards is wrong.
+tf_default() {
+  python3 - "$1" <<'PYEOF'
+import re, sys
+name = sys.argv[1]
+text = open("deploy/terraform/variables.tf").read()
+block = re.search(r'variable "%s"\s*\{(.*?)\n\}' % re.escape(name), text, re.S)
+found = re.search(r'^\s*default\s*=\s*"([^"]*)"', block.group(1), re.M) if block else None
+print(found.group(1) if found else "")
+PYEOF
+}
+MODEL="${GEMINI_MODEL:-$(tf_default gemini_model)}"
+MODEL="${MODEL:-gemini-2.5-flash}"
+MODEL_LOCATION="${GEMINI_LOCATION:-$(tf_default gemini_location)}"
+MODEL_LOCATION="${MODEL_LOCATION:-$VERTEX_REGION}"
+if [[ "$MODEL_LOCATION" == "global" ]]; then
+  MODEL_HOST="https://aiplatform.googleapis.com"
+else
+  MODEL_HOST="https://${MODEL_LOCATION}-aiplatform.googleapis.com"
+fi
+echo "Checking $MODEL in $MODEL_LOCATION..."
 model_status="$(
   curl -sS -o /dev/null -w '%{http_code}' -X POST \
     -H "Authorization: Bearer $(gcloud auth print-access-token)" \
     -H "Content-Type: application/json" \
-    "https://${VERTEX_REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${VERTEX_REGION}/publishers/google/models/${MODEL}:generateContent" \
+    "${MODEL_HOST}/v1/projects/${PROJECT_ID}/locations/${MODEL_LOCATION}/publishers/google/models/${MODEL}:generateContent" \
     -d '{"contents":[{"role":"user","parts":[{"text":"ok"}]}],"generationConfig":{"maxOutputTokens":8,"thinkingConfig":{"thinkingBudget":0}}}' || echo 000
 )"
 case "$model_status" in
-  200) echo "  ✓ $MODEL served from $VERTEX_REGION" ;;
-  404) note_fail "$MODEL is not served from '$VERTEX_REGION'. Set vertex_region to a region that serves it." ;;
+  200) echo "  ✓ $MODEL served from $MODEL_LOCATION" ;;
+  404) note_fail "$MODEL is not served from '$MODEL_LOCATION'. Set gemini_location to one that serves it — 'global' for the Flash models after 2.5." ;;
   403) note_fail "$MODEL returned 403 — grant roles/aiplatform.user and retry." ;;
-  429) echo "  ✓ $MODEL served from $VERTEX_REGION (quota-limited right now)" ;;
-  *)   note_fail "Unexpected HTTP $model_status calling $MODEL in '$VERTEX_REGION'." ;;
+  429) echo "  ✓ $MODEL served from $MODEL_LOCATION (quota-limited right now)" ;;
+  *)   note_fail "Unexpected HTTP $model_status calling $MODEL in '$MODEL_LOCATION'." ;;
 esac
 
 # --- Cloud Run ----------------------------------------------------------------

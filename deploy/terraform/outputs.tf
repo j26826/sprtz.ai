@@ -33,6 +33,11 @@ output "gemini_model" {
   value       = var.gemini_model
 }
 
+output "gemini_location" {
+  description = "Vertex location the engine's own model is called from."
+  value       = var.gemini_location
+}
+
 output "analysis_model" {
   description = "Gemini model for the per-segment video analysis."
   value       = var.analysis_model

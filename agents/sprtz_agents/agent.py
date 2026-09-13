@@ -18,11 +18,11 @@ import os
 import google.auth
 from google.adk.agents import Agent, ParallelAgent, SequentialAgent
 from google.adk.apps import App
-from google.adk.models import Gemini
 from google.adk.tools import AgentTool
 from google.genai import types
 
 from sprtz_agents.config import get_settings
+from sprtz_agents.models import gemini
 from sprtz_agents.sports import list_sports
 from sprtz_agents.sub_agents.stages import (
     analysis_agent,
@@ -382,10 +382,7 @@ def _build_tools() -> list:
 
 root_agent = Agent(
     name="sprtz_producer",
-    model=Gemini(
-        model=_settings.model,
-        retry_options=types.HttpRetryOptions(attempts=3),
-    ),
+    model=gemini(),
     description=(
         "Sports video analyst that finds the key moments in a match and describes "
         "what happens in each of them."

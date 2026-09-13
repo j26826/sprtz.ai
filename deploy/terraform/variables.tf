@@ -51,8 +51,14 @@ variable "image_tag" {
 
 variable "gemini_model" {
   type        = string
-  description = "Gemini model the agent engine runs on: the root agent, the game judgement and grounding. Analysis and reranking have their own."
-  default     = "gemini-2.5-flash"
+  description = "Gemini model the agent engine runs on: the root agent, the stages, the game judgement and grounding. Analysis and reranking have their own."
+  default     = "gemini-3.8-flash"
+}
+
+variable "gemini_location" {
+  type        = string
+  description = "Vertex location `gemini_model` is called from. `global` for the models only served there. Not the engine's own region, which Agent Runtime fixes."
+  default     = "global"
 }
 
 # Analysis and reranking are separable from the engine's own model because the
@@ -64,21 +70,25 @@ variable "gemini_model" {
 variable "analysis_model" {
   type        = string
   description = "Gemini model for the per-segment video analysis."
-  # 2.5 Flash again: 3.6 Flash was tried on the equestrian footage and its
-  # moments were judged less accurate on the desk. The reranker stays on 3.6.
-  default = "gemini-2.5-flash"
+  # 3.6 Flash was tried here once and its moments were judged less accurate on
+  # the equestrian footage, so the analysis went back to 2.5 while the reranker
+  # stayed on 3.6. 3.8 is a different model and is being tried on its own
+  # evidence; if the moments come back worse again, this is the variable to put
+  # back to "gemini-2.5-flash" — with `analysis_location` back to the engine's
+  # region, because 2.5 is served there and 3.8 is not.
+  default = "gemini-3.8-flash"
 }
 
 variable "analysis_location" {
   type        = string
   description = "Vertex location the analysis model is called from. `global` for the models only served there."
-  default     = "us-central1"
+  default     = "global"
 }
 
 variable "rerank_model" {
   type        = string
   description = "Gemini model that reranks search candidates for relevance."
-  default     = "gemini-3.6-flash"
+  default     = "gemini-3.8-flash"
 }
 
 variable "rerank_location" {
