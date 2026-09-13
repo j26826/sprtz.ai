@@ -70,19 +70,27 @@ variable "gemini_location" {
 variable "analysis_model" {
   type        = string
   description = "Gemini model for the per-segment video analysis."
-  # 3.6 Flash was tried here once and its moments were judged less accurate on
-  # the equestrian footage, so the analysis went back to 2.5 while the reranker
-  # stayed on 3.6. 3.8 is a different model and is being tried on its own
-  # evidence; if the moments come back worse again, this is the variable to put
-  # back to "gemini-2.5-flash" — with `analysis_location` back to the engine's
-  # region, because 2.5 is served there and 3.8 is not.
-  default = "gemini-3.8-flash"
+  # 2.5 Flash, and this is now the second newer Flash generation to be tried
+  # here and put back. 3.8 was measured against two chunks of the 10 September
+  # LeMieux recording, through the analysis's own prompt, schema and config:
+  #
+  #   2.5 Flash   22 moments, parsed, 97s     (24 are on record for that window)
+  #   3.8 Flash   2-4 moments across four runs, and one run of three at the
+  #               production thinking budget degenerated — the `venue` string
+  #               repeated for 96,179 characters until MAX_TOKENS, so the JSON
+  #               never closed and the window would have found nothing.
+  #
+  # A fifth of the recall, and an intermittent hard failure. `response_json_schema`
+  # is already in use here: it fixed that degeneration for 3.6 and does not fix
+  # it for 3.8.
+  default = "gemini-2.5-flash"
 }
 
 variable "analysis_location" {
   type        = string
   description = "Vertex location the analysis model is called from. `global` for the models only served there."
-  default     = "global"
+  # Back with the model: 2.5 is served regionally and the pair must agree.
+  default     = "us-central1"
 }
 
 variable "rerank_model" {

@@ -74,16 +74,20 @@ class TestDeploymentCarriesThePair:
         assert 'output "analysis_model"' in OUTPUTS and 'output "analysis_location"' in OUTPUTS
 
     def test_terraform_defaults(self):
-        # Everything the engine asks a model is on 3.8 Flash, which is served
-        # only through `global` in this project. The analysis was on 2.5 after
-        # a day on 3.6 went badly on the equestrian footage; 3.8 is a different
-        # model and is being tried on its own evidence. The embeddings are not
-        # here on purpose: the width has to equal the Firestore vector index
-        # exactly, and that fails at read time rather than at write.
+        # The engine and the reranker are on 3.8 Flash, served only through
+        # `global` in this project. **The analysis is not, and this is the
+        # second newer Flash generation to be put back.** 3.8 was measured on
+        # two chunks of the 10 September recording through the analysis's own
+        # prompt and schema: a fifth of 2.5's recall, and one run of three at
+        # the production thinking budget repeated a string for 96,179
+        # characters until MAX_TOKENS, so the window found nothing at all.
+        #
+        # The embeddings are not here on purpose: the width has to equal the
+        # Firestore vector index exactly, and that fails at read time.
         assert _default("gemini_model") == "gemini-3.8-flash"
         assert _default("gemini_location") == "global"
-        assert _default("analysis_model") == "gemini-3.8-flash"
-        assert _default("analysis_location") == "global"
+        assert _default("analysis_model") == "gemini-2.5-flash"
+        assert _default("analysis_location") == "us-central1"
         assert _default("rerank_model") == "gemini-3.8-flash"
         assert _default("rerank_location") == "global"
         assert _default("embedding_model") == "gemini-embedding-001", "embeddings do not move"
