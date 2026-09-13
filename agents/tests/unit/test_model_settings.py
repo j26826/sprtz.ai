@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[3]
 ANALYSIS = (ROOT / "agents" / "sprtz_agents" / "tools" / "analysis.py").read_text()
 PIPELINE = (ROOT / "agents" / "sprtz_agents" / "tools" / "pipeline.py").read_text()
 GROUNDING = (ROOT / "agents" / "sprtz_agents" / "tools" / "grounding.py").read_text()
+AGENT = (ROOT / "agents" / "sprtz_agents" / "agent.py").read_text()
+STAGES = (ROOT / "agents" / "sprtz_agents" / "sub_agents" / "stages.py").read_text()
 STORE = (ROOT / "mcp" / "catalog_server" / "store.py").read_text()
 BUILD = (ROOT / "deploy" / "cloudbuild.yaml").read_text()
 VARS = (ROOT / "deploy" / "terraform" / "variables.tf").read_text()
@@ -72,24 +74,90 @@ class TestDeploymentCarriesThePair:
         assert 'output "analysis_model"' in OUTPUTS and 'output "analysis_location"' in OUTPUTS
 
     def test_terraform_defaults(self):
-        # The analysis went back to 2.5 Flash after a day on 3.6: fewer
-        # moments judged right on the equestrian footage, and four windows of
-        # sixteen unanswerable even on the retry pass. 2.5 is regional, so
-        # the pair moves to us-central1 together. The reranker stays on 3.6.
-        assert _default("analysis_model") == "gemini-2.5-flash"
-        assert _default("analysis_location") == "us-central1"
-        assert _default("rerank_model") == "gemini-3.6-flash"
+        # Everything the engine asks a model is on 3.8 Flash, which is served
+        # only through `global` in this project. The analysis was on 2.5 after
+        # a day on 3.6 went badly on the equestrian footage; 3.8 is a different
+        # model and is being tried on its own evidence. The embeddings are not
+        # here on purpose: the width has to equal the Firestore vector index
+        # exactly, and that fails at read time rather than at write.
+        assert _default("gemini_model") == "gemini-3.8-flash"
+        assert _default("gemini_location") == "global"
+        assert _default("analysis_model") == "gemini-3.8-flash"
+        assert _default("analysis_location") == "global"
+        assert _default("rerank_model") == "gemini-3.8-flash"
         assert _default("rerank_location") == "global"
-        assert _default("gemini_model") == "gemini-2.5-flash", "the engine's own model is unchanged"
+        assert _default("embedding_model") == "gemini-embedding-001", "embeddings do not move"
 
     def test_a_global_only_model_is_never_paired_with_a_region(self):
         # Every regional endpoint 404s for the post-2.5 Flash models here;
-        # the pair is the guard, and this is the shape it must keep.
-        for model_var, location_var in (("analysis_model", "analysis_location"),
+        # the pair is the guard, and this is the shape it must keep. The
+        # engine's own model is in this list now: it had no location of its
+        # own, so pointing it at a global-only model would have 404'd the root
+        # agent, every stage and the grounding with nothing to set.
+        for model_var, location_var in (("gemini_model", "gemini_location"),
+                                        ("analysis_model", "analysis_location"),
                                         ("rerank_model", "rerank_location")):
             model, location = _default(model_var), _default(location_var)
             if not model.startswith("gemini-2.5"):
                 assert location == "global", f"{model} is only served globally"
+
+
+class TestTheEngineModelHasALocationOfItsOwn:
+    """`GOOGLE_CLOUD_LOCATION` cannot carry it.
+
+    Agent Runtime injects that itself and refuses a deployment that sets it, so
+    the root agent, the stages and the grounding had no way to reach a model
+    served only through `global` — ADK builds their client out of the
+    environment. The location is given to ADK as a pinned client instead, which
+    is what ADK's own documentation prescribes for this.
+    """
+
+    def test_the_setting_falls_back_to_the_engine_region(self, monkeypatch):
+        monkeypatch.delenv("SPRTZ_MODEL_LOCATION", raising=False)
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        assert Settings().model_location == "us-central1"
+
+    def test_and_wins_when_it_is_set(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        monkeypatch.setenv("SPRTZ_MODEL_LOCATION", "global")
+        s = Settings()
+        assert (s.model_location, s.location) == ("global", "us-central1")
+
+    def test_a_differing_location_is_pinned_onto_the_client(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "ci")
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        monkeypatch.setenv("SPRTZ_MODEL_LOCATION", "global")
+        monkeypatch.setenv("SPRTZ_MODEL", "gemini-3.8-flash")
+        from sprtz_agents.config import get_settings
+        from sprtz_agents.models import PinnedGemini, gemini
+        get_settings.cache_clear()
+        built = gemini()
+        assert isinstance(built, PinnedGemini)
+        assert built.api_client._api_client.location == "global"
+        get_settings.cache_clear()
+
+    def test_the_same_location_changes_nothing(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "ci")
+        monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        monkeypatch.delenv("SPRTZ_MODEL_LOCATION", raising=False)
+        from sprtz_agents.config import get_settings
+        from sprtz_agents.models import PinnedGemini, gemini
+        get_settings.cache_clear()
+        assert not isinstance(gemini(), PinnedGemini)
+        get_settings.cache_clear()
+
+    def test_the_agents_build_their_model_through_it(self):
+        # Not `Gemini(model=...)` directly, or the location cannot reach them.
+        assert "model=gemini()" in AGENT
+        assert "return gemini()" in STAGES
+
+    def test_grounding_asks_from_the_model_location(self):
+        assert "location=settings.model_location" in GROUNDING
+        assert "location=settings.location)" not in GROUNDING
+
+    def test_the_deployment_carries_it(self):
+        assert '--env "SPRTZ_MODEL_LOCATION=$$(tf gemini_location)"' in BUILD
+        assert 'output "gemini_location"' in OUTPUTS
 
     def test_the_catalog_receives_the_rerank_pair(self):
         assert 'value = var.rerank_model' in CLOUD_RUN

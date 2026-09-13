@@ -164,7 +164,11 @@ def _client() -> Any:
     from google import genai
 
     settings = get_settings()
-    return genai.Client(vertexai=True, project=settings.project_id, location=settings.location)
+    # The model's own location, not the engine's: grounding runs on the same
+    # model as the root agent, and a model served only through `global` is a
+    # 404 on the engine's regional endpoint.
+    return genai.Client(vertexai=True, project=settings.project_id,
+                        location=settings.model_location)
 
 
 def observed_lines(

@@ -31,7 +31,7 @@ PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-south1")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
 EMBEDDING_DIMENSIONS = int(os.environ.get("EMBEDDING_DIMENSIONS", "768"))
-RERANK_MODEL = os.environ.get("RERANK_MODEL", "gemini-3.6-flash")
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "gemini-3.8-flash")
 # Its own location, because the model and the location move together: the
 # newer Flash generation is served only through Vertex's `global` location in
 # this project, while the embedding model is regional and stays on LOCATION.

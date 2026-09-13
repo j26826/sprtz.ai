@@ -20,7 +20,8 @@ upload_cors_origins = [
   "http://localhost:5173",
 ]
 
-gemini_model            = "gemini-2.5-flash"
+gemini_model            = "gemini-3.8-flash"
+gemini_location         = "global"
 embedding_model         = "gemini-embedding-001"
 embedding_dimensions    = 768
 segment_minutes         = 15

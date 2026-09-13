@@ -12,6 +12,7 @@ from google.adk.models import Gemini
 from google.genai import types
 
 from sprtz_agents.config import get_settings
+from sprtz_agents.models import gemini
 from sprtz_agents.sports import list_sports
 from sprtz_agents.tools import live, pipeline
 
@@ -19,12 +20,12 @@ _settings = get_settings()
 
 
 def _model() -> Gemini:
-    """Gemini 2.5 Flash for every stage. Per-stage temperature is set through
-    generate_content_config, which is where the model object does not carry it."""
-    return Gemini(
-        model=_settings.model,
-        retry_options=types.HttpRetryOptions(attempts=3),
-    )
+    """The engine's model for every stage, called from wherever it is served.
+
+    Per-stage temperature is set through generate_content_config, which is
+    where the model object does not carry it.
+    """
+    return gemini()
 
 
 def _generation(temperature: float, max_tokens: int = 8192) -> types.GenerateContentConfig:

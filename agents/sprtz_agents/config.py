@@ -45,6 +45,17 @@ class Settings:
         or os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
     )
 
+    # And the same pair for everything else the engine asks a model: the root
+    # agent, the stages, the game judgement and grounding. They differ from the
+    # analysis in one way that matters — the analysis builds its own client and
+    # these do not, so this location has to be given to ADK rather than to a
+    # constructor. `GOOGLE_CLOUD_LOCATION` cannot carry it: Agent Runtime
+    # injects that itself and refuses a deployment that sets it.
+    model_location: str = field(
+        default_factory=lambda: os.environ.get("SPRTZ_MODEL_LOCATION")
+        or os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    )
+
     embedding_model: str = field(
         default_factory=lambda: os.environ.get("SPRTZ_EMBEDDING_MODEL", "gemini-embedding-001")
     )
