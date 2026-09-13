@@ -213,6 +213,41 @@ def cut(source: str | Path, dest: Path, start_sec: float, end_sec: float,
     _run(cmd)
 
 
+def reframe(source: Path, dest: Path, aspect: str = "9:16", blur_pad: bool = True) -> None:
+    """Reframe to a vertical aspect.
+
+    Centre-crops to the target aspect over a blurred, filled background so a
+    wide arena shot still reads on a phone instead of becoming letterboxed.
+
+    This runs on a *rendered reel*, never on a match. That is what makes it safe
+    here: the input is one file of tens of megabytes that Transcoder has already
+    concatenated and normalised, so it is the same size of work as `mux_chunk`
+    rather than the multi-gigabyte in-container encode this service is scarred
+    by. Transcoder cannot do it — its preprocessing has crop and pad, but no
+    blur — which is the whole reason there is a second pass at all.
+    """
+    w, h = (1080, 1920) if aspect == "9:16" else (1080, 1080)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if blur_pad:
+        vf = (
+            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},boxblur=luma_radius=40:luma_power=2[bg];"
+            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
+        )
+        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
+               "-i", str(source), "-filter_complex", vf]
+    else:
+        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+        cmd = ["ffmpeg", "-hide_banner", "-y", *_FFMPEG_HARDENING,
+               "-i", str(source), "-vf", vf]
+
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(dest)]
+    _run(cmd)
+
+
 def thumbnail(source: str | Path, dest: Path, at_sec: float, width: int = 640,
               bearer_token: str | None = None) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)

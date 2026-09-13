@@ -97,6 +97,31 @@ PROXY_GOP_SECONDS = 10
 PROXY_STREAM_KEY = "proxy_1fps"
 PROXY_FILE_NAME = f"{PROXY_STREAM_KEY}.mp4"
 
+# The reel: what actually goes to a channel, so it is the one encode here whose
+# job is to look good rather than to be cheap to scrub.
+#
+# It is also the reason a reel can draw on several matches at once. A reel is
+# one Transcoder job with an `Input` per source and an `EditAtom` per cut, and
+# the encoder normalises whatever it is given to the single output spec below —
+# so cuts from a 1080i50 broadcast and a 720p30 stream land in one file without
+# this service touching a video byte. Concatenating them here with ffmpeg would
+# put N range-reads across several multi-gigabyte sources through a filesystem
+# that is really RAM, which is the shape that killed this container twice.
+REEL_HEIGHT = 1080
+REEL_WIDTH = 1920
+REEL_BITRATE_BPS = 6_000_000
+# One rate for every source, because the sources disagree: European broadcast
+# is 25 or 50, and a cut from each in one file has to settle on something. 30 is
+# the most widely accepted by YouTube, and DROP_DUPLICATE (required anyway by
+# FILL_CONTENT_GAPS) is what makes the conversion honest rather than blended.
+REEL_FRAME_RATE = 30
+REEL_AUDIO_BITRATE_BPS = 128_000
+REEL_GOP_SECONDS = 2
+# Transcoder names an unsegmented mux stream `<key>.mp4` under the output
+# prefix, so a reel's object URI is known before the encode has started.
+REEL_STREAM_KEY = "reel"
+REEL_FILE_NAME = f"{REEL_STREAM_KEY}.mp4"
+
 _client: Any = None
 
 
@@ -274,6 +299,119 @@ def create_preview_job(source_uri: str, hls_bucket: str, job_id: str,
         "transcoder_job": created.name,
         "output_uri": out_uri,
         "master_playlist_uri": f"{out_uri}{MASTER_PLAYLIST}",
+    }
+
+
+def reel_output_uri(bucket: str, reel_id: str) -> str:
+    return f"gs://{bucket}/reels/{reel_id}/"
+
+
+def _ms_duration(ms: int) -> Any:
+    """Milliseconds as a protobuf Duration, exactly.
+
+    Duration carries nanoseconds, so a cut point survives the trip whole. This
+    is what makes the stored millisecond a real boundary rather than a number
+    that gets rounded to the nearest second on the way to the encoder.
+    """
+    from google.protobuf import duration_pb2
+
+    ms = max(0, int(ms))
+    return duration_pb2.Duration(seconds=ms // 1000, nanos=(ms % 1000) * 1_000_000)
+
+
+def build_reel_config(out_uri: str, cuts: list[dict[str, Any]],
+                      sources: dict[str, str], audio: bool = True) -> Any:
+    """One MP4 of the cuts, in order, drawn from however many sources they name.
+
+    ``cuts`` are dicts with ``jobId``, ``startMs`` and ``endMs``; ``sources``
+    maps a job id to its ``gs://`` source. Each distinct source becomes an
+    ``Input`` and each cut an ``EditAtom`` naming it — the edit list is the
+    concatenation, in list order.
+    """
+    from google.cloud.video import transcoder_v1
+    from google.protobuf import duration_pb2
+
+    # One Input per distinct source, in first-use order so the config reads in
+    # the same order as the reel does.
+    keys: dict[str, str] = {}
+    inputs = []
+    for cut in cuts:
+        job_id = cut.get("jobId") or ""
+        if job_id in keys or job_id not in sources:
+            continue
+        keys[job_id] = f"in{len(keys)}"
+        inputs.append(transcoder_v1.types.Input(key=keys[job_id], uri=sources[job_id]))
+
+    atoms = []
+    for i, cut in enumerate(cuts):
+        key = keys.get(cut.get("jobId") or "")
+        if not key:
+            continue
+        atoms.append(transcoder_v1.types.EditAtom(
+            key=f"atom{i}",
+            inputs=[key],
+            start_time_offset=_ms_duration(cut.get("startMs") or 0),
+            end_time_offset=_ms_duration(cut.get("endMs") or 0),
+        ))
+
+    streams = [
+        transcoder_v1.types.ElementaryStream(
+            key="video-reel",
+            video_stream=transcoder_v1.types.VideoStream(
+                h264=transcoder_v1.types.VideoStream.H264CodecSettings(
+                    height_pixels=REEL_HEIGHT,
+                    width_pixels=REEL_WIDTH,
+                    bitrate_bps=REEL_BITRATE_BPS,
+                    frame_rate=REEL_FRAME_RATE,
+                    gop_duration=duration_pb2.Duration(seconds=REEL_GOP_SECONDS),
+                    frame_rate_conversion_strategy=FRAME_RATE_CONVERSION,
+                ),
+            ),
+        ),
+    ]
+    if audio:
+        streams.append(_audio_stream("audio-reel", REEL_AUDIO_BITRATE_BPS))
+
+    return transcoder_v1.types.JobConfig(
+        inputs=inputs,
+        edit_list=atoms,
+        elementary_streams=streams,
+        mux_streams=[
+            transcoder_v1.types.MuxStream(
+                key=REEL_STREAM_KEY,
+                container="mp4",
+                elementary_streams=[s.key for s in streams],
+            ),
+        ],
+        output=transcoder_v1.types.Output(uri=out_uri),
+    )
+
+
+def create_reel_job(reel_id: str, cuts: list[dict[str, Any]], sources: dict[str, str],
+                    media_bucket: str, audio: bool = True) -> dict[str, Any]:
+    """Start the reel encode. Returns as soon as it is accepted.
+
+    ``input_uri`` is deliberately not set on the Job: the sources live in the
+    config's ``inputs`` because there is more than one of them, and a Job
+    carrying both would be ambiguous about which the edit list refers to.
+    """
+    from google.cloud.video import transcoder_v1
+
+    out_uri = reel_output_uri(media_bucket, reel_id)
+    job = transcoder_v1.types.Job(
+        output_uri=out_uri,
+        config=build_reel_config(out_uri, cuts, sources, audio=audio),
+        fill_content_gaps=FILL_CONTENT_GAPS,
+        optimization=OPTIMIZATION,
+        ttl_after_completion_days=7,
+        labels={"sprtz_reel": reel_id[:63], "sprtz_kind": "reel"},
+    )
+    created = client().create_job(parent=parent(), job=job)
+    logger.info("transcoder reel job %s created for %s", created.name, reel_id)
+    return {
+        "transcoder_job": created.name,
+        "output_uri": out_uri,
+        "reel_uri": f"{out_uri}{REEL_FILE_NAME}",
     }
 
 

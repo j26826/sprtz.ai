@@ -43,6 +43,12 @@ HLS2MP4_JOB = os.environ.get("HLS2MP4_JOB", "")
 REMUX_JOB = os.environ.get("REMUX_JOB", "")
 LIVE_CAPTURE_JOB = os.environ.get("LIVE_CAPTURE_JOB", "")
 LIVE_CHUNK_SECONDS = int(os.environ.get("LIVE_CHUNK_SECONDS", "300") or 300)
+# The longest reel this service will encode, as a backstop rather than as the
+# rule. The real bound is applied where the records are — a cut is clamped
+# against the moment it names, and a reel against the sum of its cuts — but
+# that bound needs a Firestore read, and this one needs nothing. It is here so
+# that whatever asks, however it got here, cannot start a twelve-hour encode.
+MAX_REEL_MS = int(os.environ.get("MAX_REEL_MS", "900000") or 900_000)
 # Cloud Run's writable filesystem is memory-backed, so scratch is only ever
 # used for small artefacts: playlists in flight, thumbnails, rendered cuts.
 # Multi-gigabyte sources are read over HTTPS and never land here.
@@ -1113,6 +1119,113 @@ def cancel_live_capture(execution: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "execution": execution}
     return {"status": "cancelled", "execution": execution}
+
+
+@mcp.tool
+def render_reel(reel_id: str, cuts: list[dict], sources: dict, aspect: str = "16:9") -> dict:
+    """Render a reel: the cuts, in order, concatenated into one MP4.
+
+    One Transcoder job with an input per source match and an edit atom per cut,
+    so a reel drawing on several matches is still one encode and no video byte
+    passes through this container. Poll it with `reel_status`.
+
+    A cut naming a source that is not in `sources` is refused rather than
+    skipped: a match deleted out from under a reel should say so, not render a
+    shorter reel that looks finished.
+
+    Args:
+        reel_id: Reel being rendered; becomes the object prefix.
+        cuts: Ordered cuts, each with jobId, startMs and endMs.
+        sources: Job id -> gs:// URI of that match's source video.
+        aspect: "16:9" now; "9:16" is a second pass over this output.
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+    if not cuts:
+        return {"status": "error", "error": "A reel needs at least one cut.", "reel_id": reel_id}
+
+    missing = sorted({c.get("jobId") or "" for c in cuts} - set(sources or {}))
+    if missing:
+        return {"status": "error", "reel_id": reel_id, "missing_sources": missing,
+                "error": "These matches have no source video: " + ", ".join(missing)}
+
+    total_ms = sum(int(c.get("endMs") or 0) - int(c.get("startMs") or 0) for c in cuts)
+    if total_ms > MAX_REEL_MS:
+        return {"status": "error", "reel_id": reel_id,
+                "error": f"A reel may run to {MAX_REEL_MS // 1000}s; this one is "
+                         f"{total_ms // 1000}s."}
+
+    try:
+        safe_id = _SAFE_ID.sub("_", reel_id)[:120]
+        gcs.delete_prefix(MEDIA_BUCKET, f"reels/{safe_id}/")
+        # Audio only if every source has it: Transcoder asked for an AAC stream
+        # it cannot fill from one silent input fails the whole job, minutes in.
+        audio = all(_source_has_audio(uri) for uri in sources.values())
+        started = transcoder.create_reel_job(safe_id, cuts, sources, MEDIA_BUCKET, audio=audio)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not start a reel encode for %s", reel_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "reel_id": reel_id}
+    return {"status": "started", "reel_id": reel_id, "aspect": aspect,
+            "duration_ms": total_ms, "audio": audio, **started}
+
+
+@mcp.tool
+def reel_status(transcoder_job: str, reel_uri: str = "") -> dict:
+    """How a reel encode is doing, and its object once it has succeeded.
+
+    Args:
+        transcoder_job: The job name `render_reel` returned.
+        reel_uri: The reel's gs:// URI, echoed back on success.
+    """
+    try:
+        state = transcoder.job_state(transcoder_job)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}",
+                "transcoder_job": transcoder_job}
+    out = {"status": "success", **state}
+    if state.get("succeeded") and reel_uri:
+        out["reel_uri"] = reel_uri
+    return out
+
+
+@mcp.tool
+def reframe_reel(reel_uri: str, reel_id: str, aspect: str = "9:16") -> dict:
+    """Make the vertical cut of a rendered reel, for Shorts.
+
+    Centre-crop over a blurred fill, so a wide arena shot still reads on a
+    phone. Done here rather than on Transcoder because a blurred background is
+    not something its preprocessing can express, and done to the *rendered
+    reel* rather than to the matches: the input is one already-concatenated
+    file of tens of megabytes, which is the size of work this service can do
+    in a request.
+
+    Args:
+        reel_uri: gs:// URI of the rendered 16:9 reel.
+        reel_id: Reel this belongs to; becomes the object prefix.
+        aspect: "9:16" or "1:1".
+    """
+    if not MEDIA_BUCKET:
+        return {"status": "error", "error": "MEDIA_BUCKET is not configured."}
+    if aspect not in ("9:16", "1:1"):
+        return {"status": "error", "error": f"Cannot reframe to {aspect}.", "reel_id": reel_id}
+
+    safe_id = _SAFE_ID.sub("_", reel_id)[:120]
+    work = _scratch()
+    try:
+        local = work / "reel.mp4"
+        gcs.download(reel_uri, local)
+        tall = work / "reel-tall.mp4"
+        ffmpeg_ops.reframe(local, tall, aspect=aspect)
+        name = "reel-9x16.mp4" if aspect == "9:16" else "reel-1x1.mp4"
+        out_uri = f"gs://{MEDIA_BUCKET}/reels/{safe_id}/{name}"
+        gcs.upload(tall, out_uri, content_type="video/mp4")
+        return {"status": "success", "reel_id": reel_id, "aspect": aspect,
+                "reel_uri": out_uri, "bytes": tall.stat().st_size}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("could not reframe reel %s", reel_id)
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}", "reel_id": reel_id}
+    finally:
+        _cleanup(work)
 
 
 @mcp.custom_route("/healthz", methods=["GET"])
