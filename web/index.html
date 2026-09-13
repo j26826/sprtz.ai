@@ -140,6 +140,31 @@
   </div>
 </div>
 
+<!-- The reel editor. Its own dialog rather than a third mode of #details:
+     that one is already shared between a moment and a game record, and each
+     has to tear the other's state down on the way in. A third tenant would
+     make the teardown the feature. It also needs the room — a preview, an
+     ordered list of cuts and the trim on each do not fit beside a record. -->
+<div class="modal hidden" id="reel">
+  <div class="modal-card modal-card-full" role="dialog" aria-modal="true"
+       aria-labelledby="reel-title">
+    <div class="modal-head">
+      <div class="modal-title" id="reel-title"></div>
+      <div class="modal-actions" id="reel-actions"></div>
+      <button class="btn-quiet detail-action" id="close-reel"
+              data-i18n="settings.close">Close</button>
+    </div>
+    <div class="reel-busy" id="reel-busy" role="status" aria-live="polite" hidden></div>
+    <div class="reel-split">
+      <div class="reel-stage">
+        <div class="reel-player" id="reel-player"></div>
+        <div class="reel-under" id="reel-under"></div>
+      </div>
+      <div class="reel-cuts" id="reel-cuts"></div>
+    </div>
+  </div>
+</div>
+
 <!-- The bar a run's progress is drawn on. It is not in the table: a row of
      meters down a list of twenty jobs is a wall of moving parts, and only the
      job somebody is actually waiting on is worth watching. The table says how

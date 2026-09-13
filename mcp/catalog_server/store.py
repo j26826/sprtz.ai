@@ -2064,6 +2064,12 @@ def plan_cut(job_id: str, moment_id: str,
         "end_sec": end,
         "start_ms": round(start * 1000),
         "end_ms": round(end * 1000),
+        # What the analysis actually found, carried alongside what was asked
+        # for. The editor shows the two together so a trim can be seen as a
+        # trim and put back; without this the detected range is only knowable
+        # by reading the moment again.
+        "detected_start_ms": round(float(moment.get("start_sec") or 0.0) * 1000),
+        "detected_end_ms": round(float(moment.get("end_sec") or 0.0) * 1000),
         "label": moment.get("label", ""),
         "summary": moment.get("summary", ""),
     }
@@ -2129,6 +2135,11 @@ def _cut_out(cut: dict[str, Any], order: int) -> dict[str, Any]:
         "startMs": start,
         "endMs": end,
         "label": str(cut.get("label") or ""),
+        # What the analysis found, so the editor can show a trim as a trim.
+        # Absent on a cut written before this existed, which the editor reads
+        # as "not trimmed" rather than guessing.
+        "detectedStartMs": int(cut.get("detectedStartMs") or start),
+        "detectedEndMs": int(cut.get("detectedEndMs") or end),
         # Which match this came from, denormalised so a reel row can name its
         # sources without reading every job.
         "jobTitle": str(cut.get("jobTitle") or ""),
@@ -2164,6 +2175,7 @@ def _reel_out(data: dict[str, Any]) -> dict[str, Any]:
         "durationMs": int(data.get("durationMs") or 0),
         "thumbnail": data.get("thumbnail") or {},
         "render": data.get("render") or {},
+        "crops": data.get("crops") or {},
         "publish": data.get("publish") or {},
         "ownerUid": data.get("ownerUid", ""),
         "createdAt": data.get("createdAt"),
@@ -2201,6 +2213,11 @@ def create_reel(owner_uid: str, title: str, cuts: list[dict[str, Any]],
         "durationMs": total,
         "thumbnail": {},
         "render": {},
+        # One entry per shape that has been cut, keyed by aspect. Derived from
+        # the render rather than from the cuts, so changing the cuts clears
+        # them along with it: a 9:16 of a reel that no longer exists is a file
+        # that will be posted by mistake.
+        "crops": {},
         "publish": {},
         "createdAt": now(),
         "updatedAt": now(),
@@ -2278,8 +2295,10 @@ def update_reel(reel_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         writes["cuts"] = ordered
         writes["durationMs"] = total
         writes["jobIds"] = sorted({c["jobId"] for c in ordered if c["jobId"]})
-        # A reel whose cuts changed is no longer the reel that was rendered.
+        # A reel whose cuts changed is no longer the reel that was rendered,
+        # and every shape cut from that render is equally stale.
         writes["render"] = {}
+        writes["crops"] = {}
 
     if writes:
         writes["updatedAt"] = now()
@@ -2294,6 +2313,114 @@ def update_reel(reel_id: str, patch: dict[str, Any]) -> dict[str, Any]:
 def set_reel_render(reel_id: str, render: dict[str, Any]) -> dict[str, Any]:
     """Record where a render got to. Written by the machinery, not the editor."""
     reel_ref(reel_id).update({"render": render, "updatedAt": now()})
+    return get_reel(reel_id)
+
+
+def write_reel_copy(reel_id: str, generate: bool = True) -> dict[str, Any]:
+    """The copy a reel goes out with: title, description, keywords, hashtags.
+
+    Facts are assembled from the records — the title from what was read on
+    screen, the keywords from the sport's own taxonomy and the names the
+    analysis recorded — and only the description and the hashtags are written
+    by a model, over a digest of observations and nothing else. See
+    reel_copy.py for why the halves are split that way.
+
+    Falls back to composed copy on any failure. A reel that publishes with a
+    plain description is a far better outcome than one that cannot be
+    published, which is the same rule the reranker follows.
+    """
+    # Imported here like every other sibling and Google module in this file:
+    # module scope costs ~100s on a cold Cloud Run instance.
+    from catalog_server import reel_copy
+    from google.genai import types
+
+    reel = get_reel(reel_id)
+    cuts = reel.get("cuts") or []
+
+    # The moments in the order they play, and the events they came from. One
+    # read per cut and one per distinct match: a reel holds at most fifty.
+    moments: list[dict[str, Any]] = []
+    for cut in cuts:
+        found = get_moment(cut.get("jobId", ""), cut.get("momentId", ""))
+        if found:
+            moments.append(found)
+    events: list[dict[str, Any]] = []
+    for job_id in reel.get("jobIds") or []:
+        try:
+            events.append(get_game(job_id))
+        except KeyError:
+            continue
+
+    digest = reel_copy.build_digest(reel, moments, events)
+    written: reel_copy.ReelCopy | None = None
+    if generate:
+        try:
+            response = rerank_client().models.generate_content(
+                model=RERANK_MODEL,
+                contents=reel_copy.prompt_for(digest),
+                config=types.GenerateContentConfig(
+                    # Copy, not a judgement: a little warmth is the point, and
+                    # the prompt is what keeps it inside the observations.
+                    temperature=0.6,
+                    response_mime_type="application/json",
+                    # JSON Schema rather than the class, for the reason written
+                    # out at the rerank call: given the class, the newer Flash
+                    # models can write a field as an unbounded run of
+                    # characters until the token cap and the JSON never closes.
+                    response_json_schema=reel_copy.ReelCopy.model_json_schema(),
+                    max_output_tokens=2048,
+                ),
+            )
+            written = reel_copy.ReelCopy.model_validate_json(
+                (getattr(response, "text", "") or "").strip())
+        except Exception:  # noqa: BLE001
+            logger.warning("reel copy generation failed; composing instead", exc_info=True)
+
+    return {"reel_id": reel_id, **reel_copy.compose(reel, moments, events, written)}
+
+
+def match_reels_by_title(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Find reels whose name appears in ``query``, longest name first.
+
+    The same argument as `match_games_by_title`, for the same reason: a name is
+    what a vector search is worst at, and a reel's name is usually a match's
+    name with a word on the end — "Preview CDI 3* — Grand Prix Freestyle —
+    Highlights" — so its embedding would sit on top of the event it was cut
+    from. Comparing the text answers exactly or not at all.
+
+    One word is not a name here either: a reel called "Highlights" would
+    otherwise answer any question containing the word, and "Highlights" is
+    exactly what the default title is when a reel spans several events.
+    """
+    asked = _title_key(query)
+    if not asked:
+        return []
+
+    hits: list[tuple[int, str]] = []
+    for doc in db().collection("reels").select(["reelId", "title"]).stream():
+        data = doc.to_dict() or {}
+        key = _title_key(data.get("title") or "")
+        if len(key.split()) > 1 and key in asked:
+            hits.append((len(key), data.get("reelId") or doc.id))
+
+    hits.sort(key=lambda hit: hit[0], reverse=True)
+
+    reels: list[dict[str, Any]] = []
+    for _, reel_id in hits[:limit]:
+        try:
+            reels.append(get_reel(reel_id))
+        except KeyError:
+            continue
+    return reels
+
+
+def set_reel_crop(reel_id: str, aspect: str, crop: dict[str, Any]) -> dict[str, Any]:
+    """Record one cut shape against the reel.
+
+    Merged rather than replaced: a reel may carry a 9:16 and a 1:1 at once, and
+    cutting the second is not a statement about the first.
+    """
+    reel_ref(reel_id).update({f"crops.{aspect}": crop, "updatedAt": now()})
     return get_reel(reel_id)
 
 

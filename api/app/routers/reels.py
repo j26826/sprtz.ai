@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -29,6 +30,9 @@ router = APIRouter(prefix="/api/reels", tags=["reels"])
 # as `_MOMENT_ID` next door: anything outside this set is refused rather than
 # rewritten, because a rewritten id addresses somebody else's object.
 _REEL_ID = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
+
+# The shapes a reel can be cut to. 16:9 is the render's own and is not a crop.
+CROP_ASPECTS = ("9:16", "4:5", "1:1")
 _MOMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
 
 
@@ -103,6 +107,10 @@ async def _plan(cuts: list[CutIn]) -> list[dict]:
             "momentId": cut.moment_id,
             "startMs": result["start_ms"],
             "endMs": result["end_ms"],
+            # What the analysis found, beside what was asked for, so the editor
+            # can show a trim as a trim and offer the way back.
+            "detectedStartMs": result.get("detected_start_ms", result["start_ms"]),
+            "detectedEndMs": result.get("detected_end_ms", result["end_ms"]),
             "label": result.get("label") or "",
         })
     return planned
@@ -235,6 +243,145 @@ async def render_reel(reel_id: str, user: CallerIdentity = Depends(current_user)
     await clients.call_mcp("catalog", "set_reel_render",
                            {"reel_id": reel_id, "render": render})
     return {"reel_id": reel_id, "render": render}
+
+
+class CropRequest(BaseModel):
+    aspect: str
+    # "crop" takes a window out of the picture; "blur" keeps the whole frame
+    # over a blurred copy of itself.
+    fill: str = "crop"
+    # Where the middle of the window sits, 0 at the left edge and 1 at the
+    # right. Bounded here as well as in the media server: it lands in an ffmpeg
+    # filter string, and a value outside the picture is a failed encode rather
+    # than a bad framing.
+    focus_x: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+@router.post("/{reel_id}/crop")
+async def crop_reel(reel_id: str, body: CropRequest,
+                    user: CallerIdentity = Depends(current_user)) -> dict:
+    """Cut the rendered reel to another shape.
+
+    Derived from the render, so there has to be one: cutting a 9:16 out of a
+    reel that was never rendered would be cutting it out of nothing.
+    """
+    reel = await _reel(reel_id)
+    if body.aspect not in CROP_ASPECTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Choose one of {', '.join(CROP_ASPECTS)}.")
+
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Render the reel first — the other shapes are cut from it.")
+
+    result = await clients.call_mcp("media", "reframe_reel", {
+        "reel_uri": render["reelUri"],
+        "reel_id": reel_id,
+        "aspect": body.aspect,
+        "fill": body.fill,
+        "focus_x": body.focus_x,
+    })
+    if result.get("status") != "success":
+        raise _upstream(result, "That shape could not be cut just now.")
+
+    crop = {
+        "uri": result.get("reel_uri", ""),
+        "fill": body.fill,
+        "focusX": body.focus_x,
+        "bytes": result.get("bytes", 0),
+    }
+    saved = await clients.call_mcp("catalog", "set_reel_crop",
+                                   {"reel_id": reel_id, "aspect": body.aspect, "crop": crop})
+    return {"reel_id": reel_id, "aspect": body.aspect, "crop": crop,
+            "reel": saved.get("reel") or reel}
+
+
+@router.post("/{reel_id}/copy")
+async def write_copy(reel_id: str, user: CallerIdentity = Depends(current_user)) -> dict:
+    """Write the copy this reel would go out with.
+
+    Returns it rather than saving it. The editor is going to read it before it
+    is published, and quietly overwriting a description someone had already
+    written would be the worst possible moment to be helpful.
+    """
+    await _reel(reel_id)
+    result = await clients.call_mcp("catalog", "write_reel_copy", {"reel_id": reel_id})
+    if result.get("status") != "success":
+        raise _upstream(result, "The copy could not be written just now.")
+    return {
+        "reel_id": reel_id,
+        "title": result.get("title", ""),
+        "description": result.get("description", ""),
+        "tags": result.get("tags") or [],
+        "hashtags": result.get("hashtags") or [],
+        # Whether a model wrote the description or it was composed. The editor
+        # is told which, because the two read differently and one of them is
+        # worth editing before it goes out.
+        "generated": bool(result.get("generated")),
+    }
+
+
+class PublishYouTubeRequest(BaseModel):
+    """What to publish, and how it should read on the channel.
+
+    Deliberately the same shape as the single-moment request next door: the
+    two are one action on two things, and an editor who has published a moment
+    should not have to learn a second form to publish a reel.
+    """
+
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=5000)
+    privacy: Literal["private", "unlisted", "public"] = "private"
+    tags: list[str] = Field(default_factory=list, max_length=15)
+
+
+@router.post("/{reel_id}/publish/youtube")
+async def publish_reel_to_youtube(reel_id: str, body: PublishYouTubeRequest,
+                                  user: CallerIdentity = Depends(current_user)) -> dict:
+    """Upload the rendered 16:9 reel to the configured YouTube channel.
+
+    The rendered file is what goes up, so there has to be one — nothing here
+    cuts video. That is the difference from the moment route, which renders
+    its cut on the way past; a reel's render is a Transcoder job that already
+    happened.
+    """
+    reel = await _reel(reel_id)
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Render the reel first — publishing uploads the rendered file.")
+
+    result = await clients.call_mcp("media", "publish_youtube", {
+        "clip_uri": render["reelUri"],
+        "title": body.title,
+        "description": body.description,
+        "privacy": body.privacy,
+        "tags": body.tags,
+    })
+    if result.get("status") != "success":
+        # The reason is the editor's to act on — a revoked refresh token, a
+        # channel over its daily quota — so it travels rather than being
+        # flattened into "upload failed". Same rule as the moment route.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.get("error") or "YouTube would not accept the upload.",
+        )
+
+    publish = {
+        "status": "done",
+        "videoId": result.get("video_id", ""),
+        "url": result.get("url", ""),
+        "privacy": result.get("privacy", body.privacy),
+        "error": "",
+    }
+    saved = await clients.call_mcp("catalog", "set_reel_publish",
+                                   {"reel_id": reel_id, "publish": publish})
+    return {"reel_id": reel_id, "video_id": publish["videoId"], "url": publish["url"],
+            "privacy": publish["privacy"], "reel": saved.get("reel") or reel}
 
 
 @router.get("/{reel_id}/render")

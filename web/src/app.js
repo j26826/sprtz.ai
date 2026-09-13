@@ -30,6 +30,12 @@ import { LOCALES, detectLocale, getLocale, localeName, setLocale, t } from './i1
 import { chooseCard, wantsDetail } from './cards.js';
 import { currentTurn } from './transcript.js';
 import { humanMessage, jobFailure } from './errors.js';
+import {
+  CROP_ASPECTS, MIN_CUT_MS, cropBand, focusFrom, isPickedIn, isTrimmed, matchCount,
+  moveCut, msAt, msClock, nextCut, nudge, pastEnd, pickKey, pctOf, reelLength,
+  hashLine, hashList, rulerTicks, splitTags, tagLine, togglePicked, trimWindow,
+  withHashtags,
+} from './reels.js';
 import { liveStageFills, liveSummary, validateLiveEvent } from './live.js';
 import {
   disciplinesFor, findGames, gamesInScope, scopeContextLine, scopeFilters, scopeTitle,
@@ -128,6 +134,17 @@ const state = {
   },
   pendingUploads: [],     // uploaded to GCS but never registered as a job
   thumbs: { urls: {}, asked: new Set() },  // momentId -> signed URL for its still
+  // Moments picked to go in a reel: [{ jobId, momentId, label, summary }].
+  //
+  // On the session rather than on a message, because a reel may draw on
+  // several events and the moments for each arrive as a different answer. A
+  // basket held on one card could only ever hold one card's worth, which is
+  // the one thing a cross-event reel cannot be. It persists with the session
+  // for the same reason a scope does: a half-built reel should survive a
+  // reload, and the transcript is rebuilt wholesale on every Firestore write.
+  pick: [],
+  reels: [],               // every reel on the desk, from its own listener
+  reel: null,             // the reel open in the editor, once one is built
   details: null,          // the moment whose popup is open, and playing inside it
   // The title being edited: { jobId, value, at }. The transcript re-renders on
   // every Firestore write, so a half-typed name has to live here rather than in
@@ -611,6 +628,7 @@ onAuthStateChanged(auth, async (user) => {
   render();
   watchJobs();
   watchGames();
+  watchReels();
   // An empty screen is not a starting point. With nothing stored this used to
   // paint a blank transcript and wait for the editor to find the + in the
   // rail; the opener is the thing that says what this desk can do, and it only
@@ -653,6 +671,21 @@ function watchGames() {
       render();
     },
     (err) => console.error('games listener', err),
+  );
+}
+
+
+function watchReels() {
+  // Reels are top-level and shared like everything else on this desk. Ordered
+  // by updatedAt alone, which the automatic single-field index serves — the
+  // same reason watchJobs orders by createdAt alone.
+  onSnapshot(
+    query(collection(db, 'reels'), orderBy('updatedAt', 'desc'), limit(50)),
+    (snap) => {
+      state.reels = snap.docs.map((d) => ({ reelId: d.id, ...d.data() }));
+      render();
+    },
+    (err) => console.error('reels listener', err),
   );
 }
 
@@ -1095,6 +1128,68 @@ function momentsHead(view, index) {
  * and gone against a bright floor. The star and the play button are the
  * exceptions, because each carries its own ground wherever it lands.
  */
+/* ── Picking moments for a reel ──────────────────────────────────────────────
+   A moment is addressed by its match as well as by itself: ids are unique
+   within a job and a reel may hold cuts from four of them, so the key carries
+   both. The separator is a pipe rather than a colon because the delegated
+   handler already splits on colons for `index:value` attributes. */
+
+const keyOf = (jobId, momentId) => pickKey(jobId || state.jobId || '', momentId);
+
+function isPicked(m) {
+  return isPickedIn(state.pick, m.jobId || state.jobId || '', m.momentId);
+}
+
+/** Add or remove one moment, and remember it with the session. */
+function togglePick(jobId, momentId) {
+  const m = momentById(momentId) || {};
+  state.pick = togglePicked(state.pick, {
+    jobId: jobId || state.jobId || '',
+    momentId,
+    // Kept on the pick rather than looked up later: a moment from another
+    // event is not in `state.moments`, so by the time the editor opens there
+    // would be nothing to read a label off.
+    label: m.label || m.momentType || '',
+    summary: m.summary || '',
+  });
+  persistPick();
+}
+
+function persistPick() {
+  if (state.sessionKey) updateSession(state.sessionKey, { pick: state.pick });
+}
+
+/**
+ * The bar under a page of tiles: what is picked, and the way into the editor.
+ *
+ * Under the tiles rather than in the card's head, because it acts on what was
+ * just chosen and reads in the direction the choosing happened. It is present
+ * even at zero — a control that appears only once you have guessed the
+ * gesture that summons it is a control nobody finds.
+ */
+function reelBar() {
+  const n = state.pick.length;
+  const open_ = Boolean(state.reel);
+  return `
+    <div class="reel-bar" data-picked="${n > 0}">
+      <span class="reel-bar-count">${n
+    ? esc(t('reel.picked').replace('{n}', String(n)))
+    : esc(t('reel.pickHint'))}</span>
+      <span class="reel-bar-actions">
+        ${n ? `<button class="btn-ghost btn-step" data-pick-clear="1">${
+    esc(t('reel.clear'))}</button>` : ''}
+        ${open_
+    // A reel is already being edited, so this adds to that one. Building a
+    // second reel from the desk while the first is open is almost never what
+    // was meant — "add more moments" is a trip out to the desk and back.
+    ? `<button class="btn-primary btn-step" data-reel-append="1" ${n ? '' : 'disabled'}>${
+      esc(t('reel.addToOpen'))}</button>`
+    : `<button class="btn-primary btn-step" data-reel-build="1" ${n ? '' : 'disabled'}>${
+      esc(t('reel.build'))}</button>`}
+      </span>
+    </div>`;
+}
+
 function momentTile(m, opts = {}) {
   // A moment from another game cannot be played through the open match's
   // listeners, which do not hold it. opts.open routes the picture through the
@@ -1111,8 +1206,18 @@ function momentTile(m, opts = {}) {
   const kind = m.label || m.momentType || '';
   const sure = m.confidence == null ? null : Math.round(Math.min(Math.max(Number(m.confidence), 0), 1) * 100);
 
+  const picked = isPicked(m);
+
   return `
-    <div class="tile">
+    <div class="tile" aria-current="${picked}">
+      <!-- A sibling of the frame, not a child of it: the frame is a button and
+           a button cannot hold another one. It sits over the top-left corner,
+           opposite the early-preview mark. -->
+      <button class="tile-pick" data-pick="${esc(keyOf(m.jobId, m.momentId))}"
+              aria-pressed="${picked}"
+              title="${esc(t(picked ? 'reel.removeOne' : 'reel.addOne'))}"
+              aria-label="${esc(`${t(picked ? 'reel.removeOne' : 'reel.addOne')}: ${
+    m.summary || kind}`)}"><span aria-hidden="true"></span></button>
       <button class="thumb" ${opts.open ? `data-search-open="${esc(opts.open)}"` : `data-play="${esc(m.momentId)}"`}
               title="${esc(t('moment.play'))}" aria-label="${esc(`${t('moment.play')}: ${m.summary || kind}`)}"
               ${m.thumbUri && !state.thumbs.urls[m.momentId]
@@ -1168,6 +1273,7 @@ function momentsCard(msg, index) {
     <div class="list">
       ${momentsHead({ ...found, sort: msg.sort }, index)}
       <div class="tile-row">${view.slice.map(momentTile).join('')}</div>
+      ${reelBar()}
       ${pagerRow(view, index)}
     </div>`;
 }
@@ -1603,6 +1709,7 @@ function ridePane({ ride, moments }, index, msg, types, picked, ofThisRide, boar
         ${playRideButton(ride, 'btn-primary play-ride')}
       </div>
       ${body}
+      ${reelBar()}
       ${pagerRow(view, index)}
     </div>`;
 }
@@ -1878,7 +1985,7 @@ function renderDetailsBody() {
   const over = $('details-player').querySelector('.player-over');
   if (over) over.innerHTML = panel ? panel.over : '';
   const under = $('details-player').querySelector('.player-under');
-  if (under) under.innerHTML = previewNotice() + (panel ? panel.summary : '');
+  if (under) under.innerHTML = trimPanel(p) + previewNotice() + (panel ? panel.summary : '');
   const actions = $('details-actions');
   if (actions) actions.innerHTML = detailActions();
   const body = $('details-body');
@@ -1886,6 +1993,218 @@ function renderDetailsBody() {
   body.innerHTML = state.share?.mode === 'publish'
     ? publishPanel()
     : (panel ? panel.reference : '') + (p.moment ? momentRecord(p.moment, Boolean(ride)) : '');
+}
+
+
+/* ── Trimming a moment, before it goes in a reel ──────────────────────────
+   A filmstrip of the moment in its own window, with the chosen range drawn on
+   it between two handles. Dragging is the coarse control; the nudge buttons
+   beside the readout are the fine one, because 120 seconds across a few
+   hundred pixels is half a second a pixel and no mouse lands a millisecond
+   there.
+
+   The detected range is shown beside the trimmed one, and can be put back in
+   one click: what the analysis found is a fact about the footage, and an
+   editor who has dragged past the play needs a way home that does not involve
+   remembering where it was. */
+
+const TRIM_FRAMES = 9;
+
+function trimPanel(p) {
+  if (!p?.moment) return '';
+  const m = p.moment;
+  return trimStrip({
+    startMs: Math.round(p.start * 1000),
+    endMs: Math.round(p.end * 1000),
+    detectedStartMs: Math.round(m.startSec * 1000),
+    detectedEndMs: Math.round(m.endSec * 1000),
+    thumb: state.thumbs.urls[m.momentId],
+    scope: 'player',
+  });
+}
+
+/**
+ * The strip itself, drawn for whichever cut is being trimmed.
+ *
+ * One renderer for both dialogs. The moment player trims the range about to be
+ * added to a reel; the reel editor trims one already in it. They are the same
+ * gesture on the same kind of thing, and two strips that drifted apart would
+ * be two answers to "where do I drag".
+ *
+ * `scope` is what tells the handlers which one they are on: the player writes
+ * through `state.playing`, the editor through the reel's cuts.
+ */
+function trimStrip({ startMs, endMs, detectedStartMs, detectedEndMs, thumb, scope, index = 0 }) {
+  // A trim made during a render applies to a render that is already stale, so
+  // the strip goes read-only rather than accepting an edit it cannot honour.
+  const off = scope === 'cut' && reelBusy() ? 'disabled' : '';
+  const win = trimWindow(detectedStartMs, detectedEndMs);
+  const left = pctOf(startMs, win);
+  const right = pctOf(endMs, win);
+  const moved = startMs !== detectedStartMs || endMs !== detectedEndMs;
+  const at = scope === 'cut' ? `${index}:` : '';
+
+  return `
+    <div class="trim-card">
+      <div class="trim-card-head">
+        <span class="panel-label">${esc(t('trim.title'))}</span>
+        <span class="trim-card-head-right">
+          <span class="trim-hint">${esc(t('trim.hint'))}</span>
+          <span class="segmented" role="group" aria-label="${esc(t('reel.nudge'))}">
+            ${NUDGE_MS.map((ms) => `
+              <button class="seg-btn" data-reel-step="${ms}"
+                      aria-pressed="${ms === (state.reelPlay?.step ?? NUDGE_MS[0])}">${
+  ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`}</button>`).join('')}
+          </span>
+        </span>
+      </div>
+
+      <div class="trim-strip" data-trim-strip="${esc(scope)}:${index}">
+        ${Array.from({ length: TRIM_FRAMES }, (_, i) => `
+          <span class="trim-frame"${thumb ? ` style="background-image:url(${esc(thumb)})"` : ''}
+                aria-hidden="true" data-n="${i}"></span>`).join('')}
+        <span class="trim-selection" style="left:${left}%;width:${Math.max(0, right - left)}%">
+          <button class="trim-handle trim-handle-in" data-trim-grab="${esc(scope)}:${index}:start"
+                  aria-label="${esc(t('trim.dragIn'))}"><span class="grip" aria-hidden="true"></span></button>
+          <button class="trim-handle trim-handle-out" data-trim-grab="${esc(scope)}:${index}:end"
+                  aria-label="${esc(t('trim.dragOut'))}"><span class="grip" aria-hidden="true"></span></button>
+        </span>
+      </div>
+      <div class="trim-ruler" aria-hidden="true">
+        ${rulerTicks(win, 7).map((ms) => `<span>${esc(shortClock(ms / 1000))}</span>`).join('')}
+      </div>
+
+      <div class="trim-readout">
+        ${['start', 'end'].map((edge) => `
+          <span class="trim-edge-box">
+            <span class="field-label">${esc(t(`reel.${edge}`))}</span>
+            <button class="link-btn" data-${scope === 'cut' ? 'reel-trim' : 'trim'}="${at}${edge}:-1"
+                    ${off} aria-label="${esc(t('reel.earlier'))}">&minus;</button>
+            <span class="trim-at">${esc(msClock(edge === 'start' ? startMs : endMs))}</span>
+            <button class="link-btn" data-${scope === 'cut' ? 'reel-trim' : 'trim'}="${at}${edge}:1"
+                    ${off} aria-label="${esc(t('reel.later'))}">+</button>
+          </span>`).join('')}
+        <span class="trim-ranges">
+          <span><span class="k">${esc(t('trim.detected'))}</span>
+            <b>${esc(msClock(detectedEndMs - detectedStartMs))}</b></span>
+          <span><span class="k">${esc(t('trim.trimmed'))}</span>
+            <b>${esc(msClock(endMs - startMs))}</b></span>
+        </span>
+        ${moved ? `<button class="link-btn trim-reset" data-${
+    scope === 'cut' ? `reel-trim-reset="${index}"` : 'trim-reset'}>${
+    esc(t('trim.reset'))}</button>` : ''}
+      </div>
+    </div>`;
+}
+
+/**
+ * Dragging a handle.
+ *
+ * Bound once on the popup rather than per render: the panel is redrawn on
+ * every pointer move, so a listener attached to the handle would be removed
+ * out from under the gesture that started it.
+ */
+function onTrimPointerDown(event) {
+  // `const el = event.target` first, deliberately. web/check.mjs reads the
+  // *first* `event.target.closest(...)` in this file as the whole delegated
+  // click selector, and this function sits above that handler — spelling it
+  // the obvious way here silently blanks the selector and fails every button
+  // in the app.
+  const el = event.target;
+
+  // The crop guide is dragged on the same gesture, on the frame rather than on
+  // a handle: the window is the whole control, and a 32%-wide band with grips
+  // on it would be mostly grips.
+  const source = el.closest?.('[data-crop-source]');
+  if (source) {
+    if (reelBusy()) return;
+    const aspect = state.reelCrop?.aspect || '9:16';
+    // Measured once, here. Every move re-renders the panel, which replaces
+    // this element — and a detached element's rect is all zeros, so reading it
+    // mid-drag divides by nothing and pins the guide to one end. The box
+    // cannot move during a drag anyway.
+    const box = source.getBoundingClientRect();
+    const slide = (ev) => {
+      state.reelCrop = {
+        ...(state.reelCrop || {}),
+        aspect,
+        focusX: focusFrom((ev.clientX - box.left) / (box.width || 1), aspect),
+      };
+      renderReelEditor();
+    };
+    const drop = () => {
+      window.removeEventListener('pointermove', slide);
+      window.removeEventListener('pointerup', drop);
+    };
+    event.preventDefault();
+    slide(event);
+    window.addEventListener('pointermove', slide);
+    window.addEventListener('pointerup', drop);
+    return;
+  }
+
+  const handle = el.closest?.('[data-trim-grab]');
+  if (!handle) return;
+  const strip = handle.closest('[data-trim-strip]');
+  if (!strip) return;
+  const [scope, indexRaw, edge] = handle.dataset.trimGrab.split(':');
+  const index = Number(indexRaw);
+  event.preventDefault();
+
+  const onPlayer = scope === 'player';
+  const p = state.playing;
+  const cut = onPlayer ? null : state.reel?.cuts?.[index];
+  if (onPlayer ? !p?.moment : !cut) return;
+
+  const win = onPlayer
+    ? trimWindow(Math.round(p.moment.startSec * 1000), Math.round(p.moment.endSec * 1000))
+    : trimWindow(cut.detectedStartMs ?? cut.startMs, cut.detectedEndMs ?? cut.endMs);
+
+  // Held here and written once on release. A PATCH per pointer move would be
+  // a hundred requests a drag, and each one re-plans every cut in the reel.
+  let atMs = null;
+
+  // Measured once, for the same reason as the crop guide below: every move
+  // re-renders the panel this strip lives in, and reading the rect off the
+  // replaced element gives zeros.
+  const box = strip.getBoundingClientRect();
+
+  const move = (ev) => {
+    atMs = msAt((ev.clientX - box.left) / (box.width || 1), win);
+    if (onPlayer) {
+      const next = edge === 'start'
+        ? { start: Math.min(atMs, p.end * 1000 - MIN_CUT_MS) / 1000, end: p.end }
+        : { start: p.start, end: Math.max(atMs, p.start * 1000 + MIN_CUT_MS) / 1000 };
+      Object.assign(p, next, { full: false, free: false });
+      renderDetailsBody();
+      syncPlayer();
+    } else {
+      // Draw against the reel's own copy so the strip follows the pointer,
+      // and save what it settles on.
+      const cuts = state.reel.cuts.map((c) => ({ ...c }));
+      cuts[index] = edge === 'start'
+        ? { ...cuts[index], startMs: Math.min(atMs, cuts[index].endMs - MIN_CUT_MS) }
+        : { ...cuts[index], endMs: Math.max(atMs, cuts[index].startMs + MIN_CUT_MS) };
+      state.reel = { ...state.reel, cuts };
+      renderReelEditor();
+    }
+  };
+
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (atMs === null) return;
+    if (onPlayer) {
+      // Land the playhead on what was just chosen, so the edge can be judged.
+      const video = playerEl?.querySelector('video');
+      if (video) video.currentTime = edge === 'start' ? p.start : Math.max(p.start, p.end - 1.5);
+    } else {
+      saveReelCuts(state.reel.cuts);
+    }
+  };
+
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
 }
 
 
@@ -1911,7 +2230,14 @@ function detailActions() {
   // idioms read as three kinds. The fill stays scarce, which is the brand's
   // rule: Publish is the action, Download and Close are the same button
   // outlined. `.detail-action` is what carries the amber to the quiet two.
+  // Add to reel is here, and the trim is under the video, because this is the
+  // screen where a moment is judged: the range that goes in the reel is the
+  // range that was just watched, trimmed to taste, rather than whatever the
+  // analysis reported for a tile nobody opened.
+  const inReel = isPickedIn(state.pick, p.moment.jobId || state.jobId || '', p.moment.momentId);
   return `
+    <button class="btn-quiet detail-action" data-detail-act="reel" aria-pressed="${inReel}">${
+  esc(t(inReel ? 'reel.removeOne' : (state.reel ? 'reel.addToOpen' : 'reel.addOne')))}</button>
     <button class="btn-quiet detail-action" data-detail-act="download" ${
       state.share?.downloading ? 'disabled' : ''}>${
       esc(state.share?.downloading ? t('share.preparing') : t('share.download'))}</button>
@@ -1994,7 +2320,7 @@ function publishPanel() {
 
       ${status === 'error' ? `<div class="share-error">${esc(share.error || '')}</div>` : ''}
       ${status === 'done' ? `<div class="share-done">${esc(t('share.published'))}
-        <a class="link-btn" href="${esc(share.url)}" target="_blank"
+        <a class="share-link" href="${esc(share.url)}" target="_blank"
            rel="noopener noreferrer">${esc(share.url)}</a></div>` : ''}
       ${over ? `<div class="share-error">${esc(t('share.tooLong'))}</div>` : ''}
     </div>`;
@@ -3080,6 +3406,8 @@ function openSession(sessionId) {
   // switching back, not starting again.
   state.sessionId = session.agentSessionId || null;
   state.scope = session.scope || null;
+  // The half-built reel survives a switch away and back, like the scope.
+  state.pick = Array.isArray(session.pick) ? session.pick : [];
   state.msgs = Array.isArray(session.msgs) && session.msgs.length
     ? session.msgs.map((m) => ({ ...m, searching: false, deskLoading: false }))
     : [];
@@ -3320,6 +3648,7 @@ function deskMomentsCard(msg, index) {
       </div>
       <div class="tile-row">${rows.map((row, k) =>
         momentTile(camel(row), { game: row.game || {}, open: `${index}:${k}` })).join('')}</div>
+      ${reelBar()}
       ${note}
     </div>`;
 }
@@ -4315,6 +4644,9 @@ function cardAnswersIt(m) {
   // Only a card with rides in it answers; "no ride matched" leaves the
   // agent's own reply on screen, which may know why.
   if (m.showRides) return Boolean(ridesFor(m).asked);
+  // An empty desk leaves the agent's reply on screen, which can say what to
+  // do about it; a list of reels answers on its own.
+  if (m.showReels) return (state.reels || []).length > 0;
   if (m.showGames) return state.games.length > 0;
   if (m.showGame) return Boolean(state.game);
   return false;
@@ -4377,6 +4709,7 @@ function render() {
       ${m.showSearch ? searchPanel(m, i) + searchCard(m, i) : ''}
       ${m.showDeskMoments ? deskMomentsCard(m, i) : ''}
       ${m.showMoments ? momentsCard(m, i) : ''}
+      ${m.showReels ? reelsCard(m, i) : ''}
       ${m.showRides ? ridesCard(m, i) : ''}
       ${m.showIngest ? ingestCard(m) : ''}
       ${m.showJobs ? jobsCard(m, i) : ''}
@@ -4724,6 +5057,824 @@ function destroyPlayer() {
 }
 
 
+/* ──────────────────────────────────────────────────── the reel editor ── */
+
+// One manifest per match, because a reel may draw on several and the moment
+// player's cache holds only the open one. Cleared when the editor closes: a
+// signed CDN cookie outlives the dialog but not the session, and re-asking is
+// one request against playing the wrong match's video.
+let reelUrls = {};
+let reelHls = null;
+let reelVideo = null;
+let reelLoadedJob = null;
+let reelPreviewError = '';
+
+// How far a nudge moves an edge. Milliseconds, because that is what a cut is
+// stored in; 1s to find the moment, 100ms to land on it.
+const NUDGE_MS = [1000, 100];
+
+/** Turn what is picked into a reel, and open it. */
+async function buildReel() {
+  if (!state.pick.length) return;
+  const cuts = state.pick.map((p) => ({
+    job_id: p.jobId,
+    moment_id: p.momentId,
+    // Present only for a moment trimmed in the player; the server falls back
+    // to the record's own points when they are absent.
+    ...(p.startSec == null ? {} : { start_sec: p.startSec, end_sec: p.endSec }),
+  }));
+  try {
+    const out = await api('/api/reels', {
+      method: 'POST',
+      body: JSON.stringify({ title: defaultReelTitle(), cuts }),
+    });
+    state.reel = out.reel;
+    // The basket has become the reel; leaving it full would have the next
+    // Build reel silently make a second copy of the same one.
+    state.pick = [];
+    persistPick();
+    openReelEditor();
+    render();
+  } catch (err) {
+    say(humanError(err, 'reel.buildFailed'));
+  }
+}
+
+/**
+ * Put the moment being watched into the reel, at the range on screen.
+ *
+ * The trim travels with it. Everywhere else a pick carries only the moment and
+ * the server resolves its own in and out points; from here the editor has just
+ * dragged them, and throwing that away would make the trim on this screen
+ * decorative.
+ */
+function pickFromPlayer() {
+  const p = state.playing;
+  if (!p?.moment) return;
+  const jobId = p.moment.jobId || state.jobId || '';
+  state.pick = togglePicked(state.pick, {
+    jobId,
+    momentId: p.moment.momentId,
+    label: p.moment.label || p.moment.momentType || '',
+    summary: p.moment.summary || '',
+    startSec: p.start,
+    endSec: p.end,
+  });
+  persistPick();
+  renderDetailsBody();
+  render();
+}
+
+/** Add what has just been picked to the reel already open, and go back to it. */
+async function appendToReel() {
+  if (!state.reel || !state.pick.length) return;
+  const cuts = [
+    ...state.reel.cuts.map((c) => ({
+      job_id: c.jobId, moment_id: c.momentId,
+      start_sec: c.startMs / 1000, end_sec: c.endMs / 1000,
+    })),
+    ...state.pick.map((p) => ({
+      job_id: p.jobId,
+      moment_id: p.momentId,
+      ...(p.startSec == null ? {} : { start_sec: p.startSec, end_sec: p.endSec }),
+    })),
+  ];
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}`, {
+      method: 'PATCH', body: JSON.stringify({ cuts }),
+    });
+    state.reel = out.reel;
+    state.pick = [];
+    persistPick();
+    openReelEditor();
+    render();
+  } catch (err) {
+    say(humanError(err, 'reel.saveFailed'));
+  }
+}
+
+/** A name from what the cuts are of, not "Untitled reel". */
+function defaultReelTitle() {
+  const games = new Set(state.pick.map((p) => p.jobId));
+  if (games.size === 1) {
+    const g = state.games.find((x) => (x.jobId || x.id) === [...games][0]);
+    const name = (g && gameHeadline(g)) || state.job?.title || '';
+    if (name) return `${name} — ${t('reel.highlights')}`.slice(0, 100);
+  }
+  return t('reel.highlights');
+}
+
+function openReelEditor() {
+  $('reel').classList.remove('hidden');
+  renderReelEditor();
+  mountReelPlayer();
+}
+
+function closeReelEditor() {
+  $('reel').classList.add('hidden');
+  if (reelHls) { reelHls.destroy(); reelHls = null; }
+  reelVideo = null;
+  reelLoadedJob = null;
+  reelPreviewError = '';
+  reelUrls = {};
+  state.reel = null;
+  state.reelPlay = null;
+  state.reelPublish = null;
+  state.reelCrop = null;
+  $('reel-player').innerHTML = '';
+  render();
+}
+
+/**
+ * The editor, drawn into its own regions.
+ *
+ * Same contract as renderDetailsBody: the player's own container is never
+ * rewritten, because re-parenting a playing video is how a preview loses its
+ * place on every keystroke.
+ */
+function renderReelEditor() {
+  const reel = state.reel;
+  if (!reel) return;
+  $('reel-title').textContent = reel.title || t('reel.untitled');
+  $('reel-actions').innerHTML = reelActions(reel);
+  $('reel-cuts').innerHTML = state.reelPublish?.open
+    ? reelPublishPanel(reel)
+    : reelCutList(reel);
+  $('reel-under').innerHTML = reelMeta(reel);
+
+  // One class on the dialog, read by everything inside it. Saying it once here
+  // rather than on each control is what keeps a new control from quietly
+  // staying live during a render.
+  const busy = reelBusy();
+  $('reel').dataset.busy = busy;
+  const banner = $('reel-busy');
+  if (banner) {
+    banner.hidden = !busy;
+    banner.innerHTML = busy
+      ? `<span class="reel-busy-spin" aria-hidden="true"></span>
+         <span>${esc(t(`reel.busy.${busy}`))}</span>` : '';
+  }
+}
+
+/**
+ * What the reel is busy doing, or ''.
+ *
+ * One answer, read by every control on the screen. A render is minutes of
+ * someone else's encoder and a publish is an upload; both leave the editor
+ * looking idle while the thing under it is not, and an edit made in that
+ * window either applies to a render that has already been superseded or is
+ * quietly thrown away when the reply lands. So the whole surface goes to
+ * work-in-progress rather than each button deciding for itself.
+ */
+/**
+ * "1 cut" / "3 cuts".
+ *
+ * There is no plural machinery in i18n.js — `{n}` is replaced by hand — so the
+ * singular is its own key. Only this string needs it: "1 selected" reads
+ * correctly, and the match count is only ever shown above one.
+ */
+function cutCount(n) {
+  return t(n === 1 ? 'reel.cutCount.one' : 'reel.cutCount').replace('{n}', String(n));
+}
+
+function reelBusy() {
+  const reel = state.reel;
+  if (!reel) return '';
+  if ((reel.render || {}).status === 'running') return 'render';
+  if (state.reelPublish?.status === 'sending') return 'publish';
+  if (state.reelCrop?.busy) return 'crop';
+  return '';
+}
+
+function reelActions(reel) {
+  const rendered = (reel.render || {}).status || '';
+  const busy = reelBusy();
+  const off = busy ? 'disabled' : '';
+  const ready = rendered === 'ready';
+  const publishing = state.reelPublish?.open;
+  return `
+    <span class="reel-render-state" data-state="${esc(rendered)}">${
+  rendered ? esc(t(`reel.render.${rendered}`) || rendered) : ''}</span>
+    <button class="btn-quiet detail-action" data-reel-add="1" ${off}>${
+  esc(t('reel.addMore'))}</button>
+    <button class="btn-quiet detail-action" data-reel-render="1" ${
+  off || !reel.cuts.length ? 'disabled' : ''}>${
+  esc(ready ? t('reel.rerender') : t('reel.render'))}</button>
+    <button class="btn-primary detail-action" data-reel-publish="1"
+            aria-pressed="${Boolean(publishing)}" ${off || !ready ? 'disabled' : ''}>${
+  esc(t('share.publish'))}</button>`;
+}
+
+function reelMeta(reel) {
+  const matches = matchCount(reel.cuts);
+  const at = state.reelPlay?.at ?? 0;
+  const cut = reel.cuts[at];
+  // One strip, for the cut in hand, rather than fifty down the list: the list
+  // is the running order and the strip is the close work, and a filmstrip on
+  // every row would make neither readable.
+  const strip = cut ? trimStrip({
+    startMs: cut.startMs,
+    endMs: cut.endMs,
+    detectedStartMs: cut.detectedStartMs ?? cut.startMs,
+    detectedEndMs: cut.detectedEndMs ?? cut.endMs,
+    thumb: state.thumbs.urls[cut.momentId],
+    scope: 'cut',
+    index: at,
+  }) : '';
+  return `
+    ${reelPreviewError ? `<div class="error-note">${esc(reelPreviewError)}</div>` : ''}
+    ${strip}
+    <div class="reel-meta">
+      <label class="field-label" for="reel-name">${esc(t('reel.name'))}</label>
+      <input class="input" id="reel-name" maxlength="100" data-reel-field="title"
+             value="${esc(reel.title || '')}" />
+      <div class="reel-meta-facts">
+        <span>${esc(cutCount(reel.cuts.length))}</span>
+        <span class="reel-len">${esc(msClock(reelLength(reel.cuts)))}</span>
+        ${matches > 1 ? `<span>${esc(t('reel.fromMatches').replace('{n}', String(matches)))}</span>` : ''}
+      </div>
+    </div>
+    ${cropPanel(reel)}`;
+}
+
+/**
+ * The reels on the desk, and the way back into one.
+ *
+ * Until this existed a reel was durable and unreachable: it persisted in
+ * Firestore, the agent could list it, and the editor could be opened only by
+ * building a new one. A reel made yesterday could not be found from the app at
+ * all, which made every other thing about it — the render, the shapes, the
+ * copy — worth much less than it looked.
+ */
+function reelsCard(msg, index) {
+  const asked = String(msg.reelQuery || '').trim();
+  const all = state.reels || [];
+  // Named in the question, or all of them. The same idea as the rides board:
+  // the question narrows what is shown, and the head says when it has.
+  const named = asked ? all.filter((r) => reelNamedIn(asked, r)) : [];
+  const rows = named.length ? named : all;
+  if (!rows.length) return emptyCard(t('reels.none'));
+
+  const view = pageOf(rows, msg.page, 6);
+  return `
+    <div class="list">
+      <div class="list-head">
+        <div class="panel-head-title">${esc(t('reels.title'))}</div>
+        <div class="panel-head-meta">
+          ${named.length && named.length !== all.length
+    ? `<span class="list-count">${named.length} ${esc(t('pager.of'))} ${all.length}</span>
+       <button class="link-btn" data-reels-all="${index}">${esc(t('list.showAll'))}</button>`
+    : `<span class="list-count">${all.length}</span>`}
+        </div>
+      </div>
+      <div class="tile-row">${view.slice.map(reelTile).join('')}</div>
+      ${pagerRow(view, index)}
+    </div>`;
+}
+
+/** Whether a question names this reel. Whole words, never half a title. */
+function reelNamedIn(asked, reel) {
+  const norm = (x) => ` ${String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const title = norm(reel.title);
+  // One word is not a name: "Highlights" is the default title for a reel that
+  // spans several events, and would otherwise answer every question.
+  return title.trim().split(' ').length > 1 && norm(asked).includes(title.trim());
+}
+
+/**
+ * A reel as a card, in the same shape as a moment.
+ *
+ * A reel is a video, and a row of text is a filename. It uses the tile the
+ * moments use — same grid, same frame, same play button, same footer of two
+ * facts — because they are the same kind of object on this desk: a thing you
+ * watch and then do something with.
+ *
+ * What differs is the frame. A moment has one still; a reel is several
+ * moments, so it shows the first three side by side. That reads as a reel at a
+ * glance without a label saying so, and it costs nothing: the stills are the
+ * cuts' own, requested by the same batching that fills the moment tiles.
+ */
+function reelTile(reel) {
+  const cuts = reel.cuts || [];
+  const render = reel.render || {};
+  const shapes = Object.keys(reel.crops || {}).sort();
+  const published = (reel.publish || {}).url;
+  const matches = (reel.jobIds || []).length;
+
+  const meta = [
+    cutCount(cuts.length),
+    matches > 1 ? t('reel.fromMatches').replace('{n}', String(matches)) : '',
+  ].filter(Boolean).join(' \u00b7 ');
+
+  return `
+    <div class="tile reel-tile">
+      <button class="thumb" data-reel-open="${esc(reel.reelId)}"
+              title="${esc(t('reels.open'))}"
+              aria-label="${esc(`${t('reels.open')}: ${reel.title || t('reel.untitled')}`)}">
+        <span class="reel-strip" aria-hidden="true">
+          ${cuts.slice(0, 3).map((c) => {
+    const url = state.thumbs.urls[c.momentId];
+    return `<span class="reel-strip-cell"${url ? '' : ` data-thumb="${esc(c.momentId)}"${
+      c.jobId ? ` data-thumb-job="${esc(c.jobId)}"` : ''}`}>${
+      url ? `<img src="${esc(url)}" alt="" loading="lazy">` : '<span class="thumb-stripes"></span>'
+    }</span>`;
+  }).join('') || '<span class="reel-strip-cell"><span class="thumb-stripes"></span></span>'}
+        </span>
+        ${published ? `<span class="tile-beta" aria-hidden="true"><span>${
+    esc(t('reels.published'))}</span></span>` : ''}
+        <span class="thumb-play" aria-hidden="true"></span>
+        <span class="thumb-clock">${esc(shortClock((reel.durationMs || 0) / 1000))}</span>
+      </button>
+      <div class="tile-name">${esc(reel.title || t('reel.untitled'))}</div>
+      <div class="tile-meta">${esc(meta)}</div>
+      <dl class="tile-facts">
+        <div class="tile-fact">
+          <dt>${esc(t('reels.state'))}</dt>
+          <dd class="tile-kind" data-state="${esc(render.status || 'none')}">${
+  esc(render.status ? (t(`reel.render.${render.status}`) || render.status) : t('reels.draft'))}</dd>
+        </div>
+        <div class="tile-fact">
+          <dt>${esc(t('reels.shapes'))}</dt>
+          <dd class="reel-tile-shapes">${shapes.length
+    ? shapes.map((a) => `<span class="crop-chip">${esc(a)}</span>`).join('')
+    : '<span class="reel-tile-none">16:9</span>'}</dd>
+        </div>
+      </dl>
+    </div>`;
+}
+
+/** Open a reel that already exists, by id. */
+async function openSavedReel(reelId) {
+  try {
+    const out = await api(`/api/reels/${reelId}`);
+    state.reel = out.reel;
+    state.reelPlay = null;
+    state.reelPublish = null;
+    state.reelCrop = null;
+    openReelEditor();
+    render();
+  } catch (err) {
+    say(humanError(err, 'reels.openFailed'));
+  }
+}
+
+
+/**
+ * Cutting the reel to another shape.
+ *
+ * The render is 16:9 and every shape a feed wants is narrower, so a crop is a
+ * window of the width — and the window is draggable, because in sport the play
+ * is rarely in the middle of the arena and a centre crop of a wide shot frames
+ * an empty half as often as the action.
+ *
+ * The guide is drawn from the same arithmetic the encoder uses, in
+ * `reels.js`. Two copies of that sum that disagreed would be a preview that
+ * lies about its own output, which is worse than no preview.
+ */
+function cropPanel(reel) {
+  const render = reel.render || {};
+  const ready = render.status === 'ready';
+  const chosen = state.reelCrop?.aspect || '9:16';
+  const focus = state.reelCrop?.focusX ?? 0.5;
+  const fill = state.reelCrop?.fill || 'crop';
+  const band = cropBand(chosen, focus);
+  const done = reel.crops || {};
+  const busy = state.reelCrop?.busy;
+  const off = reelBusy() ? 'disabled' : '';
+
+  return `
+    <div class="crop-card">
+      <div class="trim-card-head">
+        <span class="panel-label">${esc(t('crop.title'))}</span>
+        <span class="segmented" role="group" aria-label="${esc(t('crop.title'))}">
+          ${Object.keys(CROP_ASPECTS).map((a) => `
+            <button class="seg-btn" data-crop-aspect="${a}" ${off} aria-pressed="${a === chosen}">${
+  esc(a)}${done[a] ? ' ✓' : ''}</button>`).join('')}
+        </span>
+      </div>
+
+      <div class="crop-source" data-crop-source>
+        <span class="crop-frame" aria-hidden="true"></span>
+        ${band ? `<span class="crop-guide" style="left:${band.left * 100}%;width:${
+  band.width * 100}%"><span class="crop-tag">${esc(chosen)}</span></span>` : ''}
+      </div>
+      <div class="crop-hint">${esc(ready ? t('crop.drag') : t('crop.needsRender'))}</div>
+
+      <div class="crop-actions">
+        <span class="segmented" role="group" aria-label="${esc(t('crop.fill'))}">
+          ${['crop', 'blur'].map((f) => `
+            <button class="seg-btn" data-crop-fill="${f}" ${off} aria-pressed="${f === fill}">${
+  esc(t(`crop.fill.${f}`))}</button>`).join('')}
+        </span>
+        <button class="btn-primary btn-step" data-crop-go="1" ${ready && !reelBusy() ? '' : 'disabled'}>${
+  esc(busy ? t('crop.cutting') : t('crop.cut').replace('{a}', chosen))}</button>
+      </div>
+      ${Object.keys(done).length ? `<div class="crop-done">${
+    Object.keys(done).sort().map((a) => `<span class="crop-chip">${esc(a)}</span>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+/**
+ * Publishing the rendered reel.
+ *
+ * The same panel as a moment's, in the same order, with the same fields and
+ * the same three inert platform notes — it is one action on two things, and an
+ * editor who has published a moment should not meet a second form. What it
+ * does not have is a trim: a reel's range is its cuts, which are edited on the
+ * other side of this dialog, and the file being uploaded is the render.
+ */
+function reelPublishPanel(reel) {
+  const pub = state.reelPublish || {};
+  const status = pub.status || 'idle';
+  const done = reel.publish || {};
+
+  return `
+    <div class="publish-panel">
+      <div class="panel-label">${esc(t('reel.publishTitle'))}</div>
+
+      <div class="reel-publish-what">
+        <span class="k">${esc(t('reel.publishing'))}</span>
+        <b>${esc(msClock(reelLength(reel.cuts)))}</b>
+        <span class="k">${esc(cutCount(reel.cuts.length))}</span>
+      </div>
+
+      <div class="reel-copy-row">
+        <button class="btn-quiet btn-step" data-reel-copy="1" ${
+  pub.writing ? 'disabled' : ''}>${esc(pub.writing ? t('copy.writing') : t('copy.write'))}</button>
+        ${pub.copySource === 'generated' ? `<span class="reel-copy-note">${
+    esc(t('copy.generated'))}</span>` : ''}
+        ${pub.copySource === 'composed' ? `<span class="reel-copy-note">${
+    esc(t('copy.composed'))}</span>` : ''}
+      </div>
+
+      <label class="field-label" for="reel-share-title">${esc(t('share.videoTitle'))}</label>
+      <input class="input" id="reel-share-title" maxlength="100" data-reel-share="title"
+             value="${esc(pub.title || '')}" />
+      <div class="setting-hint">${esc(t('share.titleHint'))}</div>
+
+      <label class="field-label" for="reel-share-description">${esc(t('share.description'))}</label>
+      <textarea class="input share-text" id="reel-share-description" rows="5"
+                data-reel-share="description">${esc(pub.description || '')}</textarea>
+
+      <label class="field-label" for="reel-share-tags">${esc(t('share.keywords'))}</label>
+      <input class="input" id="reel-share-tags" data-reel-share="tags"
+             placeholder="${esc(t('share.keywordsHint'))}"
+             value="${esc(tagLine(pub.tags))}" />
+
+      <label class="field-label" for="reel-share-hashtags">${esc(t('share.hashtags'))}</label>
+      <input class="input" id="reel-share-hashtags" data-reel-share="hashtags"
+             value="${esc(hashLine(pub.hashtags))}" />
+      ${hashList(pub.hashtags).length ? `<div class="hashtag-row">${
+    hashList(pub.hashtags).map((h) => `<span class="hashtag-chip">#${esc(h)}</span>`).join('')}</div>` : ''}
+
+      <label class="field-label" for="reel-share-privacy">${esc(t('share.privacy'))}</label>
+      <select class="input" id="reel-share-privacy" data-reel-share="privacy">
+        ${['private', 'unlisted', 'public'].map((v) => `
+          <option value="${v}" ${(pub.privacy || 'private') === v ? 'selected' : ''}>${
+  esc(t(`share.privacy.${v}`))}</option>`).join('')}
+      </select>
+
+      <div class="platform-row">
+        <button class="btn-primary" data-reel-publish-to="youtube" ${
+  status === 'sending' ? 'disabled' : ''}>${
+  esc(status === 'sending' ? t('share.sending') : t('share.toYouTube'))}</button>
+        <span class="platform-soon">${esc(t('share.instagramSoon'))}</span>
+        <span class="platform-soon">${esc(t('share.tiktokSoon'))}</span>
+      </div>
+
+      ${status === 'error' ? `<div class="share-error">${esc(pub.error || '')}</div>` : ''}
+      ${done.url ? `<div class="share-done">${esc(t('share.published'))}
+        <a class="share-link" href="${esc(done.url)}" target="_blank"
+           rel="noopener noreferrer">${esc(done.url)}</a></div>` : ''}
+    </div>`;
+}
+
+/** The cuts, in the order they will play. */
+function reelCutList(reel) {
+  if (!reel.cuts.length) {
+    return `<div class="ride-group-empty">${esc(t('reel.noCuts'))}</div>`;
+  }
+  return `
+    <div class="reel-cuts-head">
+      <span class="panel-label">${esc(t('reel.order'))}</span>
+      <span class="reel-cuts-total">${esc(msClock(reelLength(reel.cuts)))}</span>
+    </div>
+    ${reel.cuts.map((c, i) => reelCutRow(c, i, reel.cuts.length)).join('')}`;
+}
+
+function reelCutRow(cut, i, total) {
+  const playing = state.reelPlay?.at === i;
+  const off = reelBusy() ? 'disabled' : '';
+  return `
+    <div class="reel-cut" aria-current="${playing}">
+      <div class="reel-cut-top">
+        <button class="reel-cut-play" data-reel-play="${i}"
+                title="${esc(t('reel.playCut'))}" aria-label="${esc(t('reel.playCut'))}">
+          <span aria-hidden="true"></span>
+        </button>
+        <span class="reel-cut-name">${esc(cut.label || cut.momentId)}</span>
+        <span class="reel-cut-len">${esc(msClock(cut.endMs - cut.startMs))}</span>
+      </div>
+      <div class="reel-cut-edges">
+        <span class="reel-edge">
+          <span class="reel-edge-label">${esc(t('reel.start'))}</span>
+          <span class="reel-edge-at">${esc(msClock(cut.startMs))}</span>
+        </span>
+        <span class="reel-edge">
+          <span class="reel-edge-label">${esc(t('reel.end'))}</span>
+          <span class="reel-edge-at">${esc(msClock(cut.endMs))}</span>
+        </span>
+        ${isTrimmed(cut) ? `<span class="reel-edge-trimmed">${esc(t('trim.trimmed'))}</span>` : ''}
+      </div>
+      <div class="reel-cut-move">
+        <button class="btn-ghost btn-step" data-reel-move="${i}:-1" ${i === 0 || off ? 'disabled' : ''}
+                aria-label="${esc(t('reel.moveUp'))}">&uarr;</button>
+        <button class="btn-ghost btn-step" data-reel-move="${i}:1"
+                ${i === total - 1 || off ? 'disabled' : ''}
+                aria-label="${esc(t('reel.moveDown'))}">&darr;</button>
+        <button class="btn-ghost btn-step" data-reel-drop="${i}" ${off}>${
+  esc(t('reel.remove'))}</button>
+      </div>
+    </div>`;
+}
+
+/* ── Editing the cuts ─────────────────────────────────────────────────────
+   Every change is written straight through to the API, which re-plans each
+   cut against the moment it names. The browser's copy is what came back, so
+   a trim the server clamped shows as clamped rather than as what was asked
+   for — the alternative is a field that disagrees with the thing it edits. */
+
+async function saveReelCuts(cuts) {
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        cuts: cuts.map((c) => ({
+          job_id: c.jobId,
+          moment_id: c.momentId,
+          start_sec: c.startMs / 1000,
+          end_sec: c.endMs / 1000,
+        })),
+      }),
+    });
+    state.reel = out.reel;
+  } catch (err) {
+    say(humanError(err, 'reel.saveFailed'));
+  }
+  renderReelEditor();
+}
+
+async function saveReelTitle(title) {
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: title.slice(0, 100) }),
+    });
+    state.reel = out.reel;
+  } catch (err) {
+    say(humanError(err, 'reel.saveFailed'));
+  }
+  renderReelEditor();
+}
+
+function reelTrim(i, edge, dir) {
+  const cuts = state.reel.cuts.map((c) => ({ ...c }));
+  const cut = cuts[i];
+  if (!cut) return;
+  cuts[i] = nudge(cut, edge, (state.reelPlay?.step ?? NUDGE_MS[0]) * dir);
+  saveReelCuts(cuts);
+}
+
+/** Put one cut back to the range the analysis found. */
+function reelResetCut(i) {
+  const cuts = state.reel.cuts.map((c) => ({ ...c }));
+  const cut = cuts[i];
+  if (!cut || cut.detectedStartMs == null) return;
+  cuts[i] = { ...cut, startMs: cut.detectedStartMs, endMs: cut.detectedEndMs };
+  saveReelCuts(cuts);
+}
+
+function reelMove(i, by) {
+  const cuts = moveCut(state.reel.cuts, i, by);
+  if (cuts !== state.reel.cuts) saveReelCuts(cuts);
+}
+
+function reelDrop(i) {
+  const cuts = state.reel.cuts.filter((_, n) => n !== i);
+  saveReelCuts(cuts);
+}
+
+/* ── Previewing ───────────────────────────────────────────────────────────
+   No render is needed to watch a reel: the cuts are ranges of matches that
+   are already streaming, so the preview seeks between them on one video.
+   Cuts from one match run on without a break; crossing to another costs a
+   manifest load, which is visible and is meant to be — pretending otherwise
+   would make a stall look like a stutter in the footage. */
+
+async function reelPlaybackUrl(jobId) {
+  if (reelUrls[jobId]) return reelUrls[jobId];
+  const p = await api(`/api/jobs/${jobId}/playback`);
+  reelUrls[jobId] = p.hls_url;
+  return reelUrls[jobId];
+}
+
+function mountReelPlayer() {
+  const slot = $('reel-player');
+  if (!slot) return;
+  slot.innerHTML = `
+    <div class="inline-player">
+      <div class="player-frame">
+        <video playsinline preload="none"></video>
+      </div>
+      <div class="player-controls">
+        <button class="btn-primary player-play" data-reel-pc="play">${esc(t('player.play'))}</button>
+        <button class="pc" data-reel-pc="prev">&#8592;</button>
+        <button class="pc" data-reel-pc="next">&#8594;</button>
+        <span class="player-time" data-reel-time>0:00.000</span>
+      </div>
+    </div>`;
+  reelVideo = slot.querySelector('video');
+  reelVideo.addEventListener('timeupdate', onReelTick);
+  reelVideo.addEventListener('click', () => reelControl('play'));
+}
+
+function onReelTick() {
+  const play = state.reelPlay;
+  const cut = state.reel?.cuts?.[play?.at ?? -1];
+  if (!play || !cut || !reelVideo) return;
+  const el = $('reel-cuts')?.querySelector('[data-reel-time]');
+  const clock = $('reel-player')?.querySelector('[data-reel-time]');
+  if (clock) clock.textContent = msClock(reelVideo.currentTime * 1000 - cut.startMs);
+  if (el) el.textContent = '';
+  if (pastEnd(cut, reelVideo.currentTime)) {
+    const next = nextCut(state.reel.cuts, play.at);
+    if (next === null) { reelVideo.pause(); play.playing = false; } else playReelCut(next);
+  }
+}
+
+async function playReelCut(i) {
+  const cut = state.reel?.cuts?.[i];
+  if (!cut || !reelVideo) return;
+  reelPreviewError = '';
+  state.reelPlay = { ...(state.reelPlay || {}), at: i, playing: true };
+  renderReelEditor();
+  try {
+    if (reelLoadedJob !== cut.jobId) {
+      const url = await reelPlaybackUrl(cut.jobId);
+      if (reelHls) { reelHls.destroy(); reelHls = null; }
+      if (window.Hls?.isSupported()) {
+        reelHls = new window.Hls({ enableWorker: true });
+        reelHls.loadSource(url);
+        reelHls.attachMedia(reelVideo);
+        await new Promise((done) => reelHls.on(window.Hls.Events.MANIFEST_PARSED, done));
+      } else {
+        reelVideo.src = url;
+        await new Promise((done) => reelVideo.addEventListener('loadedmetadata', done, { once: true }));
+      }
+      reelLoadedJob = cut.jobId;
+    }
+    reelVideo.currentTime = cut.startMs / 1000;
+    await reelVideo.play();
+  } catch (err) {
+    // Held in state and rendered by reelMeta, never written straight into
+    // #reel-under: that region also holds the trim strip and the reel's name,
+    // and a preview that failed is no reason to take the editing controls away.
+    reelPreviewError = humanError(err, 'reel.previewFailed');
+    renderReelEditor();
+  }
+}
+
+function reelControl(kind) {
+  const play = state.reelPlay || { at: 0 };
+  if (kind === 'play') {
+    if (reelVideo && !reelVideo.paused) { reelVideo.pause(); return; }
+    playReelCut(play.at ?? 0);
+    return;
+  }
+  if (kind === 'prev') playReelCut(Math.max(0, (play.at ?? 0) - 1));
+  if (kind === 'next') playReelCut(Math.min(state.reel.cuts.length - 1, (play.at ?? 0) + 1));
+}
+
+/** Cut the rendered reel to the chosen shape. */
+async function cutReelShape() {
+  const c = state.reelCrop || {};
+  const aspect = c.aspect || '9:16';
+  state.reelCrop = { ...c, busy: true };
+  renderReelEditor();
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/crop`, {
+      method: 'POST',
+      body: JSON.stringify({ aspect, fill: c.fill || 'crop', focus_x: c.focusX ?? 0.5 }),
+    });
+    state.reel = out.reel || state.reel;
+  } catch (err) {
+    say(humanError(err, 'crop.failed'));
+  }
+  state.reelCrop = { ...state.reelCrop, busy: false };
+  renderReelEditor();
+}
+
+/* ── Publishing ───────────────────────────────────────────────────────── */
+
+/** The copy a reel arrives with: what it is, and what is in it. */
+function reelShareDefaults(reel) {
+  const names = (reel.cuts || []).map((c) => c.label).filter(Boolean);
+  const seen = [...new Set(names)].slice(0, 4);
+  return {
+    title: (reel.title || t('reel.untitled')).slice(0, 100),
+    // What is actually in it, in the order it plays. Not a claim about how
+    // good it is: nothing here has watched it.
+    description: [
+      seen.length ? `${t('reel.contains')}: ${seen.join(', ')}.` : '',
+      cutCount((reel.cuts || []).length),
+    ].filter(Boolean).join('\n\n'),
+    privacy: state.youtube?.privacy || 'private',
+  };
+}
+
+/** Ask the desk to write the copy, and put it in the fields for review. */
+async function writeReelCopy() {
+  if (!state.reel || !state.reelPublish) return;
+  state.reelPublish = { ...state.reelPublish, writing: true };
+  renderReelEditor();
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/copy`, { method: 'POST' });
+    state.reelPublish = {
+      ...state.reelPublish,
+      writing: false,
+      title: out.title || state.reelPublish.title,
+      description: out.description || '',
+      tags: out.tags || [],
+      hashtags: out.hashtags || [],
+      // Said on screen, because a composed description and a written one read
+      // differently and only one of them is worth editing before it goes out.
+      copySource: out.generated ? 'generated' : 'composed',
+    };
+  } catch (err) {
+    state.reelPublish = {
+      ...state.reelPublish, writing: false,
+      status: 'error', error: humanError(err, 'copy.failed'),
+    };
+  }
+  renderReelEditor();
+}
+
+async function publishReelToYouTube() {
+  const pub = state.reelPublish;
+  if (!state.reel || !pub || pub.status === 'sending') return;
+  state.reelPublish = { ...pub, status: 'sending', error: '' };
+  renderReelEditor();
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/publish/youtube`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: pub.title,
+        description: withHashtags(pub.description, pub.hashtags),
+        privacy: pub.privacy,
+        tags: splitTags(pub.tags),
+      }),
+    });
+    state.reel = out.reel || state.reel;
+    state.reelPublish = { ...state.reelPublish, status: 'done', url: out.url };
+  } catch (err) {
+    state.reelPublish = {
+      ...state.reelPublish, status: 'error',
+      error: humanError(err, 'share.publishFailed'),
+    };
+  }
+  renderReelEditor();
+}
+
+/* ── Rendering ────────────────────────────────────────────────────────── */
+
+async function startReelRender() {
+  try {
+    const out = await api(`/api/reels/${state.reel.reelId}/render`, { method: 'POST' });
+    state.reel = { ...state.reel, render: out.render };
+    renderReelEditor();
+    pollReelRender();
+  } catch (err) {
+    say(humanError(err, 'reel.renderFailed'));
+  }
+}
+
+/** Ask how the encode is doing until it settles. */
+async function pollReelRender() {
+  if (!state.reel) return;
+  const id = state.reel.reelId;
+  try {
+    const out = await api(`/api/reels/${id}/render`);
+    if (!state.reel || state.reel.reelId !== id) return;
+    state.reel = { ...state.reel, render: out.render };
+    renderReelEditor();
+    if (out.render?.status === 'running') setTimeout(pollReelRender, 5000);
+  } catch {
+    // A poll that could not be made is not news about the encode; try again.
+    setTimeout(pollReelRender, 10000);
+  }
+}
+
+
 /* ──────────────────────────────────────────────────────────── agent ── */
 
 async function ensureSession() {
@@ -4871,6 +6022,12 @@ function attachCards(index, question) {
     msg.searchResults = null;
   } else if (card === 'activity') {
     msg.showActivity = true;
+  } else if (card === 'reels') {
+    // Which reels exist, narrowed by any name the question carries. Nothing
+    // is selected and no listener is re-pointed: a reel is not a match, and
+    // asking about one should not change what the desk is showing.
+    msg.showReels = true;
+    msg.reelQuery = question;
   } else if (card === 'rides') {
     // The rides of one event, narrowed by the rider, horse or score bar the
     // question names. Which event: the one that ran the named rider — the
@@ -5401,6 +6558,15 @@ document.addEventListener('click', (event) => {
     + '[data-edit-live],[data-cancel-edit-live],'
     + '[data-youtube-act],'
     + '[data-ride-tab],[data-type-menu],[data-type-pick],[data-progress],'
+    + '[data-pick],[data-pick-clear],[data-reel-build],[data-reel-append],'
+    // Dragged rather than clicked, but it is a <button> and the check
+    // rightly wants to know something handles it.
+    + '[data-trim-grab],[data-reel-trim-reset],'
+    + '[data-crop-aspect],[data-crop-fill],[data-crop-go],'
+    + '[data-reel-publish],[data-reel-publish-to],[data-reel-copy],'
+    + '[data-reel-open],[data-reels-all],'
+    + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
+    + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
     + '[data-job-events],[data-resplit],[data-resplit-go],[data-resplit-cancel]');
 
   // An open moment-type menu closes on any click outside its own filter. Its
@@ -5431,6 +6597,7 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (hit.dataset.detailAct) {
+    if (hit.dataset.detailAct === 'reel') { pickFromPlayer(); return; }
     if (hit.dataset.detailAct === 'download') downloadMoment();
     // A second press closes the panel again: the button reads as a toggle
     // because it is pressed, and a toggle that only opens is a trap.
@@ -5544,6 +6711,90 @@ document.addEventListener('click', (event) => {
     render();
     return;
   }
+  if (hit.dataset.pick) {
+    // The key carries the match as well as the moment: ids are unique within a
+    // job, and a reel may hold cuts from several.
+    const raw = hit.dataset.pick;
+    const at = raw.indexOf('|');
+    togglePick(raw.slice(0, at), raw.slice(at + 1));
+    render();
+    return;
+  }
+  if (hit.dataset.pickClear) {
+    state.pick = [];
+    persistPick();
+    render();
+    return;
+  }
+  if (hit.dataset.reelBuild) {
+    buildReel();
+    return;
+  }
+  if (hit.dataset.reelAppend) {
+    appendToReel();
+    return;
+  }
+  if (hit.dataset.cropAspect) {
+    state.reelCrop = { ...(state.reelCrop || {}), aspect: hit.dataset.cropAspect };
+    renderReelEditor();
+    return;
+  }
+  if (hit.dataset.cropFill) {
+    state.reelCrop = { ...(state.reelCrop || {}), fill: hit.dataset.cropFill };
+    renderReelEditor();
+    return;
+  }
+  if (hit.dataset.reelOpen) { openSavedReel(hit.dataset.reelOpen); return; }
+  if (hit.dataset.reelsAll) {
+    const msg = state.msgs[Number(hit.dataset.reelsAll)];
+    if (msg) { msg.reelQuery = ''; msg.page = 0; render(); }
+    return;
+  }
+  if (hit.dataset.reelPublish) {
+    // A second press closes it again: the button is pressed, and a toggle
+    // that only opens is a trap. Same rule as the moment's Publish.
+    state.reelPublish = state.reelPublish?.open
+      ? { ...state.reelPublish, open: false }
+      : { ...reelShareDefaults(state.reel), open: true, status: 'idle' };
+    renderReelEditor();
+    // Written as the panel opens rather than behind a button nobody presses.
+    // It is one call, it is only a suggestion, and the alternative is an
+    // editor typing a description the desk could have offered.
+    if (state.reelPublish.open && !state.reelPublish.copySource) writeReelCopy();
+    return;
+  }
+  if (hit.dataset.reelPublishTo) { publishReelToYouTube(); return; }
+  if (hit.dataset.reelCopy) { writeReelCopy(); return; }
+  if (hit.dataset.cropGo) { cutReelShape(); return; }
+  if (hit.dataset.reelPc) { reelControl(hit.dataset.reelPc); return; }
+  if (hit.dataset.reelRender !== undefined) { startReelRender(); return; }
+  if (hit.dataset.reelAdd !== undefined) {
+    // Back to the desk with the reel still open behind: picking more is done
+    // where the moments are, not in a second browser inside the editor.
+    $('reel').classList.add('hidden');
+    return;
+  }
+  if (hit.dataset.reelStep) {
+    state.reelPlay = { ...(state.reelPlay || {}), step: Number(hit.dataset.reelStep) };
+    renderReelEditor();
+    return;
+  }
+  if (hit.dataset.reelPlay !== undefined) { playReelCut(Number(hit.dataset.reelPlay)); return; }
+  if (hit.dataset.reelTrim) {
+    const [i, edge, dir] = hit.dataset.reelTrim.split(':');
+    reelTrim(Number(i), edge, Number(dir));
+    return;
+  }
+  if (hit.dataset.reelTrimReset !== undefined) {
+    reelResetCut(Number(hit.dataset.reelTrimReset));
+    return;
+  }
+  if (hit.dataset.reelMove) {
+    const [i, by] = hit.dataset.reelMove.split(':');
+    reelMove(Number(i), Number(by));
+    return;
+  }
+  if (hit.dataset.reelDrop !== undefined) { reelDrop(Number(hit.dataset.reelDrop)); return; }
   if (hit.dataset.typePick) {
     const [index, key] = hit.dataset.typePick.split(':');
     const msg = state.msgs[Number(index)];
@@ -5697,6 +6948,18 @@ document.addEventListener('input', (event) => {
     if (state.share) state.share[el.dataset.shareField] = el.value;
     return;
   }
+  // The reel's name, for the same reason: the editor is redrawn on every
+  // trim, and a redraw under the caret would take the caret with it. It is
+  // written through on blur rather than per keystroke — one PATCH a name,
+  // not one a letter.
+  if (el.matches('[data-reel-field]')) {
+    if (state.reel) state.reel[el.dataset.reelField] = el.value;
+    return;
+  }
+  if (el.matches('[data-reel-share]')) {
+    if (state.reelPublish) state.reelPublish[el.dataset.reelShare] = el.value;
+    return;
+  }
   if (el.matches('[data-youtube-field]')) {
     state.youtubeForm = { ...(state.youtubeForm || {}), [el.dataset.youtubeField]: el.value };
     return;
@@ -5766,6 +7029,15 @@ document.addEventListener('change', (event) => {
     if (state.share) state.share[event.target.dataset.shareField] = event.target.value;
     return;
   }
+  // A name is written through when the field is left, not on every letter.
+  if (event.target.matches?.('[data-reel-field]') && state.reel) {
+    saveReelTitle(event.target.value);
+    return;
+  }
+  if (event.target.matches?.('[data-reel-share]') && state.reelPublish) {
+    state.reelPublish[event.target.dataset.reelShare] = event.target.value;
+    return;
+  }
   if (event.target.id !== 'file-input') return;
   const f = event.target.files?.[0];
   if (!f) return;
@@ -5809,6 +7081,15 @@ document.addEventListener('click', (event) => {
 $('open-settings')?.addEventListener('click', openSettings);
 $('close-settings')?.addEventListener('click', closeSettings);
 $('close-details')?.addEventListener('click', closeDetails);
+$('close-reel')?.addEventListener('click', closeReelEditor);
+// Bound on the popup, not on the handles: the panel is redrawn on every
+// pointer move, so a listener on a handle would be removed out from under
+// the gesture that started it.
+$('details')?.addEventListener('pointerdown', onTrimPointerDown);
+$('reel')?.addEventListener('pointerdown', onTrimPointerDown);
+$('reel')?.addEventListener('click', (event) => {
+  if (event.target.id === 'reel') closeReelEditor();
+});
 // Clicking the backdrop closes; clicking the card must not.
 $('details')?.addEventListener('click', (event) => {
   if (event.target.id === 'details') closeDetails();

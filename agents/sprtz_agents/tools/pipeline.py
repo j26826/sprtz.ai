@@ -2276,6 +2276,187 @@ def _brief_moments(moments: list[dict], limit: int) -> list[dict]:
     return out
 
 
+CROP_ASPECTS = ("9:16", "4:5", "1:1")
+
+
+async def list_reels(limit: int = 20) -> dict:
+    """The reels on the desk, most recently worked on first.
+
+    Args:
+        limit: How many to return.
+    """
+    found = await mcp_client.call_tool("catalog", "list_reels", {"limit": limit})
+    reels = found.get("reels") or []
+    # Cut down for a model's context the way list_rides is: a reel's fifty cuts
+    # are not what is being asked about when someone asks which reels exist.
+    return {"reels": [{
+        "reel_id": r.get("reelId"),
+        "title": r.get("title"),
+        "cuts": r.get("cutCount"),
+        "duration_ms": r.get("durationMs"),
+        "matches": len(r.get("jobIds") or []),
+        "render": (r.get("render") or {}).get("status") or "none",
+        "shapes": sorted((r.get("crops") or {}).keys()),
+    } for r in reels]}
+
+
+async def find_reels(query: str, limit: int = 5) -> dict:
+    """Find a reel the editor named, by comparing the name rather than its meaning.
+
+    A name is what a vector search is worst at, and a reel's name is usually a
+    match's name with a word on the end, so its embedding would sit on top of
+    the event it was cut from. Use this when the editor names one; use
+    `list_reels` when they ask what exists.
+
+    Args:
+        query: The editor's words, which may contain a reel's name.
+        limit: How many to return.
+    """
+    found = await mcp_client.call_tool("catalog", "find_reels",
+                                       {"query": query, "limit": limit})
+    return {"reels": [{
+        "reel_id": r.get("reelId"),
+        "title": r.get("title"),
+        "cuts": r.get("cutCount"),
+        "duration_ms": r.get("durationMs"),
+        "render": (r.get("render") or {}).get("status") or "none",
+        "shapes": sorted((r.get("crops") or {}).keys()),
+        "published": bool((r.get("publish") or {}).get("url")),
+    } for r in (found.get("reels") or [])]}
+
+
+async def write_reel_copy(reel_id: str) -> dict:
+    """Write the copy a reel would go out with: title, description, keywords, hashtags.
+
+    Returns it rather than saving it. The editor reads it before anything is
+    published, and overwriting a description they had already written would be
+    the worst possible moment to be helpful.
+
+    Args:
+        reel_id: Reel to write copy for.
+    """
+    found = await mcp_client.call_tool("catalog", "write_reel_copy", {"reel_id": reel_id})
+    if found.get("status") != "success":
+        return {"status": "error", "reel_id": reel_id,
+                "error": found.get("error") or "The copy could not be written."}
+    return {k: v for k, v in found.items() if k != "status"}
+
+
+async def publish_reel(reel_id: str, title: str = "", description: str = "",
+                       privacy: str = "private") -> dict:
+    """Upload a reel that has already been rendered to the YouTube channel.
+
+    **This cannot be undone and it posts under the desk's own channel**, so
+    confirm with the editor before calling it unless they have already said
+    plainly that they want it published — the same rule `delete_job` follows,
+    for the same reason.
+
+    It publishes a reel that already exists. It does not choose what goes in
+    one and it does not render one: if the reel has not been rendered, say so
+    rather than rendering it, because what would go out is then something
+    nobody has watched.
+
+    Leave `privacy` at "private" unless the editor has said otherwise in as
+    many words. Public is not a default and is not yours to choose.
+
+    Args:
+        reel_id: The reel to publish. It must already be rendered.
+        title: What to call it on the channel. Empty uses the reel's own name.
+        description: The copy. Empty uses what `write_reel_copy` composes.
+        privacy: "private", "unlisted" or "public".
+    """
+    if privacy not in ("private", "unlisted", "public"):
+        return {"status": "error", "reel_id": reel_id,
+                "error": 'Choose "private", "unlisted" or "public".'}
+
+    found = await mcp_client.call_tool("catalog", "get_reel", {"reel_id": reel_id})
+    reel = found.get("reel") or {}
+    if not reel:
+        return {"status": "error", "reel_id": reel_id, "error": f"No reel {reel_id}."}
+
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        return {"status": "error", "reel_id": reel_id,
+                "error": "That reel has not been rendered yet, so there is nothing "
+                         "to upload. Rendering it is the editor's to ask for."}
+
+    copy: dict[str, Any] = {}
+    if not title or not description:
+        written = await mcp_client.call_tool(
+            "catalog", "write_reel_copy", {"reel_id": reel_id})
+        if written.get("status") == "success":
+            copy = written
+
+    result = await mcp_client.call_tool("media", "publish_youtube", {
+        "clip_uri": render["reelUri"],
+        "title": (title or copy.get("title") or reel.get("title") or "Highlights")[:100],
+        "description": description or copy.get("description") or "",
+        "privacy": privacy,
+        "tags": (copy.get("tags") or [])[:15],
+    })
+    if result.get("status") != "success":
+        # The reason travels: a revoked refresh token or a channel over quota
+        # is the editor's to act on, not something to flatten.
+        return {"status": "error", "reel_id": reel_id,
+                "error": result.get("error") or "YouTube would not accept the upload."}
+
+    publish = {"status": "done", "videoId": result.get("video_id", ""),
+               "url": result.get("url", ""), "privacy": result.get("privacy", privacy),
+               "error": ""}
+    await mcp_client.call_tool("catalog", "set_reel_publish",
+                               {"reel_id": reel_id, "publish": publish})
+    return {"status": "success", "reel_id": reel_id, **publish}
+
+
+async def reframe_reel(reel_id: str, aspect: str, focus_x: float = 0.5,
+                       fill: str = "crop") -> dict:
+    """Cut an existing reel to another shape: 9:16, 4:5 or 1:1.
+
+    For a reel that has already been rendered — the other shapes are cut from
+    that render, so there has to be one. This does not choose what goes in a
+    reel and does not publish it; it makes a rendered reel a shape a phone feed
+    wants.
+
+    Args:
+        reel_id: The reel to cut. It must already be rendered.
+        aspect: "9:16" for a Short, "4:5" for a feed post, "1:1" for a square.
+        focus_x: Where the middle of the crop sits across the picture, 0 at the
+            left edge and 1 at the right. Sport is why this exists — the action
+            is rarely in the middle of an arena. Leave it at 0.5 unless the
+            editor has said which side the play is on.
+        fill: "crop" fills the frame and loses the sides; "blur" keeps the
+            whole picture over a blurred copy of itself and loses nothing.
+    """
+    if aspect not in CROP_ASPECTS:
+        return {"status": "error", "reel_id": reel_id,
+                "error": f"Choose one of {', '.join(CROP_ASPECTS)}."}
+
+    found = await mcp_client.call_tool("catalog", "get_reel", {"reel_id": reel_id})
+    reel = found.get("reel") or {}
+    if not reel:
+        return {"status": "error", "reel_id": reel_id, "error": f"No reel {reel_id}."}
+
+    render = reel.get("render") or {}
+    if render.get("status") != "ready" or not render.get("reelUri"):
+        return {"status": "error", "reel_id": reel_id,
+                "error": "That reel has not been rendered yet, and the other "
+                         "shapes are cut from the render."}
+
+    result = await mcp_client.call_tool("media", "reframe_reel", {
+        "reel_uri": render["reelUri"], "reel_id": reel_id,
+        "aspect": aspect, "fill": fill, "focus_x": focus_x,
+    })
+    if result.get("status") != "success":
+        return {"status": "error", "reel_id": reel_id,
+                "error": result.get("error") or "The reframe did not succeed."}
+
+    crop = {"uri": result.get("reel_uri", ""), "fill": fill,
+            "focusX": focus_x, "bytes": result.get("bytes", 0)}
+    await mcp_client.call_tool("catalog", "set_reel_crop",
+                               {"reel_id": reel_id, "aspect": aspect, "crop": crop})
+    return {"status": "success", "reel_id": reel_id, "aspect": aspect, **crop}
+
+
 async def get_event(job_id: str, riders: str = "", max_moments_per_ride: int = 5) -> dict:
     """Return an event as event → rides → moments: every ride (a rider on one
     horse) in running order, with the moments that happened while they were in

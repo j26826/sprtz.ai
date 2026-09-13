@@ -916,6 +916,55 @@ def set_reel_render(reel_id: str, render: dict) -> dict:
 
 
 @mcp.tool
+def write_reel_copy(reel_id: str, generate: bool = True) -> dict:
+    """The copy a reel goes out with: title, description, keywords, hashtags.
+
+    Facts are composed from the records and only the description and hashtags
+    are written by a model, over a digest of observations. Falls back to
+    composed copy if the model is unavailable.
+
+    Args:
+        reel_id: Reel to write copy for.
+        generate: False to compose without calling a model at all.
+    """
+    try:
+        return {"status": "success", **store.write_reel_copy(reel_id, generate)}
+    except KeyError as exc:
+        return {"status": "error", "error": str(exc), "reel_id": reel_id}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id)
+
+
+@mcp.tool
+def find_reels(query: str, limit: int = 5) -> dict:
+    """Find reels a question names, by comparing the name rather than its meaning.
+
+    Args:
+        query: The editor's words, which may contain a reel's name.
+        limit: How many to return.
+    """
+    try:
+        return {"status": "success", "reels": store.match_reels_by_title(query, limit)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc)
+
+
+@mcp.tool
+def set_reel_crop(reel_id: str, aspect: str, crop: dict) -> dict:
+    """Record one cut shape against a reel.
+
+    Args:
+        reel_id: Reel the shape was cut from.
+        aspect: "9:16", "4:5" or "1:1".
+        crop: Where the file is and how it was framed.
+    """
+    try:
+        return {"status": "success", "reel": store.set_reel_crop(reel_id, aspect, crop)}
+    except Exception as exc:  # noqa: BLE001
+        return _fail(exc, reel_id=reel_id, aspect=aspect)
+
+
+@mcp.tool
 def set_reel_publish(reel_id: str, publish: dict) -> dict:
     """Record a reel's publish attempt and its outcome.
 

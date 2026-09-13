@@ -261,3 +261,34 @@ describe('every locale, against the desk\'s own words', () => {
     assert.equal(chooseCard('zeig mir die Aktivitaet'), 'activity');
   });
 });
+
+describe('finding a reel that was already made', () => {
+  it('a question naming a reel is about the reel', () => {
+    // Before this route existed it answered with a moments list, and the
+    // agent's own reply was hidden — a card that claims the answer suppresses
+    // the prose beside it.
+    assert.equal(chooseCard('show me my reels'), 'reels');
+    assert.equal(chooseCard('open the highlights reel'), 'reels');
+    assert.equal(chooseCard('what reels have I made'), 'reels');
+  });
+
+  it('beats rides, which would otherwise catch the rider in the name', () => {
+    assert.equal(chooseCard('the reel for Gareth Hughes'), 'reels');
+  });
+
+  it('does not steal a question about cutting a new one', () => {
+    // Building a reel is done by picking moments on screen, so this is still
+    // a moments question.
+    assert.equal(chooseCard('cut all of these into clips'), 'moments');
+  });
+
+  it('does not steal ingesting', () => {
+    assert.equal(chooseCard('upload a new reel of the match'), 'ingest');
+  });
+
+  it('leaves ordinary ride and moment questions alone', () => {
+    assert.equal(chooseCard('show me all rides'), 'rides');
+    assert.equal(chooseCard('show all moments'), 'moments');
+    assert.equal(chooseCard('show me all events'), 'games');
+  });
+});

@@ -1695,7 +1695,30 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
   border-radius: var(--radius-sm);
   margin-top: 10px;
 }
-.share-done { font-size: 12px; margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+/* "Published." and the link it produced, on one line and on one baseline.
+   They were a flex row with the default stretch, so the link — which was
+   wearing .link-btn, a *button* style at 11px/700 with its own padding — sat
+   a few pixels low against 12px body text and read as a second kind of thing.
+   A URL the channel gave back is a reading, so it takes the mono and the
+   accent, and it is allowed to break rather than push the row wide. */
+.share-done {
+  font-size: 12px;
+  margin-top: 10px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.share-link {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-accent-700);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.share-link:hover { color: var(--color-accent-900); }
 
 /* ── The channel, in Settings ─────────────────────────────────────────────── */
 
@@ -2864,3 +2887,732 @@ body:not([data-auth-resolved]) .shell { visibility: hidden; }
 
 /* The ride pane's own play, with the round's length set beside the label. */
 .play-ride { gap: 7px; }
+
+
+/* ── Picking moments, and the reel they become ────────────────────────────
+   The pick control is a sibling of the frame rather than a child: the frame
+   is a button and a button cannot hold another one. It sits opposite the
+   early-preview mark, over the corner of the picture where nothing is ever
+   the subject. */
+.tile-pick {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  /* The same two literals the play button on this same frame uses, and for
+     the same reason: a thumbnail is dark under either theme, so a control on
+     it takes the video's ground rather than the page's. The first version
+     used --color-neutral-500 here, which is a theme grey over a photograph —
+     it read as a smudge on the picture rather than as a control. */
+  background: rgba(0, 0, 0, 0.45);
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+/* A drawn tick, not a filled box. It is invisible until the tile is hovered
+   or picked: an empty box on every tile is a page of empty boxes, and the
+   ring alone is enough to say "there is something to press here". */
+.tile-pick > span {
+  width: 9px;
+  height: 5px;
+  margin-top: -2px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tile:hover .tile-pick > span,
+.tile-pick:focus-visible > span { opacity: 0.55; }
+.tile-pick[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.tile-pick[aria-pressed="true"] > span {
+  opacity: 1;
+  /* Ink on amber, never white. */
+  border-color: var(--color-on-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-pick, .tile-pick > span { transition: none; }
+}
+.tile[aria-current="true"] { border-color: var(--color-accent); }
+
+/* The bar under the tiles. Present at zero, because a control that appears
+   only once you have guessed the gesture that summons it is a control nobody
+   finds — but quiet until there is something to act on. */
+.reel-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--rule-hair) solid var(--color-rule);
+}
+.reel-bar-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-neutral-700);
+}
+/* The Build button beside it is already the amber on this bar; a second one
+   two words away is amber competing with itself. */
+.reel-bar[data-picked="true"] .reel-bar-count {
+  color: var(--color-text);
+  font-weight: 500;
+}
+.reel-bar-actions { display: flex; gap: var(--space-2); margin-left: auto; }
+
+/* ── The editor ───────────────────────────────────────────────────────────
+   The whole viewport, like the moment player: a reel is judged by watching it,
+   and every pixel given back to the page behind is a pixel off the picture. */
+/* The same arrangement #details uses, and for the same reason: the backdrop
+   margin is pixels taken off the picture. The padding has to be cleared on the
+   modal itself, not just the card — the card cannot fill a box that is inset. */
+#reel { padding: 0; align-items: stretch; }
+
+.modal-card-full {
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+.reel-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  /* Both the split and each column, or a grid child refuses to shrink below
+     its content and the dialog quietly grows past the viewport. */
+  min-height: 0;
+}
+.reel-stage, .reel-cuts { min-height: 0; overflow-y: auto; }
+.reel-cuts { border-left: var(--rule-hair) solid var(--color-rule); padding: var(--space-3); }
+/* The trim strip, the reel's name and the shape panel all sit in here, and
+   all of them were flush against the window edge: this padding named
+   --space-5, which the scale does not have (3, 5, 8, 13, 21, 34 are
+   --space-1,2,3,4,6,8), and one invalid value voids the whole declaration. */
+.reel-under { padding: var(--space-4) var(--space-6) var(--space-6); }
+
+.reel-meta { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.reel-meta-facts {
+  display: flex;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-neutral-700);
+}
+.reel-len { color: var(--color-neutral-800); }
+
+.reel-cuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+/* One cut: what it is, where it starts and ends, and where it sits in the
+   order. The three rows are deliberate — a cut is read, then trimmed, then
+   moved, and putting all of it on one line made none of it findable. */
+.reel-cut {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+  background: var(--color-neutral-200);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-md);
+}
+.reel-cut[aria-current="true"] { border-left-color: var(--color-accent); }
+.reel-cut-top { display: flex; align-items: center; gap: var(--space-2); }
+.reel-cut-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A timecode is a model-produced reading, so it is set in the mono. */
+.reel-cut-len, .reel-edge-at {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-700);
+}
+.reel-cut-play {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.reel-cut-play:hover { border-color: var(--color-accent); }
+.reel-cut-play > span {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-left: 7px solid var(--color-text);
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+}
+.reel-cut-edges { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.reel-edge { display: inline-flex; align-items: center; gap: 4px; }
+.reel-edge-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.reel-cut-move { display: flex; gap: var(--space-2); }
+.reel-cut-move .btn-step { min-width: 0; }
+
+.reel-render-state {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+  margin-right: var(--space-2);
+}
+/* Ready is the one state worth the accent here: it is the difference between
+   a reel you can cut shapes from and one you cannot. */
+.reel-render-state[data-state="ready"] { color: var(--color-accent-700); }
+
+@media (max-width: 900px) {
+  .reel-split { grid-template-columns: 1fr; }
+  .reel-cuts { border-left: 0; border-top: var(--rule-hair) solid var(--color-rule); }
+}
+
+
+/* ── Trimming a moment, before it goes in a reel ──────────────────────────
+   A filmstrip of the moment's own window with the chosen range drawn on it.
+   Every value here is a token: the strip is one of the few places on the desk
+   where amber is load-bearing rather than decorative — the selection and its
+   two handles are the control — so nothing else in the panel takes it. */
+.trim-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 var(--space-4);
+}
+.trim-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.trim-hint { font-size: 11.5px; color: var(--color-neutral-600); }
+
+.trim-strip {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  /* A container that rounds also clips, or the selection's square corners
+     draw over the corner they are meant to sit inside. */
+  overflow: hidden;
+  background: var(--color-neutral-900);
+  touch-action: none;   /* the handles are dragged, not scrolled */
+}
+.trim-frame {
+  flex: 1;
+  min-width: 0;
+  background-color: var(--color-neutral-800);
+  background-size: cover;
+  background-position: center;
+  /* The strip is one frame repeated, not nine real ones — the stills are cut
+     at the peak and there is only ever the one. Dimming alternate frames is
+     what makes it read as a strip of film rather than as a smear. */
+  opacity: 0.85;
+}
+.trim-frame:nth-child(odd) { opacity: 0.7; }
+
+.trim-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: var(--rule) solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.trim-handle {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 14px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: var(--color-accent);
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+.trim-handle-in { left: -7px; }
+.trim-handle-out { right: -7px; }
+.trim-handle .grip {
+  width: 2px;
+  height: 16px;
+  /* Ink on amber, never white. */
+  background: var(--color-on-accent);
+  box-shadow: 3px 0 var(--color-on-accent), -3px 0 var(--color-on-accent);
+}
+.trim-handle:focus-visible { outline: 2px solid var(--color-accent-700); outline-offset: 1px; }
+
+/* Timecodes are a reading, so they are set in the mono. */
+.trim-ruler {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-600);
+}
+
+/* The two edges first, then what they add up to, then the way back. On one
+   row while it fits and stacked when it does not — the readings are the point
+   and a wrapped timecode reads as two numbers. */
+.trim-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+}
+.trim-edge-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-200);
+}
+.trim-at {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  min-width: 68px;
+  text-align: center;
+}
+/* The two readings as a pair, label over value, so the numbers line up under
+   each other and can be compared at a glance — which is the whole reason both
+   are shown. They were on one line at different widths, so they could not be.
+   Both values take the same colour: they are the same kind of reading, and
+   colouring one of them amber said "changed" in a second, quieter voice than
+   the Reset link and the row's own mark already say it. */
+.trim-ranges {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 0 var(--space-4);
+  white-space: nowrap;
+}
+.trim-ranges > span { display: grid; gap: 2px; }
+.trim-ranges .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.trim-ranges b {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}
+.trim-reset { margin-left: auto; }
+
+/* The strip's head carries the nudge step, since that is the fine end of the
+   same control the handles are the coarse end of. */
+.trim-card-head-right { display: inline-flex; align-items: center; gap: var(--space-3); }
+/* A reading, not an action: the mono says it is measured, and the colour is
+   the same as every other measured thing on the panel. */
+.reel-cuts-total {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}
+/* A row says it was trimmed; the strip above says by how much. */
+.reel-edge-trimmed {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
+/* ── Cutting the reel to another shape ────────────────────────────────────
+   The guide is the mockup's idea — the target's window drawn on the source
+   frame with its aspect tagged — with one change: it slides. A centre crop of
+   a wide arena shot frames an empty half as often as the play. */
+.crop-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) 0 var(--space-3);
+  border-top: var(--rule-hair) solid var(--color-rule);
+  margin-top: var(--space-3);
+}
+.crop-source {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-width: 320px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  /* The video's own ground, which does not follow the page: a frame is a
+     picture and a picture sits on black under either theme. */
+  background: var(--color-neutral-900);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.crop-frame {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(90deg,
+      transparent 0 22px,
+      color-mix(in srgb, var(--color-neutral-700) 40%, transparent) 22px 23px);
+}
+.crop-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: var(--rule) solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  box-sizing: border-box;
+}
+.crop-tag {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-accent);
+  /* Ink on amber, never white. */
+  color: var(--color-on-accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.crop-hint { font-size: 11px; color: var(--color-neutral-600); }
+.crop-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.crop-actions .btn-step { margin-left: auto; }
+.crop-done { display: flex; gap: var(--space-2); }
+.crop-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-neutral-700);
+}
+
+/* ── While the reel is busy ───────────────────────────────────────────────
+   A render is minutes of someone else's encoder and a publish is an upload.
+   Both leave the editor looking idle while the thing under it is not, and an
+   edit made in that window either applies to a render already superseded or
+   is thrown away when the reply lands. So the surface says so, in a band that
+   cannot be missed, and everything it would be pointless to press goes flat. */
+.reel-busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-accent-100);
+  border-bottom: var(--rule-hair) solid var(--color-accent-300);
+  font-size: 12px;
+  color: var(--color-accent-900);
+}
+.reel-busy-spin {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-accent-300);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: loading-spin 700ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .reel-busy-spin { animation: none; } }
+
+/* Disabled is the state that carries this, so it needs to read as disabled
+   rather than merely as unclickable — the default 0.4 on a seg-btn or a
+   link-btn is too easy to mistake for "quiet". */
+#reel[data-busy]:not([data-busy=""]) .seg-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .link-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-ghost:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-quiet:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-primary:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+/* The two dragged controls have no disabled attribute to carry it, so the
+   whole panel is dimmed and made inert instead. */
+#reel[data-busy]:not([data-busy=""]) .trim-strip,
+#reel[data-busy]:not([data-busy=""]) .crop-source {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* What is going up, above the fields, in the same voice as the trim readings. */
+.reel-publish-what {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.reel-publish-what .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.reel-publish-what b {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}
+
+/* ── The reels on the desk ────────────────────────────────────────────────
+   A reel uses the moments' own tile: same grid, same frame, same play button,
+   same footer of two facts. They are the same kind of object here — a thing
+   you watch and then do something with — and a second card shape for the
+   second one would say they are not.
+
+   The frame is the one difference. A moment has one still and a reel is
+   several moments, so it shows the first three side by side: that reads as a
+   reel without a label saying so. */
+.reel-strip {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 1px;
+}
+.reel-strip-cell {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--color-neutral-900);
+}
+.reel-strip-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* The strip is one picture cut in three, not three pictures: dimming the
+   outer cells lets the first cut read as the subject. */
+.reel-strip-cell:not(:first-child) { opacity: 0.75; }
+
+.reel-tile .thumb { position: relative; }
+.reel-tile-shapes { display: flex; flex-wrap: wrap; gap: 4px; }
+.reel-tile-none {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-neutral-600);
+}
+/* Ready is the one state worth the accent: it is the difference between a
+   reel you can cut shapes from or publish, and one you cannot. */
+.reel-tile .tile-kind[data-state="ready"] { color: var(--color-accent-700); }
+
+/* ── Cutting the reel to another shape ────────────────────────────────────
+   The guide is the mockup's idea — the target's window drawn on the source
+   frame with its aspect tagged — with one change: it slides. A centre crop of
+   a wide arena shot frames an empty half as often as the play. */
+.crop-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) 0 var(--space-3);
+  border-top: var(--rule-hair) solid var(--color-rule);
+  margin-top: var(--space-3);
+}
+.crop-source {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-width: 320px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  /* The video's own ground, which does not follow the page: a frame is a
+     picture and a picture sits on black under either theme. */
+  background: var(--color-neutral-900);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.crop-frame {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(90deg,
+      transparent 0 22px,
+      color-mix(in srgb, var(--color-neutral-700) 40%, transparent) 22px 23px);
+}
+.crop-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: var(--rule) solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  box-sizing: border-box;
+}
+.crop-tag {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-accent);
+  /* Ink on amber, never white. */
+  color: var(--color-on-accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.crop-hint { font-size: 11px; color: var(--color-neutral-600); }
+.crop-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.crop-actions .btn-step { margin-left: auto; }
+.crop-done { display: flex; gap: var(--space-2); }
+.crop-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-neutral-700);
+}
+
+/* ── While the reel is busy ───────────────────────────────────────────────
+   A render is minutes of someone else's encoder and a publish is an upload.
+   Both leave the editor looking idle while the thing under it is not, and an
+   edit made in that window either applies to a render already superseded or
+   is thrown away when the reply lands. So the surface says so, in a band that
+   cannot be missed, and everything it would be pointless to press goes flat. */
+.reel-busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-accent-100);
+  border-bottom: var(--rule-hair) solid var(--color-accent-300);
+  font-size: 12px;
+  color: var(--color-accent-900);
+}
+.reel-busy-spin {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-accent-300);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: loading-spin 700ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .reel-busy-spin { animation: none; } }
+
+/* Disabled is the state that carries this, so it needs to read as disabled
+   rather than merely as unclickable — the default 0.4 on a seg-btn or a
+   link-btn is too easy to mistake for "quiet". */
+#reel[data-busy]:not([data-busy=""]) .seg-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .link-btn:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-ghost:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-quiet:disabled,
+#reel[data-busy]:not([data-busy=""]) .btn-primary:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+/* The two dragged controls have no disabled attribute to carry it, so the
+   whole panel is dimmed and made inert instead. */
+#reel[data-busy]:not([data-busy=""]) .trim-strip,
+#reel[data-busy]:not([data-busy=""]) .crop-source {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* What is going up, above the fields, in the same voice as the trim readings. */
+.reel-publish-what {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.reel-publish-what .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+.reel-publish-what b {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-800);
+}
+
+/* ── The copy a reel goes out with ────────────────────────────────────────
+   Written as the panel opens, and said to be written: a composed description
+   and a model's read differently, and only one of them is worth editing
+   before it leaves the desk. */
+.reel-copy-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.reel-copy-note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-neutral-600);
+}
+/* Hashtags echoed back under the field they were typed in. The field is the
+   truth; these are there so a run-together line can be checked at a glance. */
+.hashtag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.hashtag-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  color: var(--color-neutral-700);
+}
