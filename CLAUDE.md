@@ -104,15 +104,37 @@ against the live project. Treat a merge as a deploy.
   which is what ADK's own documentation prescribes; grounding reads
   `settings.model_location` for the same reason.
 
-  **3.8 is being tried on its own evidence.** 3.6 Flash ran the analysis for a
-  day and its moments were judged less accurate on the equestrian footage, so
-  the analysis went back to 2.5 at the time. If 3.8's moments come back worse
-  too, `analysis_model` goes back to `gemini-2.5-flash` — with
-  `analysis_location` back to the engine's region in the same edit, because 2.5
-  is served there and 3.8 is not. **3.8 is a thinking model**, and a tight
-  `max_output_tokens` is spent on thinking before any answer: a 16-token cap
-  returns empty text with `thoughtsTokenCount` set, which reads as a parse
-  failure and is a budget one.
+  **The analysis stays on 2.5 Flash, in `us-central1`, and that is now twice
+  that a newer Flash generation has been tried here and put back.** 3.8 was
+  measured against two chunks of the 10 September LeMieux recording, through
+  the analysis's own prompt, schema and config:
+
+  | | moments | parsed |
+  |---|---|---|
+  | 2.5 Flash | 22 | yes (24 are on record for that window) |
+  | 3.8 Flash | 2-4 across four runs | one of three at budget 8192 did not |
+
+  A fifth of the recall, and an intermittent hard failure: the `venue` string
+  repeated — `"Somerford Park Farm; Somerford Park Farm; …"` — for 96,179
+  characters until `MAX_TOKENS`, so the JSON never closed and that window would
+  have found nothing. **`response_json_schema` was already in use for that
+  call.** It cured this degeneration for 3.6 and does not cure it for 3.8, so
+  the rule below is necessary and is not sufficient — the shape of the failure
+  outlives the fix for it.
+
+  Two things make that expensive rather than merely wrong. A chunk whose
+  analysis cannot be parsed is put back to `captured` and retried up to three
+  times, so a failing window costs three full analyses and still yields
+  nothing. And the run that failed spent 27,748 output tokens doing it.
+
+  **3.8 is a thinking model.** A tight `max_output_tokens` is spent on thinking
+  before any answer: a 16-token cap returns empty text with
+  `thoughtsTokenCount` set, which reads as a parse failure and is a budget one.
+  The budget is a cap rather than a target — on the analysis prompt, 2048 and 0
+  both produced no thinking at all, while 8192 produced thousands of tokens and
+  every degeneration seen. Where thinking was reduced it was *more* reliable
+  here, not less, which is the opposite of what `analysis.py`'s own comment
+  predicts and is worth re-measuring before that comment is trusted again.
 
   **The embeddings do not move**: `gemini-embedding-001` (768-dim) in
   `us-central1`. The width must equal the Firestore vector index dimension
