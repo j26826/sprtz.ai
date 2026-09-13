@@ -1,0 +1,589 @@
+{
+ "4b0e98e0cdb4403b": [
+  {
+   "end_sec": 7683.12,
+   "horse": "Kickback",
+   "order": "15",
+   "rider": "Alexander Harrison-West",
+   "scoreboard": "(570) Alexander Harriso... Kickback Total -45.00",
+   "start_sec": 7242.12,
+   "test_type": "straight",
+   "total_pct": 68.174
+  },
+  {
+   "end_sec": 8114.12,
+   "horse": "Woodcroft Royal Charter",
+   "order": "16",
+   "rider": "Anne-Marie Cowan",
+   "scoreboard": "Anne-Marie Cowan Woodcroft Royal Charter",
+   "start_sec": 7724.12,
+   "test_type": "straight",
+   "total_pct": 63.978
+  },
+  {
+   "end_sec": 8742.12,
+   "horse": "Farrell",
+   "order": "17",
+   "rider": "Ruby Hughes",
+   "scoreboard": "(124) Ruby Hughes Farrell\nE 70.109 (1) H 69.239 (1) C 69.891 (1) M 69.239 (1) B 69.457 (1)\nTotal 69.587 % (1) -45.00",
+   "start_sec": 8251.12,
+   "test_type": "straight",
+   "total_pct": 69.587
+  },
+  {
+   "end_sec": 9148.12,
+   "horse": "Houston V",
+   "order": "18",
+   "rider": "Daniel Bremner",
+   "scoreboard": "Daniel Bremner Houston V",
+   "start_sec": 8744.12,
+   "test_type": "straight",
+   "total_pct": 64.891
+  },
+  {
+   "end_sec": 9755.12,
+   "horse": "Donna Bella",
+   "order": "19",
+   "rider": "Fiona Bigwood",
+   "scoreboard": "E H C M B Total -45.00",
+   "start_sec": 9265.12,
+   "test_type": "straight",
+   "total_pct": 70
+  },
+  {
+   "end_sec": 295,
+   "horse": "Times Orwell",
+   "order": "1",
+   "rider": "Lisa Marriott",
+   "scoreboard": "Lisa Marriott Times Orwell",
+   "start_sec": 0,
+   "test_type": "straight",
+   "total_pct": 66.8
+  },
+  {
+   "end_sec": 1102,
+   "horse": "Donatus HC",
+   "order": "2",
+   "rider": "Rowan Collins",
+   "scoreboard": "Rowan Collins\nDonatus HC",
+   "start_sec": 540,
+   "test_type": "straight",
+   "total_pct": 72.05
+  },
+  {
+   "end_sec": 1405,
+   "horse": "Top Secret VII",
+   "order": "3",
+   "rider": "Beth Bainbridge",
+   "scoreboard": "Beth Bainbridge Top Secret VII",
+   "start_sec": 1102,
+   "test_type": "straight",
+   "total_pct": 68.684
+  },
+  {
+   "end_sec": 1509,
+   "horse": "Top Secret VII",
+   "order": "4",
+   "rider": "Beth Bainbridge",
+   "scoreboard": "E 76.200 (3) C 61.167 (4) Total 68.684 (4) Beth Bainbridge Top Secret VII",
+   "start_sec": 1500,
+   "test_type": "straight",
+   "total_pct": 68.684
+  },
+  {
+   "end_sec": 1889,
+   "horse": "OO Heaven",
+   "order": "5",
+   "rider": "Ruth Hole",
+   "scoreboard": "Ruth Hole OO Heaven",
+   "start_sec": 1549,
+   "test_type": "straight",
+   "total_pct": 74.9
+  },
+  {
+   "end_sec": 2400,
+   "horse": "Quality Always Wins MFS",
+   "order": "6",
+   "rider": "Jack Morris",
+   "scoreboard": "",
+   "start_sec": 2133,
+   "test_type": "straight",
+   "total_pct": 73.434
+  },
+  {
+   "end_sec": 2700,
+   "horse": "",
+   "order": "7",
+   "rider": "",
+   "scoreboard": "",
+   "start_sec": 2470,
+   "test_type": ""
+  },
+  {
+   "end_sec": 3040,
+   "horse": "OO Heaven",
+   "order": "8",
+   "rider": "Ruth Hole",
+   "scoreboard": "201 Ruth Hole OO Heaven E: 80.000 (2) C: 69.800 (2) Total 74.900% (2)",
+   "start_sec": 3035,
+   "test_type": "straight",
+   "total_pct": 74.9
+  },
+  {
+   "end_sec": 3425,
+   "horse": "Veto",
+   "order": "9",
+   "rider": "Tom Goode",
+   "scoreboard": "Tom Goode Veto",
+   "start_sec": 3044,
+   "test_type": "straight",
+   "total_pct": 70.867
+  },
+  {
+   "end_sec": 3939,
+   "horse": "River Rise Onassis",
+   "order": "10",
+   "rider": "Sadie Smith",
+   "scoreboard": "(430) Sadie Smith River Rise Onassis Total",
+   "start_sec": 3460,
+   "test_type": "straight",
+   "total_pct": 81.167
+  },
+  {
+   "end_sec": 4275,
+   "horse": "Freya VII",
+   "order": "11",
+   "rider": "Dannie Morgan",
+   "scoreboard": "(119) Dannie Morgan Freya VII",
+   "start_sec": 4015,
+   "test_type": "straight",
+   "total_pct": 74.617
+  },
+  {
+   "end_sec": 4884,
+   "horse": "Quality Always Wins MFS",
+   "order": "12",
+   "rider": "Jack Morris",
+   "scoreboard": "Jack Morris Quality Always Wins MFS",
+   "start_sec": 4456,
+   "test_type": "straight",
+   "total_pct": 73.434
+  },
+  {
+   "end_sec": 5207,
+   "horse": "First Dance T",
+   "order": "13",
+   "rider": "Greg Sims",
+   "scoreboard": "Greg Sims First Dance T",
+   "start_sec": 4929,
+   "test_type": "straight",
+   "total_pct": 67.317
+  },
+  {
+   "end_sec": 7242.12,
+   "horse": "I'm Bayford Hall Incognito",
+   "order": "14",
+   "rider": "Daniel Sherriff",
+   "scoreboard": "(135) Daniel Sherriff\nI'm Bayford Hall In...\nTotal",
+   "start_sec": 6776.2,
+   "test_type": "straight",
+   "total_pct": 66.95
+  },
+  {
+   "end_sec": 10246.12,
+   "horse": "Full Moon II",
+   "order": "20",
+   "rider": "Laura Tomlinson",
+   "scoreboard": "(348) Laura Tomlinson Full Moon II E H C M B Total -44.2",
+   "start_sec": 9755.12,
+   "test_type": "straight",
+   "total_pct": 63.5
+  },
+  {
+   "end_sec": 10705.12,
+   "horse": "Tramontana Tiger Feet",
+   "order": "21",
+   "rider": "Darren Hicks",
+   "scoreboard": "606 Darren Hicks Tramontana Tiger...",
+   "start_sec": 10263.12,
+   "test_type": "straight",
+   "total_pct": 64.804
+  },
+  {
+   "end_sec": 10818.12,
+   "horse": "Waverley Fellini",
+   "order": "22",
+   "rider": "Greg Sims",
+   "scoreboard": "Greg Sims Waverley Fellini",
+   "start_sec": 10801.12,
+   "test_type": "straight"
+  },
+  {
+   "end_sec": 11307.6,
+   "horse": "",
+   "order": "23",
+   "rider": "",
+   "scoreboard": "",
+   "start_sec": 11112.6,
+   "test_type": "null"
+  },
+  {
+   "end_sec": 12073.96,
+   "horse": "Waverley Fellini",
+   "order": "24",
+   "rider": "Greg Sims",
+   "scoreboard": "(482) Greg Sims Waverley Fellini Total",
+   "start_sec": 11578.24,
+   "test_type": "straight"
+  },
+  {
+   "end_sec": 12485.96,
+   "horse": "Goomong Zinfandel",
+   "order": "25",
+   "rider": "Jonny Clarke-West",
+   "scoreboard": "Jonny Clarke-West Goomong Zinfandel Total -45.00",
+   "start_sec": 12074.96,
+   "test_type": "straight",
+   "total_pct": 45
+  },
+  {
+   "end_sec": 12962.96,
+   "horse": "Full House",
+   "order": "26",
+   "rider": "Olivia Oakeley",
+   "scoreboard": "(614) Olivia Oakeley Full House Total -45.00",
+   "start_sec": 12510.96,
+   "test_type": "straight",
+   "total_pct": 67.326
+  },
+  {
+   "end_sec": 13561.96,
+   "horse": "Dita Von Teese",
+   "order": "27",
+   "rider": "Becky Edwards",
+   "scoreboard": "(213) Becky Edwards Dita Von Teese Total -35.7",
+   "start_sec": 13031.96,
+   "test_type": "straight",
+   "total_pct": 60.739
+  },
+  {
+   "end_sec": 14015.96,
+   "horse": "Furstenrausch PS",
+   "order": "28",
+   "rider": "Tom Goode",
+   "scoreboard": "(602) Tom Goode Furstenrausch PS E 65.543 (7) H 65.000 (5) C 66.413 (5) M 65.000 (5) B 61.739 (10) Total -45.00 Rank 8",
+   "start_sec": 13571.96,
+   "test_type": "straight"
+  },
+  {
+   "end_sec": 14165.96,
+   "horse": "Woodcroft Django Mon Ami",
+   "order": "29",
+   "rider": "Spencer Wilton",
+   "scoreboard": "(554) Spencer Wilton Woodcroft Django... Total -27.8",
+   "start_sec": 14016.96,
+   "test_type": "straight"
+  },
+  {
+   "end_sec": 14481.96,
+   "horse": "Woodcroft Django Mon Ami",
+   "order": "30",
+   "rider": "Spencer Wilton",
+   "scoreboard": "(554) Spencer Wilton Woodcroft Django... E 67.283 (4) H 65.978 (5) C 67.717 (4) M 65.435 (5) B 66.413 (5) Total 66.565 % (5) -45.00 Rank 5",
+   "start_sec": 14406.96,
+   "test_type": "straight",
+   "total_pct": 66.565
+  },
+  {
+   "end_sec": 15650.88,
+   "horse": "Braveheart II",
+   "order": "31",
+   "rider": "Charlotte Dujardin",
+   "scoreboard": "544 Charlotte Dujardin Braveheart II Total",
+   "start_sec": 15098.88,
+   "test_type": "straight",
+   "total_pct": 75.044
+  },
+  {
+   "end_sec": 16084.88,
+   "horse": "Dutch class",
+   "order": "32",
+   "rider": "Kimberley Siddorn",
+   "scoreboard": "(588) Kimberley Siddorn Dutch class Total -45.00",
+   "start_sec": 15651.88,
+   "test_type": "straight",
+   "total_pct": 66.435
+  },
+  {
+   "end_sec": 16602.88,
+   "horse": "Mowgli - Olympia MC",
+   "order": "33",
+   "rider": "Gareth Hughes",
+   "scoreboard": "(125) Gareth Hughes Mowgli - Olympia MC Total: -34.1",
+   "start_sec": 16157.88,
+   "test_type": "null",
+   "total_pct": 70.457
+  },
+  {
+   "end_sec": 17171.88,
+   "horse": "Kerouac",
+   "order": "34",
+   "rider": "Matt Frost",
+   "scoreboard": "Matt FrostKerouac",
+   "start_sec": 16641.88,
+   "test_type": "straight",
+   "total_pct": 63.369
+  },
+  {
+   "end_sec": 17629.88,
+   "horse": "Headmore Bella Ruby",
+   "order": "35",
+   "rider": "Alice Oppenheimer",
+   "scoreboard": "(146) Alice Oppenheimer\nHeadmore Bella R...",
+   "start_sec": 17171.88,
+   "test_type": "straight",
+   "total_pct": 62.609
+  },
+  {
+   "end_sec": 18109.88,
+   "horse": "Forest Hill",
+   "order": "36",
+   "rider": "Laura Tomlinson",
+   "scoreboard": "(349) Laura Tomlinson Forest Hill",
+   "start_sec": 17690.88,
+   "test_type": "straight",
+   "total_pct": 65.522
+  }
+ ],
+ "c1f902bbcd5e484c": [
+  {
+   "end_sec": 333,
+   "horse": "Ventura",
+   "order": "1",
+   "rider": "Alexander Harrison",
+   "scoreboard": "Alexander Harrison\nVentura",
+   "start_sec": 0,
+   "test_type": "straight",
+   "total_pct": 68.412
+  },
+  {
+   "end_sec": 786,
+   "horse": "EDH Nanouk",
+   "order": "2",
+   "rider": "Michael Eilberg",
+   "scoreboard": "E 62.941 (33) H 65.294 (24) C 64.265 (32) M 63.676 (29) B 62.941 (33) Total 63.823 Rank 32",
+   "start_sec": 600,
+   "test_type": "straight",
+   "total_pct": 63.823
+  },
+  {
+   "end_sec": 1244,
+   "horse": "valentinio",
+   "order": "3",
+   "rider": "Jody Haswell",
+   "scoreboard": "null",
+   "start_sec": 805,
+   "test_type": "straight",
+   "total_pct": 62.441
+  },
+  {
+   "end_sec": 1625,
+   "horse": "Sheepcote Just Daisy",
+   "order": "4",
+   "rider": "Bryony Goodwin",
+   "scoreboard": "(223) Bryony Goodwin Sheepcote Just Da... Total -26.7",
+   "start_sec": 1263,
+   "test_type": "straight",
+   "total_pct": 65.912
+  },
+  {
+   "end_sec": 2115,
+   "horse": "Laerke Stensvang",
+   "order": "5",
+   "rider": "Becky Edwards",
+   "scoreboard": "null",
+   "start_sec": 1680,
+   "test_type": "freestyle",
+   "total_pct": 67.588
+  },
+  {
+   "end_sec": 2520,
+   "horse": "SCS Lumiere KH",
+   "order": "6",
+   "rider": "Sue Carson",
+   "scoreboard": "214) Sue Carson\nSCS Lumiere KH\nTotal -45.00",
+   "start_sec": 2115,
+   "test_type": "straight",
+   "total_pct": 64.765
+  },
+  {
+   "end_sec": 3736.72,
+   "horse": "Nulli Secundus 11",
+   "order": "7",
+   "rider": "Olivia Oakeley",
+   "scoreboard": "Olivia Oakeley\nNulli Secundus 11",
+   "start_sec": 3269,
+   "test_type": "straight",
+   "total_pct": 67.69
+  },
+  {
+   "end_sec": 4252.72,
+   "horse": "Hawtins Fiorino",
+   "order": "8",
+   "rider": "Elder Klatzko",
+   "scoreboard": "Elder Klatzko Hawtins Fiorino",
+   "start_sec": 3786.72,
+   "test_type": "freestyle"
+  },
+  {
+   "end_sec": 4567.72,
+   "horse": "Leroy",
+   "order": "9",
+   "rider": "Fiona Brennan",
+   "scoreboard": "Fiona Brennan\nLeroy",
+   "start_sec": 4259.72,
+   "test_type": "freestyle"
+  },
+  {
+   "end_sec": 5001.72,
+   "horse": "Fraithwens Wytske fan ter Lune",
+   "order": "10",
+   "rider": "Gracie Catling",
+   "scoreboard": "Gracie Catling Fraithwens Wytske fan ter Lune",
+   "start_sec": 4666.72,
+   "test_type": "freestyle"
+  },
+  {
+   "end_sec": 5431.72,
+   "horse": "Jacko B",
+   "order": "11",
+   "rider": "Ben Martin",
+   "scoreboard": "Ben Martin Jacko B",
+   "start_sec": 5021.72,
+   "test_type": "straight"
+  },
+  {
+   "end_sec": 6610.56,
+   "horse": "Kintyre",
+   "order": "12",
+   "rider": "Fenella Quinn",
+   "scoreboard": "(254) Fenella Quinn Kintyre Total",
+   "start_sec": 6244.56,
+   "test_type": "straight",
+   "total_pct": 66.45
+  },
+  {
+   "end_sec": 7062.56,
+   "horse": "Benefit",
+   "order": "13",
+   "rider": "Davy Harvey",
+   "scoreboard": "Davy Harvey Benefit",
+   "start_sec": 6751.56,
+   "test_type": "freestyle",
+   "total_pct": 68.025
+  },
+  {
+   "end_sec": 7517.56,
+   "horse": "Dexterity",
+   "order": "14",
+   "rider": "Kimberley Alice Siddorn",
+   "scoreboard": "(568) Kimberley Alice Si... Dexterity Total -45.00",
+   "start_sec": 7096.56,
+   "test_type": "straight",
+   "total_pct": 66.925
+  },
+  {
+   "end_sec": 7873.56,
+   "horse": "SCS Lumiere KH",
+   "order": "15",
+   "rider": "Sue Carson",
+   "scoreboard": "(141) Sue Carson\nSCS Lumiere KH\nTotal -43.1",
+   "start_sec": 7517.56,
+   "test_type": "straight",
+   "total_pct": 64.525
+  },
+  {
+   "end_sec": 8412.56,
+   "horse": "La Vida Loca",
+   "order": "16",
+   "rider": "Lucy Palmer",
+   "scoreboard": "(158) Lucy Palmer La Vida Loca",
+   "start_sec": 7901.56,
+   "test_type": "straight"
+  },
+  {
+   "end_sec": 8755.56,
+   "horse": "Fever Tree",
+   "order": "17",
+   "rider": "Dannie Morgan",
+   "scoreboard": "Dannie Morgan / Fever Tree | Total -45.00",
+   "start_sec": 8412.56,
+   "test_type": "freestyle"
+  },
+  {
+   "end_sec": 10243.6,
+   "horse": "Hawtins Lirica",
+   "order": "18",
+   "rider": "Sara-Jane Lanning",
+   "scoreboard": "(325) Sara-Jane Lanning Hawtins Lirica E H C M B Total -44.6",
+   "start_sec": 9771.6,
+   "test_type": "freestyle",
+   "total_pct": 71.8
+  },
+  {
+   "end_sec": 10591.6,
+   "horse": "Lenika",
+   "order": "19",
+   "rider": "Matt Frost",
+   "scoreboard": "Matt Frost Lenika Total -45.00",
+   "start_sec": 10243.6,
+   "test_type": "freestyle"
+  },
+  {
+   "end_sec": 10973.6,
+   "horse": "GF Sezuki",
+   "order": "20",
+   "rider": "Claire Abel",
+   "scoreboard": "Claire Abel GF Sezuki Total -45.00",
+   "start_sec": 10601.6,
+   "test_type": "straight"
+  },
+  {
+   "end_sec": 11428.6,
+   "horse": "Krack DE",
+   "order": "21",
+   "rider": "Bryony Goodwin",
+   "scoreboard": "(526) Bryony Goodwin Krack DE Total -44.4",
+   "start_sec": 11071.6,
+   "test_type": "straight",
+   "total_pct": 70
+  },
+  {
+   "end_sec": 12878.44,
+   "horse": "",
+   "order": "22",
+   "rider": "",
+   "scoreboard": "FAIRFAX SADDLES Prix St Georges Freestyle Gold Champion 2024",
+   "start_sec": 12631.44,
+   "test_type": "freestyle"
+  },
+  {
+   "end_sec": 12978.44,
+   "horse": "Lenika",
+   "order": "23",
+   "rider": "Matt Frost",
+   "scoreboard": "Fairfax Saddles Prix St Georges S...\n(419) Matt Frost\nLenika\nOwner Keeva Dedicoat",
+   "start_sec": 12905.44,
+   "test_type": ""
+  },
+  {
+   "end_sec": 12978.44,
+   "horse": "David Stone Foundation",
+   "order": "24",
+   "rider": "Danny Morgan",
+   "scoreboard": "Fairfax Saddles PSG FS Gold\n(118) Danny Morgan\nDavid Stone Foundation\nOwner David Stone Foundation",
+   "start_sec": 12906.44,
+   "test_type": ""
+  }
+ ]
+}

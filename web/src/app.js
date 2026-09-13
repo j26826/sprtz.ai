@@ -96,6 +96,11 @@ const state = {
   // it: { momentId, title, description, privacy, status, error, url }. It
   // lives here rather than on a message because the popup is not a message.
   share: null,
+  // The recording whose classes are being re-cut, and the two things that
+  // decide them: { jobId, arena, contextUrls, busy, error }. Opens filled in
+  // with what the recording already carries — this is a correction, so the
+  // starting point is what it says now.
+  resplit: null,
   // Which jobs have their events listed under them. A set rather than one id
   // because this is navigation, not a dialog: comparing what two recordings
   // produced is the reason to look, and a disclosure that closes the last one
@@ -465,7 +470,8 @@ function mountSettings() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      closeSettings(); closeDetails(); closeProgress(); toggleAccountMenu(false);
+      closeSettings(); closeDetails(); closeProgress(); closeResplit();
+      toggleAccountMenu(false);
       if (closeTypeMenus()) render();
     }
   });
@@ -602,6 +608,7 @@ onAuthStateChanged(auth, async (user) => {
     closeDetails();
     closeSettings();
     closeProgress();
+    closeResplit();
     state.jobEvents.clear();
     state.msgs = [];
     state.jobs = [];
@@ -2875,6 +2882,12 @@ function liveForm(u, busy) {
                  placeholder="https://…/live.m3u8" value="${esc(l.hlsUrl || '')}" />
           <div class="setting-hint">${esc(t('ingest.liveHint'))}</div>
         </div>
+        <div class="ingest-field ingest-wide">
+          <div class="field-label">${esc(t('ingest.arena'))}</div>
+          <input class="composer-input" data-live-arena
+                 placeholder="${esc(t('ingest.arenaPlaceholder'))}" value="${esc(l.arena || '')}" />
+          <div class="setting-hint">${esc(t('ingest.arenaHint'))}</div>
+        </div>
         ${contextField(u)}
       </div>
       <div class="ingest-foot">
@@ -3906,6 +3919,8 @@ function jobRow(j) {
           ${running && !stalled
             ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
             : `<button class="link-btn" data-reanalyse="${esc(j.id)}">${esc(t('jobs.analyseAgain'))}</button>`}
+          ${resplittable(j) ? `<button class="link-btn" data-resplit="${esc(j.id)}">${
+            esc(t('jobs.resplit'))}</button>` : ''}
           <button class="link-btn" data-delete-job="${esc(j.id)}"
                   data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
@@ -3928,7 +3943,16 @@ function jobRow(j) {
 
 /**
  * A live event's row in the same table: its own state rather than the job
- * status, and — once it is over — the game record under it.
+ * status, and the events it produced in the Games column beside it.
+ *
+ * There used to be one event's whole record under a finished row — headline,
+ * competition, venue, mood, the generated summary. It picked that record with
+ * `state.games.find`, which is a coin toss the moment a recording holds more
+ * than one: the desk showed a day titled for one class with another class's
+ * summary under it and nothing saying they were different things. The Games
+ * column lists every class a recording produced, each with its number, ring
+ * and start time, and each opening its own record — which is the same question
+ * answered once and completely.
  *
  * Progress is counted in chunks against how many the window will produce,
  * because that is the only unit a live event has: there is no duration to be
@@ -3972,6 +3996,8 @@ function liveJobRow(j) {
           ${active
             ? `<button class="link-btn" data-cancel-job="${esc(j.id)}">${esc(t('jobs.cancel'))}</button>`
             : ''}
+          ${resplittable(j) ? `<button class="link-btn" data-resplit="${esc(j.id)}">${
+            esc(t('jobs.resplit'))}</button>` : ''}
           <button class="link-btn" data-delete-job="${esc(j.id)}"
                   data-title="${esc(j.title || j.id)}">${esc(t('jobs.delete'))}</button>
         </div>
@@ -3979,18 +4005,8 @@ function liveJobRow(j) {
     </tr>
     ${j.status === 'failed' && j.error
       ? noteRow(`<div class="job-error"><p>${esc(jobFailure(j.error, { t }))}</p></div>`) : ''}
-    ${live.state === 'complete' ? noteRow(game ? `
-      <div class="live-game">
-        <div class="moment-label">${esc(gameHeadline(game))}</div>
-        <div class="moment-meta">${esc([
-          game.competition || game.groundedCompetition,
-          game.venue || game.groundedVenue, game.mood,
-        ].filter(Boolean).join(' · ') || t('game.notIdentified'))}</div>
-        ${game.summary ? `<div class="game-summary">${esc(game.summary)}</div>` : ''}
-        <div class="moment-actions">
-          <button class="link-btn" data-open-game="${esc(j.id)}">${esc(t('moment.details'))}</button>
-        </div>
-      </div>` : `<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
+    ${live.state === 'complete' && !eventsOfJob(j.id).length
+      ? noteRow(`<div class="job-stage">${esc(t('live.gamePending'))}</div>`) : ''}
     ${eventsNote(j.id)}`);
 }
 
@@ -4016,6 +4032,165 @@ function liveStrip(live) {
       <div class="meter-pct">${Math.round(fills.analysis)}%</div>
     </div>`;
 }
+
+/* ───────────────────────────────────────────────────────── re-split ── */
+
+/**
+ * Whether this recording is the kind that holds classes.
+ *
+ * Only a sport ridden in rounds — splitting a handball match into competitions
+ * is not a thing, and an offer that can only answer "nothing to do" is worse
+ * than no offer. It needs a record to work from, so a run that has not written
+ * one yet does not get the link either.
+ */
+function resplittable(job) {
+  return job?.sport === 'equestrian' && eventsOfJob(job.id).length > 0;
+}
+
+
+/**
+ * Re-cutting a recording into its classes, with the two facts that decide them.
+ *
+ * Which ring the camera was on settles which of a day's classes the recording
+ * can possibly hold — a championship runs several at once — and the context
+ * links are what the grounding reads. The desk holds neither by the time
+ * anybody notices the split went wrong: the arena field arrived after these
+ * recordings were booked, and a booking is frozen once its recorder has
+ * started, so this is the only door left for them.
+ *
+ * It opens showing what the recording carries now, because this is a
+ * correction rather than a fresh answer, and a form that starts empty asks the
+ * editor to retype what is already right.
+ */
+function openResplit(jobId) {
+  const job = state.jobs.find((j) => j.id === jobId);
+  if (!job) return;
+  state.resplit = {
+    jobId,
+    arena: job.arena || '',
+    contextUrls: (job.contextUrls || []).join('\n'),
+    busy: false,
+    error: '',
+  };
+  render();
+}
+
+function closeResplit() {
+  state.resplit = null;
+  $('resplit').classList.add('hidden');
+}
+
+function renderResplit() {
+  const box = $('resplit');
+  if (!box) return;
+  const open = state.resplit;
+  const job = open && state.jobs.find((j) => j.id === open.jobId);
+  if (!open || !job) {
+    box.classList.add('hidden');
+    return;
+  }
+  const events = eventsOfJob(job.id);
+  $('resplit-title').textContent = job.title || job.id;
+  $('resplit-body').innerHTML = `
+    <div class="setting">
+      <div class="field-label">${esc(t('resplit.holdsNow'))}</div>
+      <div class="resplit-current">${events.map((g) => `
+        <div class="resplit-class">
+          <span class="resplit-class-name">${esc(g.className || gameHeadline(g))}</span>
+          <span class="resplit-class-meta">${esc([g.arena,
+            Array.isArray(g.rides) && g.rides.length
+              ? `${g.rides.length} ${t('game.rides').toLowerCase()}` : '',
+          ].filter(Boolean).join(' · '))}</span>
+        </div>`).join('')}</div>
+    </div>
+    <div class="setting">
+      <label class="field-label" for="resplit-arena">${esc(t('ingest.arena'))}</label>
+      <div class="setting-hint">${esc(t('resplit.arenaHint'))}</div>
+      <input class="input" id="resplit-arena" data-resplit-field="arena"
+             placeholder="${esc(t('ingest.arenaPlaceholder'))}" value="${esc(open.arena)}" />
+    </div>
+    <div class="setting">
+      <label class="field-label" for="resplit-context">${esc(t('ingest.contextUrls'))}</label>
+      <div class="setting-hint">${esc(t('resplit.contextHint'))}</div>
+      <textarea class="input" id="resplit-context" rows="3"
+                data-resplit-field="contextUrls">${esc(open.contextUrls)}</textarea>
+    </div>
+    ${open.error ? `<div class="error-note">${esc(open.error)}</div>` : ''}
+    <div class="panel-actions">
+      <button class="btn-primary" data-resplit-go="1" ${open.busy ? 'disabled' : ''}>${
+        esc(open.busy ? t('resplit.working') : t('resplit.action'))}</button>
+      <button class="btn-quiet" data-resplit-cancel="1">${esc(t('scope.back'))}</button>
+    </div>`;
+  box.classList.remove('hidden');
+}
+
+/**
+ * Save what was typed, then ask the agent to re-cut the recording.
+ *
+ * The links go through `PATCH /api/jobs/{id}/context`, which is the one door
+ * for them, so the tool reads them off the job like every other caller. The
+ * arena travels in the request instead: it is an argument to this particular
+ * split rather than a fact about the booking, which is frozen.
+ *
+ * The request names the job and quotes the ring, for the same reason Prepare
+ * playback does — an agent left to work out which recording is meant from the
+ * conversation is an agent that answers without calling anything.
+ */
+async function runResplit() {
+  const open = state.resplit;
+  if (!open || open.busy) return;
+  const job = state.jobs.find((j) => j.id === open.jobId);
+  if (!job) { closeResplit(); return; }
+  open.busy = true;
+  open.error = '';
+  render();
+  const links = open.contextUrls.split(/[\s,]+/).map((u) => u.trim()).filter(Boolean);
+  try {
+    const before = (job.contextUrls || []).join('\n');
+    if (links.join('\n') !== before) {
+      await api(`/api/jobs/${open.jobId}/context`, {
+        method: 'PATCH',
+        body: JSON.stringify({ context_urls: links }),
+      });
+    }
+  } catch (err) {
+    open.busy = false;
+    open.error = humanError(err, 'error.contextSave');
+    render();
+    return;
+  }
+  const arena = open.arena.trim();
+  const jobId = open.jobId;
+  // The job is the route, not a word in a sentence. Asked in the editor's own
+  // conversation this went wrong three ways in one evening: the request
+  // travelled beside a `[job_id: …]` line naming whichever match was *open*,
+  // so it split a different recording twice and reported success for it; and
+  // a session already told this recording held one class answered the next
+  // request from that rather than by calling anything at all.
+  let out;
+  try {
+    out = await api(`/api/jobs/${jobId}/split`, {
+      method: 'POST',
+      body: JSON.stringify({ arena }),
+    });
+  } catch (err) {
+    open.busy = false;
+    open.error = humanError(err, 'error.resplit');
+    render();
+    return;
+  }
+  closeResplit();
+  // Re-splitting a recording is working on it, so it becomes the open match.
+  selectJob(jobId);
+  // What the records say, not what the reply said: every way this has failed
+  // so far came back as a sentence saying it had worked.
+  const names = (out.classes || []).length;
+  say(out.changed
+    ? t('resplit.done').replace('{n}', String(names))
+    : t('resplit.unchanged'));
+  render();
+}
+
 
 /* ──────────────────────────────────────────────────────── progress ── */
 
@@ -4520,6 +4695,7 @@ function render() {
   renderSessions();
   renderComposerContext();
   renderProgress();
+  renderResplit();
   $('transcript').innerHTML = currentTurn(state.msgs).map(([m, i]) => {
     const agent = m.who === 'agent';
     const fresh = agent && !animatedMsgs.has(m);
@@ -6035,6 +6211,10 @@ async function reanalyseWithContext(jobId) {
     return;
   }
   state.reanalyse = null;
+  // The context was patched onto `jobId` and the ask says "this job", which is
+  // whichever match is open — so re-analysing from a row while another was
+  // open would clear the open one's results instead. Same line, same reason.
+  selectJob(jobId);
   ask('Clear this job\'s previous results and analyse the match again.', { showJobs: true });
 }
 
@@ -6164,9 +6344,10 @@ async function scheduleLiveEvent() {
         title_source: l.title.trim() ? 'editor' : 'derived',
         stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
+        arena: (l.arena || '').trim(),
       }),
     });
-    u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.live = { title: '', hlsUrl: '', start: '', end: '', arena: '' };
     u.contextUrls = '';
     u.status = 'idle';
     selectJob(job.job_id);
@@ -6211,6 +6392,7 @@ function editLiveBooking(jobId) {
     // with no zone; the stored value is UTC.
     start: localInputValue(live.eventStart),
     end: localInputValue(live.eventEnd),
+    arena: job.arena || '',
   };
   u.sport = job.sport || u.sport;
   u.contextUrls = (job.contextUrls || []).join('\n');
@@ -6256,9 +6438,10 @@ async function saveLiveBooking() {
         metadata_language: getSettings().metadataLanguage,
         stall_minutes: getSettings().liveStallMinutes,
         context_urls: contextUrlList(),
+        arena: (l.arena || '').trim(),
       }),
     });
-    u.live = { title: '', hlsUrl: '', start: '', end: '' };
+    u.live = { title: '', hlsUrl: '', start: '', end: '', arena: '' };
     u.contextUrls = '';
     u.status = 'idle';
     const when = new Date(startIso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -6384,7 +6567,7 @@ document.addEventListener('click', (event) => {
     + '[data-reel-open],[data-reels-all],'
     + '[data-reel-add],[data-reel-render],[data-reel-step],[data-reel-play],'
     + '[data-reel-trim],[data-reel-move],[data-reel-drop],[data-reel-pc],'
-    + '[data-job-events]');
+    + '[data-job-events],[data-resplit],[data-resplit-go],[data-resplit-cancel]');
 
   // An open moment-type menu closes on any click outside its own filter. Its
   // toggle used to be the only way out, and a menu only its own button can
@@ -6408,7 +6591,7 @@ document.addEventListener('click', (event) => {
 
   if (hit.dataset.editLive) { editLiveBooking(hit.dataset.editLive); return; }
   if (hit.dataset.cancelEditLive) {
-    state.upload.live = { title: '', hlsUrl: '', start: '', end: '' };
+    state.upload.live = { title: '', hlsUrl: '', start: '', end: '', arena: '' };
     state.upload.contextUrls = '';
     render();
     return;
@@ -6471,6 +6654,9 @@ document.addEventListener('click', (event) => {
     openGameDetails(game);
     return;
   }
+  if (hit.dataset.resplit) { openResplit(hit.dataset.resplit); return; }
+  if (hit.dataset.resplitGo) { runResplit(); return; }
+  if (hit.dataset.resplitCancel) { closeResplit(); render(); return; }
   if (hit.dataset.jobEvents) {
     const jobId = hit.dataset.jobEvents;
     if (state.jobEvents.has(jobId)) state.jobEvents.delete(jobId);
@@ -6817,6 +7003,13 @@ document.addEventListener('input', (event) => {
     u.title = el.value;
   } else if (el.matches('[data-live-title]')) {
     u.live.title = el.value;
+  } else if (el.matches('[data-resplit-field]') && state.resplit) {
+    state.resplit[el.dataset.resplitField] = el.value;
+  } else if (el.matches('[data-live-arena]')) {
+    // Like every other field on this panel it lives on the message, because
+    // render() rebuilds the panel on every job write and an analysis running
+    // elsewhere writes often.
+    u.live.arena = el.value;
   } else if (el.matches('[data-live-hls],[data-live-start],[data-live-end]')) {
     const before = validateLiveEvent(u.live);
     if (el.matches('[data-live-hls]')) u.live.hlsUrl = el.value;
@@ -6902,6 +7095,10 @@ $('details')?.addEventListener('click', (event) => {
   if (event.target.id === 'details') closeDetails();
 });
 $('close-progress')?.addEventListener('click', closeProgress);
+$('close-resplit')?.addEventListener('click', () => { closeResplit(); render(); });
+$('resplit')?.addEventListener('click', (event) => {
+  if (event.target.id === 'resplit') { closeResplit(); render(); }
+});
 $('progress')?.addEventListener('click', (event) => {
   if (event.target.id === 'progress') closeProgress();
 });

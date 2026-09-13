@@ -184,20 +184,33 @@ def _first_sheet(sheets: Any) -> dict:
 
 
 def parse_time(value: Any) -> datetime.datetime | None:
-    """Equipe's times, which carry a zone: "2026-09-11 15:20:00 +0100"."""
+    """Equipe's times, which carry a zone: "2026-09-11 15:20:00 +0100".
+
+    **The offset is kept, not normalised away.** An aware datetime is the same
+    instant however it is written, so every comparison and every subtraction
+    below is unaffected — but the zone it was written in is the show's own, and
+    that is the only thing that can say which *day* a class is on. This used to
+    convert to UTC on the way in, and a competition day is local: a class at
+    00:30 BST is 23:30 UTC the day before, so a recording that starts then is
+    of tomorrow's classes by the timetable and yesterday's by the clock we had
+    kept. `show_offset` reads the zone back off these times.
+
+    A time with no offset at all is taken as UTC, which is what our own
+    timestamps are.
+    """
     if not value:
         return None
     text = str(value).strip()
     for shape in ("%Y-%m-%d %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M %z"):
         try:
-            return datetime.datetime.strptime(text, shape).astimezone(datetime.UTC)
+            return datetime.datetime.strptime(text, shape)
         except ValueError:
             continue
     try:
         parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return parsed.astimezone(datetime.UTC) if parsed.tzinfo else parsed.replace(tzinfo=datetime.UTC)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.UTC)
 
 
 # What a timetable abbreviates and a broadcast spells out, or the other way
@@ -315,15 +328,97 @@ def _covers(show: Show, day: str) -> bool:
     return bool(start and end and start <= day <= end)
 
 
-def classes_on(show: Show, day: str) -> list[ShowClass]:
-    """The show's classes for one day, in the order they were due to run."""
-    if not day:
-        return list(show.classes)
-    return [c for c in show.classes if (c.date or "") == day or _same_day(c.start_at, day)]
+def show_offset(show: Show) -> datetime.timezone:
+    """The clock the show keeps, taken from the times it publishes.
+
+    Equipe stamps every class with an explicit offset — "2026-09-12 07:53:00
+    +0100" — so the show tells us its own zone and there is no need for a
+    timezone database or a guess from the country. A show with no timed class
+    at all keeps UTC, which changes nothing for it.
+
+    It matters because a competition day is a *local* day. A class at 00:30 BST
+    is 23:30 UTC the day before, and a recording that starts then is of
+    tomorrow's classes by the timetable and yesterday's by a UTC clock.
+    """
+    for c in show.classes:
+        if c.start_at and c.start_at.utcoffset() is not None:
+            return c.start_at.tzinfo  # type: ignore[return-value]
+    return datetime.UTC
 
 
-def _same_day(at: datetime.datetime | None, day: str) -> bool:
-    return bool(at) and at.date().isoformat() == day
+def local_day(at: datetime.datetime | None, show: Show) -> str:
+    """The show's own date for an instant, as Equipe dates its days."""
+    if not at:
+        return ""
+    return at.astimezone(show_offset(show)).date().isoformat()
+
+
+def classes_on(show: Show, day: str, arena: str = "") -> list[ShowClass]:
+    """The show's classes for one day and one arena, in the order they ran.
+
+    **The arena is not a detail, it is the whole candidate set.** A
+    championship runs several rings at once — LeMieux ran three — and a fixed
+    camera is pointed at exactly one of them. Handed every class of the day,
+    the clock rule below places each ride under whichever class started most
+    recently *anywhere on the showground*, which on 12 September filed
+    thirty-one of thirty-six rides from the LeMieux Arena under two Vector
+    Arena classes. The rule is sound; it was being asked a question about a
+    ring it had not been told about.
+
+    An empty arena means every ring, which is right for a one-ring show and for
+    a caller that has no idea — but `assign_classes` should be given one ring's
+    classes or the clock is meaningless.
+
+    The day is compared in the show's own clock on both sides. `date` comes
+    from the API as a local date and `start_at` was converted to UTC on the way
+    in, so comparing one against a UTC day and the other against a local one —
+    which is what this did — is two different questions joined by `or`.
+    """
+    picked = list(show.classes)
+    if day:
+        picked = [c for c in picked
+                  if (c.date or "") == day or local_day(c.start_at, show) == day]
+    if arena:
+        picked = [c for c in picked if same_arena(c.arena, arena)]
+    return picked
+
+
+# An arena name is two or three words and one of them is the ring's own
+# ("LeMieux Arena", "Vector Arena"). Someone naming it will type that word and
+# not always the rest, so a name that contains the other is the same ring —
+# and the fuzzy bar is only there for a typo, not to bridge two real rings.
+ARENA_MATCH = 0.82
+
+
+def same_arena(left: str, right: str) -> bool:
+    """Whether two arena names mean the same ring.
+
+    Lenient about the word "arena" and about which half was typed, strict about
+    everything else: filing a day under the wrong ring is the failure this
+    whole argument exists to stop, so "Vector" must never answer for "Kudos".
+    """
+    a, b = normalise(left), normalise(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    # Whole-word containment, so "lemieux" finds "lemieux arena" but "vector"
+    # cannot find "vectra" by being a prefix of it.
+    if f" {a} " in f" {b} " or f" {b} " in f" {a} ":
+        return True
+    return same_name(left, right) >= ARENA_MATCH
+
+
+def arenas_on(show: Show, day: str) -> list[str]:
+    """The rings this show ran on one day, in the order they first appear.
+
+    What an editor picks from when they say which one the camera is on.
+    """
+    seen: list[str] = []
+    for c in classes_on(show, day):
+        if c.arena and c.arena not in seen:
+            seen.append(c.arena)
+    return seen
 
 
 # --- Fetching -----------------------------------------------------------------
@@ -393,17 +488,156 @@ class ClassRun:
     decided_by: str = "schedule"
 
 
+def _same_person(left: str, right: str) -> bool:
+    """Whether two names are the same rider.
+
+    Normalised equality, plus whole-word prefix either way, because a lower
+    third truncates: the arena graphic says "Alexander Harrison" where the
+    start list says "Alexander Harrison-West". Prefixes must be whole words and
+    at least two of them, so "Sue Carson" cannot answer for "Sue Carson-Smith"
+    on one word alone.
+
+    Deliberately no fuzzy bar. A near-miss here does not degrade the answer, it
+    moves a ride into a class it was not in — where failing to match simply
+    leaves the ride to the clock, which is what decided it before.
+    """
+    a, b = normalise(left), normalise(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short.split()) >= 2 and long.startswith(f"{short} ")
+
+
+def entrants_for(show_class: ShowClass, get=None) -> list[str]:
+    """Who was down to ride in a class, from its published start list.
+
+    The strongest thing there is about which class a ride belongs to: it is
+    the organiser's own record of who was in the ring, against a timetable that
+    only says when a class was *due*.
+    """
+    results = results_for(show_class, get=get)
+    return [st.rider for st in (results.starts if results else []) if st.rider]
+
+
+def _entered_in(ride: dict, classes: list[ShowClass],
+                entrants: dict[int, list[str]]) -> list[ShowClass]:
+    """The classes whose start list names this ride's rider.
+
+    Narrowing, not deciding — a rider can be down for two classes on one day
+    and at this show most of them are, so the start lists rule out far more
+    than they rule in. What is left goes to the clock exactly as before.
+
+    A rider nobody can name, or a class whose list could not be read, narrows
+    nothing: every class stays a candidate, which is where this started.
+    """
+    rider = str(ride.get("rider") or "")
+    if not rider or not entrants:
+        return list(classes)
+    named = [c for c in classes
+             if any(_same_person(rider, entry) for entry in entrants.get(c.class_id, []))]
+    return named or list(classes)
+
+
+# How far a class may run from its published slot in either direction. A
+# timetable slips: a class over-runs, so the ring is not free the moment the
+# next one is due, and a class goes in early, so a ride just before its
+# published time is still its own. What this rules out is the other order of
+# magnitude — a class the day finished with hours ago, or one not due until
+# the afternoon. It bounds the two signals that read a rider and a graphic
+# and know nothing whatever about when.
+SLACK = datetime.timedelta(minutes=30)
+
+
+def _ended_before(show_class: ShowClass, at: datetime.datetime,
+                  classes: list[ShowClass]) -> bool:
+    """Whether the ring had moved on from this class by the time of a ride.
+
+    A class ends when the next one in its own ring begins, give or take the
+    slack. The last class of the day never ends, because nothing follows it
+    to say that it has.
+    """
+    if show_class.start_at is None:
+        return False
+    after = [c.start_at for c in classes
+             if c.start_at and c.start_at > show_class.start_at]
+    return bool(after) and at >= min(after) + SLACK
+
+
+def _not_due_yet(show_class: ShowClass, at: datetime.datetime) -> bool:
+    """Whether the day had not yet reached this class when a ride happened.
+
+    The mirror of the one above, and it had to be written for the same reason.
+    The clock alone never picks a class that has not started — there is
+    deliberately no allowance forward — but a start list narrowed to a single
+    future class leaves the clock nothing else to answer, and its own fallback
+    for "before anything was due" then hands the ride to it. That is how two
+    rounds of a morning young horses class were filed under an afternoon
+    freestyle five hours before it was due in the ring.
+    """
+    return show_class.start_at is not None and at < show_class.start_at - SLACK
+
+
+def _not_past(classes: list[ShowClass], at: datetime.datetime | None) -> list[ShowClass]:
+    """The classes the ring had not already finished with."""
+    if at is None:
+        return list(classes)
+    return [c for c in classes if not _ended_before(c, at, classes)]
+
+
+def _reached(classes: list[ShowClass], at: datetime.datetime | None) -> list[ShowClass]:
+    """Those of them the day had actually got to."""
+    if at is None:
+        return list(classes)
+    return [c for c in classes if not _not_due_yet(c, at)]
+
+
 def assign_classes(rides: list[dict], classes: list[ShowClass], *,
-                   recorded_from: datetime.datetime | None) -> list[ClassRun]:
+                   recorded_from: datetime.datetime | None,
+                   entrants: dict[int, list[str]] | None = None) -> list[ClassRun]:
     """Split a day's rides into the classes they belong to.
 
-    Two signals, and they answer different failures. **The clock places every
-    ride**: a class has a published start and a ride has an absolute time, so
-    each ride belongs to the last class that had started. **The caption
-    corrects it**: timetables slip, and a class that ran forty minutes late
-    would otherwise take its first rides from the class before it. Where a run
-    of rides carries a scoreboard naming a class, that naming wins — it was
-    read off the arena, which is where the competition actually was.
+    Three signals, and they answer different failures. **The start list narrows
+    it**: the organiser published who was down to ride in each class, and a
+    rider in exactly one of them was in exactly one of them — which is the only
+    signal here that is a record rather than an estimate. It narrows rather
+    than decides, because a rider can be entered in two classes on one day and
+    at this show most are. **The clock places every ride** among what is left:
+    a class has a published start and a ride has an absolute time, so each ride
+    belongs to the last class that had started. **The caption corrects it**:
+    timetables slip, and a class that ran forty minutes late would otherwise
+    take its first rides from the class before it. Where a run of rides carries
+    a scoreboard naming a class, that naming wins — it was read off the arena,
+    which is where the competition actually was.
+
+    The start list is what settles the boundary ride. A class runs over, or
+    starts early, and the clock puts the one ride either side of the change on
+    the wrong side of it: on 11 September the freestyle's first rider was filed
+    under the Intermediate I that was still running, and on the 12th the Grand
+    Prix's first was filed under the young horses. One ride each day, both in
+    the published list of exactly one class.
+
+    **Both settle a boundary, and neither may cross the day.** A start list
+    knows who rode and nothing about when; a caption knows what a graphic said
+    and nothing about when either. A rider down for a morning class and an
+    afternoon one gets narrowed onto whichever the clock then finds — and the
+    clock, asked only about that class, answers it — while a recap card cut in
+    between rounds names a class that finished hours ago perfectly clearly. So
+    a class the ring has finished with is dropped before either is asked. It is
+    finished with once the next class in the ring has started and the slack has
+    passed; the last class of the day is never finished with, because nothing
+    follows it to say so.
+
+    **The forward bound is the start list's alone.** A caption is read off the
+    arena, so it can see a class go in early and report it — that is the
+    timetable slipping, which is the thing the caption exists to correct. A
+    start list sees nothing. Narrowed to a single class that is not due for
+    hours, it leaves the clock with one answer and the clock's own fallback for
+    "before anything was due" gives it: two rounds of a morning young horses
+    class were filed under an afternoon freestyle five hours early exactly that
+    way. So the caption is offered every class the ring has not finished with,
+    and the start list only those the day has reached.
 
     A ride with no absolute time cannot be placed by the clock at all. That is
     an uploaded file rather than a live event, and the answer there is the
@@ -418,8 +652,29 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
 
     for ride in rides or []:
         at = _ride_time(ride, recorded_from)
-        by_clock = _class_at(at, classes) if at is not None else None
-        named, score = _class_named_in(ride, classes)
+        # What the ring could still have been running. Neither of the signals
+        # below knows the time of day: a start list names who rode, and a
+        # caption names what the graphic said. Both were reading a class the
+        # day had finished with — three rounds of the 12th's afternoon
+        # freestyle were filed under a young horses class that ended at
+        # breakfast because their riders were down for it too, and a fourth
+        # under a Grand Prix four hours over, off a recap card the broadcast
+        # cut to between rounds. The morning capture of the same day did it
+        # forwards: two of its rounds went to a freestyle not due for five
+        # hours. None of that is a boundary correction; all of it is a jump
+        # across the day.
+        live = _not_past(classes, at) or list(classes)
+        # The two bounds are not the same shape, because the two signals are
+        # not. A caption is read off the arena, so it can see a class go in
+        # early and say so — that is the timetable slipping, and it is what
+        # the caption is for. A start list is a list of names: it cannot see
+        # anything, least of all a class that is not due for another five
+        # hours. So the caption is offered every class the ring has not
+        # finished with, and the start list only those the day has reached.
+        reached = _reached(live, at) or list(live)
+        pool = _entered_in(ride, reached, entrants or {})
+        by_clock = _class_at(at, pool) if at is not None else None
+        named, score = _class_named_in(ride, live)
         chosen = None
         if named is not None and by_clock is not None and named.class_id != by_clock.class_id:
             # Both answered and they disagree. The caption only wins by a
@@ -439,9 +694,16 @@ def assign_classes(rides: list[dict], classes: list[ShowClass], *,
             chosen = by_id[by_clock.class_id]
         if chosen is None:
             # Neither the clock nor a caption could place it. The first class
-            # of the day is the honest default: it is where the recording
-            # started, and a ride filed nowhere is a ride nobody can find.
-            chosen = runs[0]
+            # it could have been entered in is the honest default: it is where
+            # the recording started, and a ride filed nowhere is a ride nobody
+            # can find.
+            chosen = by_id[pool[0].class_id] if pool else runs[0]
+        # Say so when the start list is what moved it. The clock's own answer
+        # over every class is what the record would have said before.
+        if len(pool) < len(reached) and at is not None:
+            unnarrowed = _class_at(at, reached)
+            if unnarrowed is not None and unnarrowed.class_id != chosen.show_class.class_id:
+                chosen.decided_by = "start list"
         chosen.rides.append(ride)
 
     return [run for run in runs if run.rides]
@@ -481,9 +743,20 @@ def _class_at(at: datetime.datetime, classes: list[ShowClass]) -> ShowClass | No
 
 
 def _class_named_in(ride: dict, classes: list[ShowClass]) -> tuple[ShowClass | None, float]:
-    """The class a ride's own scoreboard names, and how well it named it."""
+    """The class a ride's own scoreboard names, and how well it named it.
+
+    **Only what was read off the arena.** This used to include the ride's
+    `class_name`, which is not an observation at all: `list_game_rides` stamps
+    every ride of a split recording with the title of the class it currently
+    sits under, so a second split was handed its own previous answer and
+    matched it at 1.00 — beating the clock, the arena and the start list, none
+    of which can reach that score. A split therefore confirmed itself, and
+    every attempt to correct one reproduced it exactly. `competition` goes with
+    it: nothing writes one onto a ride, and an empty key that would behave the
+    same way if something ever did is not worth keeping.
+    """
     text = "\n".join(str(ride.get(key) or "") for key in
-                     ("scoreboard", "scoreboard_text", "competition", "class_name"))
+                     ("scoreboard", "scoreboard_text"))
     if not text.strip():
         return None, 0.0
     scored = [(same_name(text, c.name), c) for c in classes if c.name]
@@ -521,17 +794,34 @@ def day_of(job: dict, started: datetime.datetime | None) -> str:
 
 
 def find_classes(*, job: dict, context_urls: list[str], competition: str = "",
-                 discipline: str = "", get=None) -> tuple[Show | None, list[ShowClass]]:
+                 discipline: str = "", arena: str = "", show_id: int = 0,
+                 get=None) -> tuple[Show | None, list[ShowClass]]:
     """The show this recording is of, and the classes it ran that day.
 
-    An editor's own link is the strongest signal and costs one request; without
-    one, the day and the name read off the screen choose between the shows that
-    ran. Either can come back with nothing, and nothing is a perfectly good
-    answer: the recording then stays one event, as it was before any of this.
+    A show already settled for this recording is the strongest signal there is
+    and costs nothing — it is the answer to this question, worked out once and
+    written down. Then an editor's own link, which costs one request. Failing
+    both, the day and the name read off the screen choose between the shows
+    that ran. Any of them can come back with nothing, and nothing is a
+    perfectly good answer: the recording then stays one event, as it was
+    before any of this.
+
+    Taking the stored id first is what makes a split repeatable. Splitting
+    writes each class's own name over `competition` — which is right, that is
+    what the event now is — and a second split then searched a thousand shows
+    for "D&H INTER I SILVER CHAMPIONSHIP" and found none, because that is a
+    class and the list is of shows. So the first split worked, every one after
+    it quietly changed nothing, and the message said the show could not be
+    found on a timetable the record was carrying the id of.
+
+    `arena` narrows the classes to the one ring the camera is on, and at a
+    championship that is not optional — see `classes_on`. Empty means every
+    ring, which is right for a one-ring show; the caller is expected to have
+    asked `pick_arena` first when nobody named one.
     """
     started = recording_started(job)
     day = day_of(job, started)
-    show_id = show_id_in(context_urls or [])
+    show_id = int(show_id or 0) or show_id_in(context_urls or [])
 
     if not show_id:
         if not (day and competition):
@@ -547,7 +837,46 @@ def find_classes(*, job: dict, context_urls: list[str], competition: str = "",
     show = fetch_schedule(show_id, get=get)
     if show is None:
         return None, []
-    return show, classes_on(show, day)
+    # Now that the show's own clock is known, ask again which day this is. The
+    # day above was UTC, which is all that was available to choose a show by
+    # and is good enough for that — a show spans days. A class does not.
+    if started:
+        day = local_day(started, show) or day
+    return show, classes_on(show, day, arena=arena)
+
+
+def pick_arena(show: Show, day: str, rides: list[dict]) -> str:
+    """Which ring a recording is of, read off what its scoreboards said.
+
+    The fallback for a recording nobody named a ring for. Every arena's classes
+    are scored against every ride's caption and the best total wins, so one
+    card naming one class decides nothing on its own but a day of them does.
+
+    Deliberately all-or-nothing: with no caption anywhere naming any class
+    there is no evidence, and the honest answer is no arena — which leaves the
+    day unsplit rather than split by a coin toss. A day filed as one event is
+    what it was before any of this existed and is recoverable in one tool call;
+    a day filed under the wrong ring looks finished and is not.
+    """
+    totals: dict[str, float] = {}
+    for arena in arenas_on(show, day):
+        here = classes_on(show, day, arena=arena)
+        best = 0.0
+        for ride in rides or []:
+            named, score = _class_named_in(ride, here)
+            if named is not None and score >= CAPTION_MATCH:
+                best += score
+        totals[arena] = best
+    ranked = sorted(totals.items(), key=lambda pair: pair[1], reverse=True)
+    if not ranked or ranked[0][1] <= 0:
+        return ""
+    # One ring has to beat the next by the same margin a caption needs to beat
+    # the clock, or two rings running near-identical classes — a Gold and a
+    # Silver of one championship, which is exactly what this show runs — would
+    # be decided by noise.
+    if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < CAPTION_MARGIN:
+        return ""
+    return ranked[0][0]
 
 
 # --- Results: what was actually scored ----------------------------------------

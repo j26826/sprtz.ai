@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import re
 import time
 from typing import Any
 
@@ -1053,26 +1054,75 @@ async def record_game_facts(
         logger.warning("could not write the interim game record for %s", job_id, exc_info=True)
 
 
-def _classes_for(job: dict, game: GameDetails, context_urls: list[str]) -> list[Any]:
+def _classes_for(job: dict, game: GameDetails, context_urls: list[str],
+                 arena: str = "", keep_single: bool = False) -> list[Any]:
     """The competitions a recording turned out to hold.
 
     Empty when it held one, which is every handball match and every day that
     ran a single class — and when Equipe cannot be reached, or cannot say which
     show this was. A day that stays one event is what the desk did before any
     of this, so nothing here is allowed to be fatal.
+
+    `keep_single` is for a recording that has already been split and now
+    resolves to one class. There, one class is not "nothing to do" — it is
+    several wrong events that have to become one right one, and the caller
+    needs the run in order to write it and prune the rest.
     """
     try:
+        rides = [dict(r) for r in game.rides]
+        # Which ring the camera is on. A championship runs several at once —
+        # LeMieux ran three — and the clock rule below places a ride under
+        # whichever class started most recently *anywhere on the showground*,
+        # so without this a fixed camera's rides are filed under classes in
+        # arenas it never pointed at. Thirty-one of thirty-six were, on the
+        # twelfth. What someone typed on the booking wins; failing that the
+        # scoreboards are asked, and failing that the day stays one event.
+        # What the caller named wins over what the booking said: a recording
+        # made before the booking had an arena field cannot be corrected at the
+        # booking, because a booking is frozen once its recorder has started.
+        arena = arena or str(job.get("arena") or "")
         show, classes = equipe.find_classes(
-            job=job, context_urls=context_urls or [],
-            competition=game.competition or game.title, discipline=game.discipline)
+            job=job, context_urls=context_urls or [], arena=arena,
+            # What this recording already worked out, when it has. After a
+            # split `competition` is the class's name rather than the show's,
+            # so searching on it finds nothing at all.
+            show_id=int(getattr(game, "show_id", 0) or 0),
+            competition=game.show_title or game.competition or game.title,
+            discipline=game.discipline)
+        if show is not None and not arena:
+            guess = equipe.pick_arena(show, equipe.local_day(equipe.recording_started(job), show),
+                                      rides)
+            if guess:
+                logger.info("no arena on %s; the scoreboards say %s", job.get("job_id"), guess)
+                classes = equipe.classes_on(
+                    show, equipe.local_day(equipe.recording_started(job), show), arena=guess)
+            elif len({c.arena for c in classes if c.arena}) > 1:
+                # Several rings and nothing to choose between them. One event is
+                # recoverable in a tool call; a day filed under the wrong ring
+                # looks finished and is not.
+                logger.warning("%s ran across %d arenas and none was named; leaving it as one event",
+                               job.get("job_id"), len({c.arena for c in classes if c.arena}))
+                return []
         if not classes:
             return []
+        # Who was down to ride in each of them. One small request per class —
+        # a day in one ring is two or three — and it is the only signal here
+        # that is a record rather than an estimate, so it is worth the calls.
+        # Never fatal: a list that cannot be read narrows nothing, and the
+        # clock decides as it did before.
+        entrants: dict[int, list[str]] = {}
+        for show_class in classes:
+            try:
+                entrants[show_class.class_id] = equipe.entrants_for(show_class)
+            except Exception:
+                logger.warning("could not read the start list for %s",
+                               show_class.class_id, exc_info=True)
         runs = equipe.assign_classes(
-            [dict(r) for r in game.rides], classes,
+            rides, classes, entrants=entrants,
             recorded_from=equipe.recording_started(job))
         for run in runs:
             run.show = show
-        return runs if len(runs) > 1 else []
+        return runs if (len(runs) > 1 or (keep_single and runs)) else []
     except Exception:
         logger.warning("could not read the show timetable", exc_info=True)
         return []
@@ -1343,13 +1393,55 @@ async def _store_classes(job_id: str, game: GameDetails, runs: list[Any],
     # desk would show the day twice once it finished — once whole, once in
     # pieces — and a search would answer with both.
     await mcp_client.call_tool("catalog", "delete_game", {"job_id": job_id})
+
+    # And so does any class this recording used to be filed under and no longer
+    # is. A split can be run again — a ring named that was not known the first
+    # time, a timetable that has since been corrected — and upserting the new
+    # classes leaves the old ones sitting there: events with rides and moments
+    # that this recording did not contain, still on the desk, still answering
+    # searches, and unreachable from the job they claim to belong to. The first
+    # re-split of the twelfth would have left two Vector Arena classes behind.
+    kept = {str(run.show_class.class_id) for run in runs}
+    existing = await mcp_client.call_tool("catalog", "list_games", {"job_id": job_id})
+    for record in existing.get("games") or []:
+        class_id = str(record.get("classId") or "")
+        if class_id and class_id not in kept:
+            logger.info("dropping %s, which %s no longer holds", class_id, job_id)
+            await mcp_client.call_tool(
+                "catalog", "delete_game", {"job_id": job_id, "class_id": class_id})
     names = ", ".join(run.show_class.name for run in runs)
-    await _emit(job_id, "analysis",
-                f"This recording covered {len(runs)} classes, saved as separate events: {names}.",
-                classes=len(runs))
+    said = (f"This recording covered one class, saved as: {names}."
+            if len(runs) == 1 else
+            f"This recording covered {len(runs)} classes, saved as separate events: {names}.")
+    await _emit(job_id, "analysis", said, classes=len(runs))
 
 
-async def split_event_classes(job_id: str) -> dict:
+_CAMEL = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _snake_keys(record: dict[str, Any]) -> dict[str, Any]:
+    """A stored game record's keys as the schema spells them.
+
+    The catalog hands a game back in the shape the *document* is in — camelCase,
+    `homeTeam` and `showId` and `disciplineConfidence` — and `GameDetails` is
+    snake_case and ignores what it does not recognise. So validating one
+    against the other silently kept the single-word fields and dropped every
+    other: a re-split rebuilt the record without its teams, its final score,
+    its grounded values or the id of the show it belongs to, and nothing said
+    so because pydantic's job here is to fill in defaults.
+
+    Both spellings are kept, since a caller that already speaks snake_case is
+    unharmed by the camelCase twin sitting beside it.
+    """
+    out = dict(record)
+    for key, value in record.items():
+        snake = _CAMEL.sub("_", key).lower()
+        if snake != key and snake not in out:
+            out[snake] = value
+    return out
+
+
+async def split_event_classes(job_id: str, arena: str = "") -> dict:
     """Split a recording that was stored as one event into the classes it held.
 
     A live URL points at an arena, and the camera runs through class after
@@ -1363,8 +1455,19 @@ async def split_event_classes(job_id: str) -> dict:
     are the ones already on record, filed under the competition they happened
     in. A recording that held one class is left exactly as it is.
 
+    **Which ring the camera was on decides which classes it can possibly
+    hold.** A championship runs several arenas at once and a fixed camera
+    points at one, so without a ring the day's rounds get filed under classes
+    in arenas the camera never saw. Pass the arena when the editor names one —
+    "the camera was on the LeMieux Arena". Without it the scoreboards are read
+    instead, and a showground of several rings that they cannot settle is left
+    as one event rather than split by a guess.
+
     Args:
         job_id: Identifier of the recording to split.
+        arena: The ring the camera was on, as the show names it, for example
+            "LeMieux Arena". Empty reads the recording's own booking, then the
+            scoreboards.
 
     Returns:
         dict naming the classes it was split into, or saying why it was not.
@@ -1383,8 +1486,19 @@ async def split_event_classes(job_id: str) -> dict:
     stored = await mcp_client.call_tool(
         "catalog", "list_moments", {"job_id": job_id, "limit": 2000, "min_score": 0.0})
 
+    # The catalog wraps it — {"status": …, "game": {…}} — and this spread the
+    # envelope rather than the record, so the only key reaching the model was
+    # the word "game". Every field of GameDetails has a default except `sport`,
+    # so the failure was one missing-field error rather than a wrong record,
+    # the tool raised before it read a timetable, and the agent wrote the
+    # refusal an editor saw out of the docstring. A split has never once run.
+    record = found.get("game")
+    if not isinstance(record, dict):
+        return {"status": "error", "job_id": job_id,
+                "error": "This recording has no game record to split."}
+
     game = GameDetails.model_validate({
-        **{k: v for k, v in found.items() if k not in ("status", "type")},
+        **_snake_keys(record),
         "job_id": job_id,
         "rides": rides.get("rides") or [],
     })
@@ -1393,11 +1507,21 @@ async def split_event_classes(job_id: str) -> dict:
                 "message": "Only a competition day is split into classes, and this has no rounds."}
 
     moments = [Moment.model_validate(m) for m in _moments_from(stored)]
-    runs = _classes_for(job, game, list(job.get("contextUrls") or []))
+    # How this recording is filed now. A day already split into several classes
+    # that the timetable now says was one is not a recording with nothing to
+    # do: it is several wrong events, and leaving them is the one outcome that
+    # cannot be corrected by asking again. A recording that has never been
+    # split is left alone on a single-class answer, as before.
+    listing = await mcp_client.call_tool("catalog", "list_games", {"job_id": job_id})
+    already = sum(1 for record in (listing.get("games") or []) if record.get("classId"))
+    runs = _classes_for(job, game, list(job.get("contextUrls") or []), arena=arena,
+                        keep_single=already > 1)
     if not runs:
         return {"status": "idle", "job_id": job_id,
-                "message": ("This recording covers one class, or its show could not be found "
-                            "on the published timetable. Nothing was changed.")}
+                "message": ("Nothing was changed. Either this recording covers one class, or "
+                            "its show could not be found on the published timetable, or the "
+                            "show ran several arenas at once and nothing said which one the "
+                            "camera was on — in that last case, say which ring and ask again.")}
 
     await _store_classes(job_id, game, runs, moments)
     return {
